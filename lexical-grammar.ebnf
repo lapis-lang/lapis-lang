@@ -1,0 +1,42 @@
+PROVIDES ::= 'provides'
+REQUIRES ::= 'requires'
+DEF ::= 'def'
+PROTOCOL ::= 'protocol'
+ATTRIB ::= '@' MEMBER_NAME
+REF ::= '#'
+SELF ::= '$'
+LPAREN ::= '('
+RPAREN ::= ')'
+WILDCARD ::= '_'
+ARROW ::= '=>'
+PYRAMID ::= '<|'
+OP_CHAR ::= '!' | '$' | '%' | '&' | '*' | '+' | '-' | '/' | '<' | '=' | '>' | '?' | '@'
+           | '\' | '^' | '~' | '|'
+OP ::= OP_CHAR OP_CHAR? OP_CHAR? OP_CHAR?
+LT ::= #x0D #x0A | #x0D | #x0A
+SP ::= #x20
+SEP ::= LT LT
+INDENT ::= LT SP SP SP SP
+HEX_UPPER ::= [0-9A-F]
+HEX_LOWER ::= [0-9a-f]
+UNICODE_ESCAPE ::= '\u' (HEX_UPPER HEX_UPPER HEX_UPPER HEX_UPPER |
+                        HEX_LOWER HEX_LOWER HEX_LOWER HEX_LOWER)
+ESCAPE_CHAR ::= '\' [0abfnrtv'"\] | UNICODE_ESCAPE
+B2_INT ::= '-'? '2r' [01]+
+B2_FLOAT ::= '-'? '2r' [01]+ '.' [01]+
+B8_INT ::= '-'? '8r' [0-7]+
+B8_FLOAT ::= '-'? '8r' [0-7]+ '.' [0-7]+
+B10_INT ::= '-'? '10r'? [0-9]+
+B10_FLOAT ::= '-'? '10r'? [0-9]+ '.' [0-9]+
+B16_INT ::= '-'? '16r' (HEX_UPPER+ | HEX_LOWER+)
+B16_FLOAT ::= '-'? '16r' (HEX_UPPER+ '.' HEX_UPPER+ | HEX_LOWER+ '.' HEX_LOWER+)
+B60_INT ::= '-'? '60r' ([0-9]+ ':')* [0-9]+
+B60_FLOAT ::= '-'? '60r' ([0-9]+ ':')* [0-9]+ '.' ([0-9]+ ',')* [0-9]+
+STRING_BODY ::= [#x20#x21#x23-#x5B#x5D-#x7E]
+STRING ::= '"' (ESCAPE_CHAR | STRING_BODY)* '"'
+COMMENT ::= '//' [#x20-#x7E]*
+DEF_NAME ::= [A-Z]('-'? [A-Za-z0-9])*
+DEF_PARAM ::= ':' DEF_NAME
+MEMBER_NAME ::= [a-z]('-'? [A-Za-z0-9])*
+MEMBER_PARAM ::= ':' MEMBER_NAME
+MEMBER_ARG ::= MEMBER_NAME ':' 
