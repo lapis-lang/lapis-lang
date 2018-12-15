@@ -1,4 +1,4 @@
-import {any, seq,maybe,many,char,DIGIT, choice, range} from "../src/RegularLanguage"
+import {any, seq,maybe,many,char,DIGIT, choice, range} from "./RegularLanguage"
 
 // -?[0...9]+
 let integerNumber = seq(maybe(char('-')), many(DIGIT))
