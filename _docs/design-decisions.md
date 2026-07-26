@@ -5,7 +5,7 @@
 > rebuilds. This file is the authoritative copy; the memory file is a convenience
 > cache. Update both when decisions change, or just this file and re-import.
 
-Pinned in `_docs/theory/language-design.md`, `_docs/theory/core-calculus.md`, and `_docs/theory/why-lapis.md`.
+Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/theory/why-lapis.md`.
 
 ## Original motivation (rediscovered, see why-lapis.md)
 - The Bird-Meertens Formalism (Squiggol) should be a programming language, not a theory.
@@ -22,6 +22,28 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/core-calculus.md`, an
 - Cost: loss of parametricity. Recovered *by declaration* via `properties` annotations (associative, idempotent, etc.). Reframe `properties` as the price paid for subtyping-over-generics.
 - No general fixpoint. Recursion only via fold (terminating, data finite) and unfold (productive, guarded). Sized-types story specialized to bialgebraic setting.
 - **Iso-recursive, not equi-recursive.** `fold_T`/`unfold_T` are explicit core terms, not silent coercions. Rationale: in Lapis, fold and unfold are not type coercions (as in TAPL) but the primary computational constructs — the catamorphism and anamorphism. They carry semantic weight: `properties` (algebraic laws), `@requires`/`@ensures` (contracts), `<para>`/`<histo>`/`<aux>` (recursion scheme modifiers), and `<in:`/`<out:` (type specs) are all declared *on the fold*. Making fold/unfold implicit (equi-recursive) would destroy the declaration surface where the user tells the compiler the algebraic structure of their operation — which is the whole point of the language. The hybrid: iso-recursive core + elaboration, equi-recursive surface for pattern matching inside fold handlers (the user pattern-matches directly; the fold machinery manages the recursive boundary). Subtyping rules (S-Data-Width, S-Data-Depth) use the guarded assumption (`α <: T'` in the premise) — the standard iso-recursive treatment (Amadio-Cardelli).
+
+### Design rationale narrative
+
+The calculus is shaped by three deliberate choices, each with a cost that is
+paid back by a design feature:
+
+1. **F<:, not Fω.** No higher-kinded polymorphism. Subtyping (with bounded
+   quantification) subsumes generics (Meyer, Bracha). Protocols are predicates
+   over the subtyping lattice, not type-constructors. The cost — loss of
+   parametricity — is recovered *by declaration* via `properties`.
+
+2. **μ/ν, not general fix.** Data is μ (initial algebra); codata is ν (final
+   coalgebra). No `fix` or `Y`. Termination of folds and productivity of unfolds
+   follow from the F-structure being the measure — no separate termination
+   checker. This is the soundness lever.
+
+3. **Iso-recursive, not equi-recursive.** (See bullet above.) The cost — explicit
+   fold/unfold in the core — is paid back by the declaration surface for laws,
+   contracts, and recursion scheme modifiers.
+
+4. **Effect-free.** No effect type. Contracts elaborate to `Result`; IO is a
+   Mealy data value. The core is sound for pure fold/unfold + contracts-as-results.
 
 ## Evaluation model
 - Eager data (μ), lazy codata (ν). Fixed by declaration kind — NOT a user knob.

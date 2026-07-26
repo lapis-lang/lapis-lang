@@ -11,7 +11,7 @@
  *
  * The type checker threads a `TypeEnv` (Γ) top-down as an inherited attribute
  * and synthesizes types bottom-up as return values. It implements the typing
- * rules from _docs/core-calculus.md §4:
+ * rules from _docs/theory/lc.md §4:
  *
  *   T-Var:     Γ(x) = σ  ⟹  Γ ⊢ x : σ
  *   T-Abs:     Γ, x:σ ⊢ t : τ  ⟹  Γ ⊢ λx:σ.t : σ → τ
@@ -308,7 +308,7 @@ function checkQueryDecl(decl: QueryDecl, env: TypeEnv, nameEnv: NameEnv): void {
 /**
  * Type-check a fold declaration against its data type.
  *
- * Implements T-Fold from _docs/core-calculus.md §4.3:
+ * Implements T-Fold from _docs/theory/lc.md §4.3:
  *
  *   T = μ α. Σᵢ Cᵢ(Fᵢ(α))
  *   Γ ⊢ e : T
@@ -398,7 +398,7 @@ function checkFoldDecl(
 /**
  * Type-check an unfold declaration against its codata type.
  *
- * Implements T-Unfold from _docs/core-calculus.md §4.5:
+ * Implements T-Unfold from _docs/theory/lc.md §4.5:
  *
  *   T = ν α. Πⱼ oⱼ(Gⱼ(α))
  *   Γ ⊢ s : Σ
@@ -457,7 +457,7 @@ function checkUnfoldDecl(
 /**
  * Type-check a behavior fold (cofold) against its codata type.
  *
- * Implements T-Cofold from _docs/core-calculus.md §4.6:
+ * Implements T-Cofold from _docs/theory/lc.md §4.6:
  *
  *   T = ν α. Πⱼ oⱼ(Gⱼ(α))
  *   Γ ⊢ e : T
@@ -526,7 +526,7 @@ function checkCofoldDecl(
  * satisfies the protocol if it has the right operations, regardless of
  * explicit declaration.
  *
- * See _docs/core-calculus.md §3.5 and _docs/elaboration.md §3.3.
+ * See _docs/theory/lc.md §3.5 and _docs/elaboration.md §3.3.
  */
 function checkSatisfies(satisfies: Satisfies, type: DataType | CodataType, nameEnv: NameEnv): void {
     const protocol = nameEnv.lookupType(satisfies.protocolName);
@@ -702,7 +702,7 @@ function checkExpr(node: Node, env: TypeEnv, nameEnv: NameEnv): LapisType {
  *
  * The `out` entry declares the operation's return type. For folds, this is the
  * type that recursive (Family) fields are replaced with. See T-Fold in
- * _docs/core-calculus.md §4.3.
+ * _docs/theory/lc.md §4.3.
  */
 function resolveResultType(spec: Spec | null, targetType: DataType | CodataType): LapisType | null {
     if (!spec) return null;

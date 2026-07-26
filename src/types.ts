@@ -55,7 +55,7 @@ export abstract class LapisType {
      * Subtyping check: is `this <: other`?
      *
      * This is the core operation of the type system. It implements the rules
-     * from _docs/core-calculus.md §3:
+     * from _docs/theory/lc.md §3:
      *   - S-Refl:  σ <: σ
      *   - S-Top:   σ <: Any
      *   - S-Bot:   Nothing <: σ
@@ -161,7 +161,7 @@ export class FunType extends LapisType {
  *
  * The field types may contain `FamilyRef` positions (the recursive self-reference
  * `α`), which are replaced by the fold result type σ during fold type checking
- * (see _docs/core-calculus.md §4.3, T-Fold).
+ * (see _docs/theory/lc.md §4.3, T-Fold).
  */
 export class VariantType {
     constructor(
@@ -304,7 +304,7 @@ export class CodataType extends LapisType {
  * `σ ∧ τ` — intersection type. A value of type `σ ∧ τ` satisfies both.
  *
  * Used to express protocol conformance: `τ ∧ P` means "a τ that also satisfies
- * protocol P." See _docs/core-calculus.md §3.5.
+ * protocol P." See _docs/theory/lc.md §3.5.
  */
 export class IntersectionType extends LapisType {
     constructor(readonly left: LapisType, readonly right: LapisType) { super(); }
@@ -337,7 +337,7 @@ export class IntersectionType extends LapisType {
  * A protocol type — a set of operation signatures that a type must satisfy.
  *
  * Protocol conformance `τ satisfies P` is modeled as `τ <: P` (intersection:
- * `τ ∧ P`). See _docs/core-calculus.md §3.5 and _docs/elaboration.md §3.3.
+ * `τ ∧ P`). See _docs/theory/lc.md §3.5 and _docs/elaboration.md §3.3.
  *
  * Conformance is checked structurally: a type satisfies a protocol if it
  * declares all the protocol's required operations with compatible signatures.
@@ -390,7 +390,7 @@ export class ProtocolType extends LapisType {
  *
  * In a fold handler, `Family`-typed fields arrive as the *already-folded* result
  * (of type σ), not as the raw sub-structure. See T-Fold in
- * _docs/core-calculus.md §4.3.
+ * _docs/theory/lc.md §4.3.
  */
 export class FamilyRefType extends LapisType {
     constructor(readonly targetType: DataType) { super(); }
@@ -411,7 +411,7 @@ export class FamilyRefType extends LapisType {
  * `Self` — the corecursive self-reference in a codata type (the ν-bound α).
  *
  * In an unfold generator, `Self`-typed observers produce the next codata value
- * (lazily). See T-Unfold in _docs/core-calculus.md §4.5.
+ * (lazily). See T-Unfold in _docs/theory/lc.md §4.5.
  */
 export class SelfRefType extends LapisType {
     constructor(readonly targetType: CodataType) { super(); }

@@ -285,4 +285,4 @@ because it requires the enforcement, and enforcement is a language-level decisio
 - Coal language: [coal-lang.org](https://coal-lang.org/), [source on Codeberg](https://codeberg.org/laserpants/coal)
 - Coal data and codata: [coal-lang.org/data-and-codata](https://coal-lang.org/data-and-codata/)
 - Meijer, Fokkinga & Paterson, "Functional Programming with Bananas, Lenses, Envelopes and Barbed Wire" (1991) — the "recursion is the goto of FP" motto
-- See also: [`why-lapis.md`](./why-lapis.md) §3 (other solutions), [`core-calculus.md`](./core-calculus.md) in `theory/`
+- See also: [`why-lapis.md`](./why-lapis.md) §3 (other solutions), [`lc.md`](./lc.md) in `theory/`

@@ -3,7 +3,8 @@
 > **Status:** Draft v0.1. This document presents LC in TAPL style: syntax,
 > evaluation rules, typing rules, and soundness. It is the formal specification
 > that the implementation checks against. For design rationale, elaboration of
-> surface constructs, and discussion, see [`core-calculus.md`](./core-calculus.md).
+> surface constructs, and discussion, see [`elaboration.md`](./elaboration.md)
+> and [`design-decisions.md`](../design-decisions.md).
 
 ## 1. Overview
 

@@ -621,7 +621,7 @@ special cases — that thread is real, and it leads somewhere worth going.
 - **Meyer, B.**, "Object-Oriented Software Construction" (1997) — subtyping subsumes generics; Design by Contract
 - **von Thun, M.**, "Rationale for Joy" — the narrative structure this document imitates
 
-For the formal treatment: [`core-calculus.md`](../theory/core-calculus.md), [`semantics.md`](../theory/semantics.md).
+For the formal treatment: [`lc.md`](../theory/lc.md), [`semantics.md`](../theory/semantics.md).
 For the implementation plan: [`language-design.md`](../theory/language-design.md).
 For the defense (why this deserves to exist): [`why-lapis.md`](../theory/why-lapis.md).
 For the comparison with the closest existing language: [`lapis-vs-coal.md`](../theory/lapis-vs-coal.md).

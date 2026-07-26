@@ -59,7 +59,7 @@ export type {
 } from './ast.ts';
 
 // ── Semantic types ────────────────────────────────────────────────────────────
-// The type system for the Lapis Core (LC). See _docs/core-calculus.md and
+// The type system for the Lapis Core (LC). See _docs/theory/lc.md and
 // src/types.ts for the full documentation.
 
 export {

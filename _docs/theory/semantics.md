@@ -265,7 +265,7 @@ generators are not run until observation.
 ### 3.4 Progress and Preservation (Operational)
 
 The operational semantics satisfies Progress and Preservation (see
-[`core-calculus.md`](./core-calculus.md) §8). The key points:
+[`lc.md`](./lc.md) §6). The key points:
 
 - **Progress:** Every well-typed closed term is either a value or can take a
   step. The interesting case is fold: `fold_T (Cₖ(vⱼ)) {Cᵢ → tᵢ}` always steps
@@ -325,7 +325,7 @@ In the bialgebraic framework:
   the observed value. This is exactly the unfold equation.
 
 These properties are not additional axioms — they *follow* from the typing rules
-(T-Fold and T-Unfold in [`core-calculus.md`](./core-calculus.md) §4). The
+(T-Fold and T-Unfold in [`lc.md`](./lc.md) §5). The
 bialgebraic structure is *built into* the type system.
 
 ### 4.3 Law Exploitation as Bialgebraic Optimization
@@ -478,7 +478,7 @@ genuinely bidirectional.**
 
 ### 6.1 Contract Assessment Flow
 
-Contracts elaborate to core terms (see [`core-calculus.md`](./core-calculus.md)
+Contracts elaborate to core terms (see [`elaboration.md`](./elaboration.md)
 §6). The operational semantics of a contracted operation is:
 
 ```
@@ -590,7 +590,7 @@ equality test:
 v instanceof T  iff  typeOf(v) <: T
 ```
 
-Where `<:` is the subtyping relation from [`core-calculus.md`](./core-calculus.md)
+Where `<:` is the subtyping relation from [`lc.md`](./lc.md)
 §3. Comb inheritance (prototype chain + delegation chain) makes this work at
 runtime: an instance of `ExtendedColor.Yellow` is `instanceof ExtendedColor`,
 `instanceof Color`, and `instanceof Any` — all via the delegation chain.
@@ -606,8 +606,8 @@ subtype membership.
 |---|---|---|
 | **Termination of fold** | `fold_T e {Cᵢ → tᵢ}` terminates for all finite `e : T` | Guaranteed by μ-type finiteness + structural recursion |
 | **Productivity of unfold** | `unfold_T s {oⱼ → gⱼ}` produces one observation before recursing | Guaranteed by ν-type guardedness |
-| **Progress** | Every well-typed closed term is a value or steps | See core-calculus.md §8.1 |
-| **Preservation** | If `t : σ` and `t → t'` then `t' : σ` | See core-calculus.md §8.2 |
+| **Progress** | Every well-typed closed term is a value or steps | See lc.md §6.1 |
+| **Preservation** | If `t : σ` and `t → t'` then `t' : σ` | See lc.md §6.2 |
 | **Adequacy** | `〚t〛 = 〚t'〛` when `t →* t'` and `t'` is a value | Bialgebraic property (Turi-Plotkin); follows from fold/unfold homomorphism |
 | **Confluence (eager)** | Eager reduction is confluent for terminating terms | Church–Rosser; justifies compiler rewrites within eager strategy |
 | **Confluence (lazy)** | Lazy reduction is confluent for productive observations | Church–Rosser (dual); justifies compiler rewrites within lazy strategy |
@@ -637,7 +637,7 @@ subtype membership.
    semantics generalize (the recursion is over a tuple of types), but the
    formalization needs to be written down.
 
-5. **Cofold termination.** Cofold (codata elimination, §4.6 of core-calculus.md)
+5. **Cofold termination.** Cofold (codata elimination, §5.5 of lc.md)
    is not guaranteed to terminate — the handler decides when to stop calling
    continuations. This is the standard codata position (the consumer controls
    termination), but it means the operational semantics of cofold is

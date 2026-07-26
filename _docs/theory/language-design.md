@@ -143,7 +143,6 @@ This is the master document. The formal details live in companion documents:
 | [`../users/rationale.md`](../users/rationale.md) | Narrative for prospective users: fold/unfold → totality → laws → Datalog/Prolog → contracts | Draft |
 | `why-lapis.md` | Defense (Atanassow's questions): why this language deserves to exist | Draft |
 | `lapis-vs-coal.md` | Comparative study with Coal (closest existing language) | Draft |
-| `core-calculus.md` | Core calculus (F<: + μ/ν + fold/unfold): design rationale, commentary, elaboration of surface constructs, contracts, Boolean-as-data, open questions | Draft |
 | `lc.md` | LC in TAPL style: syntax, evaluation rules, typing rules, subtyping rules, soundness — the formal specification | Draft |
 | `semantics.md` | Denotational (fold) and operational (unfold) semantics; bialgebraic laws (Turi-Plotkin); attribute-grammar equations; evaluation strategy; contracts; equality | Draft |
 | `elaboration.md` | Surface → core desugaring: relation/query/io → data/behavior; rescue → Result; map/merge/scan → fold/unfold; contracts; properties; subtyping | Draft |
@@ -154,7 +153,7 @@ This is the master document. The formal details live in companion documents:
 
 ## 4. Core Calculus Summary
 
-> Full formal treatment: [`core-calculus.md`](./core-calculus.md)
+> Full formal treatment: [`lc.md`](./lc.md)
 
 The core calculus — **Lapis Core (LC)** — is F<: with recursive and corecursive
 types, where fold and unfold are the only recursion forms.
@@ -175,7 +174,7 @@ types, where fold and unfold are the only recursion forms.
 
 Base types (`ι`) are eliminated — `Nat`, `Int`, `String`, `Bool`, etc. are all
 `μ` types (pattern-matched or named constructors). See
-[`core-calculus.md`](./core-calculus.md) §2.1 and
+[`lc.md`](./lc.md) §2.1 and
 [`design-decisions.md`](../design-decisions.md) §"No base types".
 
 **Terms:**
@@ -223,10 +222,10 @@ evaluator after the fact).
 - [ ] Confirm Boolean-as-data, no primitive `if` (§2.6)
 - [ ] Confirm F<: (not Fω) as the core (§2.1)
 - [ ] Confirm contracts-not-effects (§2.4)
-- [ ] Draft core calculus typing rules ([`core-calculus.md`](./core-calculus.md))
+- [ ] Draft core calculus typing rules ([`lc.md`](./lc.md))
 - [ ] Draft soundness sketch (Progress/Preservation statements)
 
-**Deliverable:** `core-calculus.md` with typing rules and soundness sketches.
+**Deliverable:** `lc.md` with typing rules and soundness sketches.
 
 ### Stage 1: Minimal Core — data + fold + behavior + unfold
 

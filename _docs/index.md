@@ -32,7 +32,6 @@ the open items below.)*
 | [`theory/why-lapis.md`](./theory/why-lapis.md) | The defense: what problem Lapis solves, how the prototype proves it, why no existing language does, what's essential, and the honest risks |
 | [`theory/lapis-vs-coal.md`](./theory/lapis-vs-coal.md) | Point-by-point comparison with Coal: shared ground (enforced fold/unfold, bialgebraic duality), the critical difference (law exploitation), and what each language can learn from the other |
 | [`theory/language-design.md`](./theory/language-design.md) | Master document: key design decisions (subtyping not generics, eager data/lazy codata, no general recursion, contracts not effects, static-where-possible, Boolean-as-data), document map, and the 7-stage iterative implementation plan |
-| [`theory/core-calculus.md`](./theory/core-calculus.md) | The Lapis Core (LC) calculus: design rationale, commentary, elaboration of surface constructs, contracts, Boolean-as-data, and open questions |
 | [`theory/lc.md`](./theory/lc.md) | LC in TAPL style: syntax, evaluation rules, typing rules, subtyping rules, soundness — the formal specification the implementation checks against |
 | [`theory/semantics.md`](./theory/semantics.md) | Denotational semantics (fold = meaning), operational semantics (unfold = dynamics), bialgebraic laws (Turi-Plotkin), eager-data/lazy-codata strategy with Church–Rosser justification, attribute-grammar equations for static analysis, contract semantics, equality (structural for μ, bisimulation for ν) |
 | [`theory/elaboration.md`](./theory/elaboration.md) | Surface → core desugaring: every construct mapped to its core term. Expression elaboration, declaration elaboration (data/behavior/protocol/relation/query/io), recursion-scheme elaboration (para/histo/zygo/map/merge/scan), contract elaboration (demands/ensures/rescue/invariant → Result), properties elaboration, subtyping elaboration |
@@ -61,7 +60,7 @@ tracks.
                                        │
                           ┌────────────┼────────────┬────────────┐
                           ▼            ▼            ▼            ▼
-                    core-calculus  semantics  elaboration  surface-syntax
+                    lc.md  semantics  elaboration  surface-syntax
 ```
 
 - **`users/rationale.md`** is the entry point for new readers. It references the
@@ -70,7 +69,7 @@ tracks.
   exist?" and references the prototype and the comparison.
 - **`theory/language-design.md`** is the master implementation document — it
   indexes the formal specs and defines the staging plan.
-- **`theory/core-calculus.md`**, **`theory/semantics.md`**,
+- **`theory/lc.md`**, **`theory/semantics.md`**,
   **`theory/elaboration.md`**, and **`theory/surface-syntax.md`** are the formal
   specifications that the implementation checks against.
 - **`theory/syntax-design.md`** is the original design sketch, preserved for

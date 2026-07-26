@@ -2,7 +2,7 @@
 
 > **Status:** Draft v0.1. This document defines the elaboration (desugaring) from
 > the Lapis surface language to the Lapis Core (LC) calculus defined in
-> [`core-calculus.md`](./core-calculus.md). Every surface construct maps to a
+> [`lc.md`](./lc.md). Every surface construct maps to a
 > core term. The surface is rich (six declaration forms, specs, contracts,
 > recursion-scheme modifiers); the core is small (μ/ν types, fold, unfold,
 > observation, lambda, bounded polymorphism).
@@ -258,7 +258,7 @@ protocol Eq
 Elaborates to a constraint `Eq` requiring a fold `equals : Self → Boolean` on the
 conforming type. The `satisfies:` clause on a data/behavior declaration adds the
 constraint: `τ satisfies Eq` becomes `τ <: Eq` (intersection type in the core,
-see [`core-calculus.md`](./core-calculus.md) §3.5).
+see [`lc.md`](./lc.md) §4).
 
 **Default method bodies:** A protocol method with an indented body provides a
 default implementation. At conformance checking, if the conforming type doesn't
@@ -623,7 +623,7 @@ pop = fold_Stack e {
 
 Where `demands_check(self)` is the elaborated block `[self | self size > 0]`
 applied to the current instance. The `if` is a fold over `Bool` (see
-[`core-calculus.md`](./core-calculus.md) §7). `raise` elaborates to a `Result`
+[`elaboration.md`](./elaboration.md) §7). `raise` elaborates to a `Result`
 typed term: `VError(DemandsError)`.
 
 **DemandsError is never caught by rescue** — it propagates directly to the
@@ -844,7 +844,7 @@ data NumList <: List
 | `properties: (...)` | Law constraints; verified + exploited | §6.1 |
 | `extend` (`<:`) | μ-width subtyping + fold inheritance | §7.1 |
 | Field narrowing | μ-depth subtyping | §7.2 |
-| `ifTrue:ifFalse:` | `fold_Bool b {True → t, False → f}` | core-calculus §7 |
+| `ifTrue:ifFalse:` | `fold [Bool] b {True → t, False → f}` | elaboration §7 |
 | Binary operators | Message sends → folds on the operand type | §2.4 |
 | `[params \| expr]` | Curried lambdas | §2.3 |
 | `{a, b, c}` | Nested cons on built-in List | §2.6 |
@@ -893,3 +893,44 @@ data NumList <: List
    to the `add` fold on `Num` by convention. This requires a standard library of
    operator-to-fold mappings, or a way to declare operator bindings in the
    surface language.
+
+## 7. Boolean and Conditional
+
+There is **no primitive `if`** in LC. `Boolean` is a data type:
+
+```
+Bool = μ α. (True | False)
+```
+
+`ifTrue:ifFalse:` is a fold over `Bool`:
+
+```
+ifTrue:ifFalse: b = fold [Bool] b { True → t, False → f }
+```
+
+The surface syntax `n = 0 ifTrue: [{}] ifFalse: [...]` is a keyword message send
+on the result of `n = 0` (a `Bool`), which desugars to this fold. The "no
+conditional" claim is literally true: branching is fold-based dispatch.
+
+## 8. Contracts and Blame
+
+Contract clauses (`demands`, `ensures`, `rescue`, `invariant`) are **not core
+constructs**. They elaborate to core terms (see §5 above). The core remains
+effect-free: `raise` and `try/catch` elaborate to `Result`-typed terms (sum of
+success/failure), and the runtime interprets `Result` values.
+
+**Connection to Wadler's blame calculus.** The current design treats contracts as
+pure elaboration — they desugar to folds over `Bool` and `Result`, with no
+calculus-level support for blame. Wadler's blame calculus ("Well-typed programs
+can't be blamed", 2009) takes a different approach: blame labels are first-class
+core entities carried by casts, and the blame theorem (well-typed components can
+never be blamed) is proved at the calculus level alongside Progress and
+Preservation.
+
+Lapis's contracts are richer than Wadler's casts — they include `rescue`
+(recovery) and are tied to the subtyping lattice (LSP subcontracting:
+preconditions weaken, postconditions strengthen). The interaction of subtyping +
+DbC + blame is hard to formalize purely in elaboration, because subcontracting is
+already in LC and the blame theorem needs to talk about which side of a subtyping
+relationship is at fault. A future refinement may promote blame labels to the
+calculus level (see `design-decisions.md` open question #7).

@@ -4,7 +4,7 @@
 > for Lapis's semantic analysis passes: how grammar subclassing, the `chain`
 > combinator, and grammar-native contracts together turn the parser into the
 > compiler pipeline. The formal typing rules live in
-> [`core-calculus.md`](./core-calculus.md); the denotational/operational
+> [`lc.md`](./lc.md); the denotational/operational
 > semantics live in [`semantics.md`](./semantics.md). This document is about
 > *how those rules are implemented*.
 
@@ -350,7 +350,7 @@ branch yields an empty forest — the variable is rejected, not thrown.
 
 ## 6. Application to Lapis: T-Fold as a Contracted Production
 
-The typing rule for `fold` (from [`core-calculus.md`](./core-calculus.md) §4)
+The typing rule for `fold` (from [`lc.md`](./lc.md) §5.2)
 is:
 
 ```
