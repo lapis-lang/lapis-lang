@@ -1,0 +1,24 @@
+{
+  "name": "lapis-lang",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "denoland.vscode-deno",
+        "EditorConfig.EditorConfig",
+        "github.vscode-github-actions",
+        "GitHub.vscode-pull-request-github",
+        "Ollama.ollama",
+        "xadamxk.prune-stale-git-branches"
+      ]
+    }
+  },
+  // Features to add to the dev container. More info: https://containers.dev/features.
+  "features": {
+      "ghcr.io/devcontainers/features/github-cli:1": {
+          "version": "latest"
+      }
+  }
+}
