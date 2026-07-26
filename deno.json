@@ -1,0 +1,29 @@
+{
+  "name": "@lapis-lang/lapis-lang",
+  "version": "0.1.0",
+  "exports": "./src/index.ts",
+  "minimumDependencyAge": "0",
+  "tasks": {
+    "check": "deno check src/index.ts",
+    "test": "deno test",
+    "build": "deno compile --output dist/lapis src/cli.ts",
+    "fmt": "deno fmt",
+    "lint": "deno lint"
+  },
+  "imports": {
+    "@lapis-lang/zipper-grammar": "jsr:@lapis-lang/zipper-grammar@2.1.0"
+  },
+  "compilerOptions": {
+    "strict": true
+  },
+  "fmt": {
+    "indentWidth": 4,
+    "lineWidth": 100,
+    "semiColons": false
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  }
+}

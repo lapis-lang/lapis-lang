@@ -1,12 +1,12 @@
 /**
- * Lapis language grammar — executable grammar built on @lapis-lang/derivative-parser.
+ * Lapis language grammar — executable grammar built on jsr:@lapis-lang/zipper-grammar.
  *
  * Architecture:
  *  - `LapisShape`    — per-production type map (shape interface).
  *  - `LapisGrammar`  — abstract class; declares all productions as @rule
  *                      getters/methods. No AST construction here.
  *  - `LapisParser`   — concrete subclass; implements factory methods to build
- *                      class-based AST nodes (src/ast.mts).
+ *                      class-based AST nodes (src/ast.ts).
  *
  * Indentation strategy (P4P-inspired, no pre-pass):
  *  Fixed 4-space indent unit. Every block-introducing production is a
@@ -14,8 +14,8 @@
  *  `spaces(n)` matches exactly n space characters via recursion, cached per n.
  */
 
-import { Grammar, rule } from '@lapis-lang/derivative-parser';
-import type { GrammarShape, Parser, Span } from '@lapis-lang/derivative-parser';
+import { Grammar, rule } from 'jsr:@lapis-lang/zipper-grammar';
+import type { GrammarShape, Parser, Span } from 'jsr:@lapis-lang/zipper-grammar';
 import {
     type Node,
     type TopLevelDecl,
@@ -59,7 +59,7 @@ import {
     UnfoldDecl,
     Variant,
     VariantRef,
-} from './ast.mjs';
+} from './ast.ts';
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
 

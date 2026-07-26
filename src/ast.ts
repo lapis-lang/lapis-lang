@@ -7,7 +7,7 @@
  * root's `positionOf(offset)` helper.
  */
 
-import type { Span } from '@lapis-lang/derivative-parser';
+import type { Span } from 'jsr:@lapis-lang/zipper-grammar';
 
 // ── Base ─────────────────────────────────────────────────────────────────────
 
