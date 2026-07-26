@@ -401,6 +401,12 @@ be type-checked in a single left-to-right pass.
 
 ## 7. Higher-Order Attributes and Tree-Consuming Grammars
 
+> **Note:** The features in this section are from zipper-grammar 2.2.0, which is a
+> planned upgrade. The current codebase uses 2.1.0 (pinned via lock file). The 2.2.0
+> API is a breaking change — combinators became standalone functions instead of
+> Grammar methods — so the upgrade requires rewriting `grammar.ts`. The design
+> rationale here documents the target architecture.
+
 zipper-grammar 2.2.0 introduces two capabilities that further unify the
 architecture: **higher-order attributes** (one-pass evaluation via `_forward`)
 and **tree-consuming grammars** (via `TreeExp` / `flattenTree`). Together, they
@@ -556,14 +562,16 @@ references.
 
 ## 10. References
 
-- **zipper-grammar** — [`jsr:@lapis-lang/zipper-grammar@2.2.0`](https://jsr.io/@lapis-lang/zipper-grammar):
+- **zipper-grammar** — [`jsr:@lapis-lang/zipper-grammar@2.1.0`](https://jsr.io/@lapis-lang/zipper-grammar):
   `Grammar` base class, `@rule` decorator, `chain` combinator, `@requires` /
-  `@ensures` / `@invariant` / `@rescue` contracts, `_forward` (higher-order
-  attributes for one-pass evaluation), `TreeExp` / `flattenTree` (tree-consuming
-  grammars), standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`,
-  `keyword`), lexeme helpers (`ws`, `ws1`, `digit`, `digits`, `ident`). See
-  `examples/stlc.ts` for the headline example (STLC with 4 interpretations over
-  one grammar, including one-pass evaluation via `_forward`).
+  `@ensures` / `@invariant` / `@rescue` contracts. See `examples/stlc.ts` for
+  the headline example (STLC with 4 interpretations over one grammar).
+  **Planned upgrade to 2.2.0** adds `_forward` (higher-order attributes for
+  one-pass evaluation), `TreeExp` / `flattenTree` (tree-consuming grammars),
+  standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`,
+  `keyword`), and lexeme helpers. The 2.2.0 API is a breaking change
+  (combinators become standalone functions); the upgrade requires rewriting
+  `grammar.ts`. See §7 for the 2.2.0 features and their applicability to Lapis.
 - **Bracha, G.** — Executable grammars / pluggable type systems: the
   grammar-subclassing model that zipper-grammar realizes.
 - **Attribute grammars** — Knuth's original concept; the L-attributed /

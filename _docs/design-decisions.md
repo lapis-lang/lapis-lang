@@ -66,13 +66,13 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/core-calculus.md`, an
 - **Escaping in patterns**: special characters (`+ * ? [ ] \`) are escaped with `\` when meant literally. E.g., `[0-9]+\+[0-9]+j` for complex numbers — the `\+` is a literal `+` inside the token, while the unescaped `+` after `[0-9]` is the quantifier.
 
 ## Attribute grammars + zipper-grammar (renamed from derivative-parser)
-- Parser library now published to JSR as `@lapis-lang/zipper-grammar@2.2.0`.
+- Parser library now published to JSR as `@lapis-lang/zipper-grammar@2.1.0`.
 - v2.1.0 adds: `chain` (monadic bind) for L-attributed one-pass parsing, grammar-native contracts (`@requires`, `@ensures`, `@invariant`, `@rescue`), `diagnostic()` for failure reporting.
-- v2.2.0 adds: `_forward` (higher-order attributes — one-pass evaluation via re-parsing substrings under extended context), `TreeExp`/`flattenTree`/`parseTree` (tree-consuming grammars for passes over already-built ASTs), standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`, `keyword`), lexeme helpers (`ws`, `ws1`, `digit`, `digits`, `ident`).
+- v2.2.0 (planned upgrade): adds `_forward` (higher-order attributes — one-pass evaluation via re-parsing substrings under extended context), `TreeExp`/`flattenTree`/`parseTree` (tree-consuming grammars for passes over already-built ASTs), standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`, `keyword`), lexeme helpers (`ws`, `ws1`, `digit`, `digits`, `ident`). The 2.2.0 API is a breaking change from 2.1.0 (combinators are standalone functions, not Grammar methods); the upgrade requires rewriting `grammar.ts`.
 - Two patterns for semantics: (1) multi-pass via `super` (subclass calls super.expr.map(evalFn)), (2) one-pass judgments-as-productions via `@rule expr(Γ): Parser<Type>` with `chain` for left-sibling synthesized → right-sibling inherited flow. With 2.2.0's `_forward`, evaluation is also one-pass (closures re-parse body via `_forward`); tree-consuming grammars handle passes over ASTs.
 - Grammar-class subtyping = natural layering for semantic passes: base grammar (syntax) → subclass (name resolution) → subclass (type check) → subclass (law check) → subclass (evaluation). Each pass inherits productions it doesn't override.
 - Lapis's enforced structure means hard type-theory cases DON'T ARISE: no polymorphic recursion (no general recursion, declared result types), no let-generalization (subtyping not generics), `super` gives complete AST node (no bidirectional flow needed).
-- See zipper-grammar `examples/stlc.ts` for headline example: STLC with 4 interpretations (AST, type checker, one-pass evaluator via `_forward`, proof-bearing) over one abstract grammar.
+- See zipper-grammar `examples/stlc.ts` for headline example: STLC with 4 interpretations (AST, type checker, evaluator, proof-bearing) over one abstract grammar.
 
 ## Deno migration (completed 2026-07-25)
 - Project converted from Node/TypeScript (.mts + package.json + tsconfig.json) to Deno (.ts + deno.json).

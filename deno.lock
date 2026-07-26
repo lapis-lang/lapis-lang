@@ -10,7 +10,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@lapis-lang/zipper-grammar@^2.2.0"
+      "jsr:@lapis-lang/zipper-grammar@2.1.0"
     ]
   }
 }

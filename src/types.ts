@@ -3,31 +3,38 @@
  *
  * This file defines the types used by the semantic analysis passes
  * (name resolution, type checking, law checking). The type structure mirrors
- * the core calculus (see _docs/core-calculus.md):
+ * the core calculus (see _docs/theory/lc.md §2.1):
  *
- *   σ, τ ::= ι              base types (Int, String, Bool, ...)
- *          | α              type variable
+ *   σ, τ ::= α              type variable
  *          | σ → τ          function type (blocks, predicates, transforms)
- *          | μ α. Σᵢ Cᵢ(Fᵢ)  recursive data type (sum of named variants)
- *          | ν α. Πⱼ oⱼ(Gⱼ)  corecursive codata type (product of named observers)
+ *          | μ α. Σᵢ Cᵢ(σᵢ)  recursive data type (sum of named variants)
+ *          | μ α. Σᵢ pᵢ      pattern-matched data type (sum of pattern constructors)
+ *          | ν α. Πⱼ oⱼ(σⱼ)  corecursive codata type (product of named observers)
+ *          | Token           raw matched text
  *          | Any            top of the lattice
  *          | Nothing        bottom of the lattice
  *          | σ ∧ τ          intersection type (protocol conformance)
  *
+ * NOTE: BaseType and the convenience constructors (Int, String_, Bool, etc.)
+ * below are legacy from the pre-redesign skeleton. They will be replaced by
+ * pattern-matched μ types during Stage 1 implementation (see
+ * _docs/design-decisions.md §"No base types").
+ *
  * The subtyping relation (<:) is the core of the type system — it subsumes
- * generics (see _docs/core-calculus.md §3). Subtyping rules:
+ * generics (see _docs/theory/lc.md §4). Subtyping rules:
  *   - S-Refl, S-Top, S-Bot, S-Trans, S-Var (basic)
  *   - S-Fun (contravariant domain, covariant codomain)
  *   - S-Data-Width (more variants = subtype; the `extend` mechanism)
  *   - S-Data-Depth (field narrowing = subtype)
  *   - S-Codata-Width (more observers = subtype)
+ *   - S-Codata-Depth (observer type narrowing = subtype)
  *   - S-And-Intro, S-And-Elim (intersection / protocol conformance)
  *
  * Design note: Lapis avoids parametric polymorphism (generics) in favor of
  * subtyping. Following Meyer (OOSC) and Bracha (Pluggable Type Systems),
  * bounded quantification over a subtyping lattice recovers most of what
  * generics buy you. The cost — loss of parametricity — is recovered *by
- * declaration* via `properties` annotations (see _docs/language-design.md §2.1).
+ * declaration* via `properties` annotations (see _docs/theory/language-design.md §2.1).
  */
 
 import type { Node } from './ast.ts';

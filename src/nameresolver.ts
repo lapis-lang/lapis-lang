@@ -31,7 +31,7 @@
  *   - No polymorphic recursion (no general recursion; declared result types)
  *   - No let-generalization (subtyping, not parametric polymorphism)
  *   - `super` gives the complete AST node, not a streaming view, so
-     cross-reference checking has full knowledge
+ *     cross-reference checking has full knowledge
  */
 
 import { Grammar, rule } from 'jsr:@lapis-lang/zipper-grammar';
