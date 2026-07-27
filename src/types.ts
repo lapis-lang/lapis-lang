@@ -103,12 +103,18 @@ export class Field {
  * inheritance (null for base types).
  */
 export class DataType extends Type {
+    /** Mutable to allow self-referential μ-type construction (create empty, then push variants). */
+    variants: Variant[];
+    parent: DataType | null;
+
     constructor(
         readonly name: string,
-        readonly variants: Variant[],
-        readonly parent: DataType | null = null,
+        variants: Variant[],
+        parent: DataType | null = null,
     ) {
         super();
+        this.variants = variants;
+        this.parent = parent;
     }
 
     equals(other: Type): boolean {
