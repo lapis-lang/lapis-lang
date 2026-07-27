@@ -68,3 +68,11 @@ export { TypeChecker, TypeError_, substituteType } from "./typing.ts";
 
 // Evaluation (lc.md §3)
 export { Evaluator, EvalError } from "./eval.ts";
+
+// Soundness (lc.md §6)
+export {
+    canStep,
+    checkProgress,
+    checkSoundness,
+    type SoundnessResult,
+} from "./soundness.ts";
