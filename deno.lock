@@ -1,16 +1,16 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@lapis-lang/zipper-grammar@*": "2.1.0"
+    "jsr:@lapis-lang/zipper-grammar@*": "3.0.0"
   },
   "jsr": {
-    "@lapis-lang/zipper-grammar@2.1.0": {
-      "integrity": "6f8fd75888bbbefaa07a3f3706ff7db844d8d343fa58e55fb0ce9a6e599e0749"
+    "@lapis-lang/zipper-grammar@3.0.0": {
+      "integrity": "4be5de2c09534f370af6c379a54c89d8505ca7ca04d23b3d484819e6dc2db6dc"
     }
   },
   "workspace": {
     "dependencies": [
-      "jsr:@lapis-lang/zipper-grammar@2.1.0"
+      "jsr:@lapis-lang/zipper-grammar@3.0.0"
     ]
   }
 }

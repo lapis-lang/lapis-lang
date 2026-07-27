@@ -11,7 +11,7 @@
     "lint": "deno lint"
   },
   "imports": {
-    "@lapis-lang/zipper-grammar": "jsr:@lapis-lang/zipper-grammar@2.1.0"
+    "@lapis-lang/zipper-grammar": "jsr:@lapis-lang/zipper-grammar@3.0.0"
   },
   "compilerOptions": {
     "strict": true

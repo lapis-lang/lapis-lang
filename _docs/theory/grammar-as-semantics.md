@@ -401,11 +401,10 @@ be type-checked in a single left-to-right pass.
 
 ## 7. Higher-Order Attributes and Tree-Consuming Grammars
 
-> **Note:** The features in this section are from zipper-grammar 2.2.0, which is a
-> planned upgrade. The current codebase uses 2.1.0 (pinned via lock file). The 2.2.0
-> API is a breaking change — combinators became standalone functions instead of
-> Grammar methods — so the upgrade requires rewriting `grammar.ts`. The design
-> rationale here documents the target architecture.
+> **Note:** The features in this section are from zipper-grammar 2.2.0+, which is
+> now the current version (3.0.0). The 3.0.0 API adds typed contract predicates
+> (`@requires`/`@ensures` infer `Parameters<F>` and `ReturnType<F>` from the
+> decorated method; `old` is typed as `OldSnapshot<This>`).
 
 zipper-grammar 2.2.0 introduces two capabilities that further unify the
 architecture: **higher-order attributes** (one-pass evaluation via `_forward`)
@@ -562,16 +561,15 @@ references.
 
 ## 10. References
 
-- **zipper-grammar** — [`jsr:@lapis-lang/zipper-grammar@2.1.0`](https://jsr.io/@lapis-lang/zipper-grammar):
+- **zipper-grammar** — [`jsr:@lapis-lang/zipper-grammar@3.0.0`](https://jsr.io/@lapis-lang/zipper-grammar):
   `Grammar` base class, `@rule` decorator, `chain` combinator, `@requires` /
-  `@ensures` / `@invariant` / `@rescue` contracts. See `examples/stlc.ts` for
-  the headline example (STLC with 4 interpretations over one grammar).
-  **Planned upgrade to 2.2.0** adds `_forward` (higher-order attributes for
-  one-pass evaluation), `TreeExp` / `flattenTree` (tree-consuming grammars),
-  standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`,
-  `keyword`), and lexeme helpers. The 2.2.0 API is a breaking change
-  (combinators become standalone functions); the upgrade requires rewriting
-  `grammar.ts`. See §7 for the 2.2.0 features and their applicability to Lapis.
+  `@ensures` / `@invariant` / `@rescue` contracts (with typed predicates —
+  `Parameters<F>`/`ReturnType<F>` inferred, `OldSnapshot<This>` for `old`),
+  `_forward` (higher-order attributes for one-pass evaluation), `TreeExp` /
+  `flattenTree` (tree-consuming grammars), standalone combinators (`sseq`,
+  `plus`, `sepBy`, `between`, `trim`, `keyword`), and lexeme helpers. See
+  `examples/stlc.ts` for the headline example (STLC with 4 interpretations over
+  one grammar, including one-pass evaluation via `_forward`).
 - **Bracha, G.** — Executable grammars / pluggable type systems: the
   grammar-subclassing model that zipper-grammar realizes.
 - **Attribute grammars** — Knuth's original concept; the L-attributed /
