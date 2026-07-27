@@ -63,13 +63,21 @@ export {
 // Subtyping (lc.md §4)
 export { isSubtype, typeEquals } from "./subtyping.ts";
 
-// Typing (lc.md §5)
+// Grammar — concrete syntax for LC (parse, don't validate)
+export {
+    AbstractLC,
+    LCAST,
+    TypeRegistry,
+    type LCShape,
+} from "./grammar.ts";
+
+// Typing (lc.md §5) — tree-walking (to be replaced by grammar subclass)
 export { TypeChecker, TypeError_, substituteType } from "./typing.ts";
 
-// Evaluation (lc.md §3)
+// Evaluation (lc.md §3) — tree-walking (to be replaced by grammar subclass)
 export { Evaluator, EvalError } from "./eval.ts";
 
-// Soundness (lc.md §6)
+// Soundness (lc.md §6) — to be replaced by @ensures contracts
 export {
     canStep,
     checkProgress,
