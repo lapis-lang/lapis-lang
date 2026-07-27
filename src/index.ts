@@ -59,3 +59,6 @@ export {
     isValue,
     isFullyEvaluated,
 } from "./values.ts";
+
+// Subtyping (lc.md §4)
+export { isSubtype, typeEquals } from "./subtyping.ts";
