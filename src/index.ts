@@ -71,6 +71,9 @@ export {
     type LCShape,
 } from "./grammar.ts";
 
+// Type-checking grammar subclass (lc.md §5 — parse, don't validate)
+export { LCTypeCheck } from "./typing_grammar.ts";
+
 // Typing (lc.md §5) — tree-walking (to be replaced by grammar subclass)
 export { TypeChecker, TypeError_, substituteType } from "./typing.ts";
 

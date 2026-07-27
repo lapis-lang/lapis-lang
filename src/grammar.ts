@@ -130,7 +130,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected abstract lam(param: string, type: Type, body: S["expr"]): S["expr"];
     protected abstract app(fn: S["atom"], arg: S["atom"]): S["expr"];
     protected abstract let_(name: string, type: Type, def: S["expr"], body: S["expr"]): S["expr"];
-    protected abstract varRef(name: string): S["atom"];
+    protected abstract varRef(name: string, ctx: unknown): S["atom"];
     protected abstract paren(e: S["expr"]): S["atom"];
     protected abstract variantCon(name: string, args: S["atom"][]): S["atom"];
     protected abstract obs(scrutinee: S["atom"], observerName: string): S["expr"];
@@ -444,7 +444,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             seq(this.variantName, this.ws, char("("), this.ws, sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws)).opt(), this.ws, char(")"))
                 .map(([name, , , , args, ,]) => this.variantCon(name as string, (args as S["atom"][] | undefined) ?? [])),
             // Variable
-            this.ident.map((name) => this.varRef(name)),
+            this.ident.map((name) => this.varRef(name, ctx)),
         );
     }
 
@@ -507,6 +507,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
 
     // ── Whitespace ────────────────────────────────────────────────────────────
 
+    @rule
     protected override get ws(): Parser<string> {
         return or(
             seq(this.wsChar, this.ws).map(([c, cs]) => c + cs),
@@ -514,6 +515,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         );
     }
 
+    @rule
     protected get ws1(): Parser<string> {
         return seq(this.wsChar, this.ws).map(([c, cs]) => c + cs);
     }
@@ -549,7 +551,7 @@ export class LCAST extends AbstractLC<{ expr: Term; atom: Term; type: Type }> {
         return new Let(name, type, def, body);
     }
 
-    protected varRef(name: string): Term {
+    protected varRef(name: string, _ctx: unknown): Term {
         return new Var(name);
     }
 
