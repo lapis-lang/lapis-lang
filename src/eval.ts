@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-unused-vars
 /**
  * LC Evaluation — the evaluation rules of the Lapis Core Calculus.
  *

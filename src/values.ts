@@ -114,7 +114,7 @@ export class ValueEnv {
 // ── IsValue check ─────────────────────────────────────────────────────────────
 
 /** Check if a term is a value (i.e., fully evaluated). */
-export function isValue(term: Term): boolean {
+export function isValue(_term: Term): boolean {
     // Values are: closures, variant constructions with value args,
     // pattern matches, and unfolds. But at the term level, we check
     // if the term is already a Value (i.e., evaluation has produced it).

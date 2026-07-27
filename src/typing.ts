@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-unused-vars
 /**
  * LC Typing — the typing rules of the Lapis Core Calculus.
  *

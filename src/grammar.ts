@@ -35,8 +35,6 @@
 import {
     Grammar,
     rule,
-    requires,
-    ensures,
     invariant,
     assert,
     char,
@@ -44,21 +42,11 @@ import {
     literal,
     or,
     seq,
-    chain,
     epsilon,
     empty,
     keyword,
-    plus,
     sepBy,
-    between,
-    trim,
-    ws as wsFn,
-    ws1 as ws1Fn,
-    digit,
-    digits as digitsFn,
-    ident as identFn,
     type Parser,
-    type Span,
 } from "jsr:@lapis-lang/zipper-grammar@3.0.0";
 
 import {
@@ -66,20 +54,9 @@ import {
     TypeVar,
     FunType,
     DataType,
-    Variant,
-    Field,
     PatternDataType,
     CodataType,
-    Observer,
-    TokenType,
-    AnyType,
-    NothingType,
-    IntersectionType,
     Any,
-    Nothing,
-    Token,
-    TypeVarEnv,
-    TypeEnv,
 } from "./types.ts";
 
 import {
@@ -87,23 +64,12 @@ import {
     Var,
     Lam,
     App,
-    VariantCon,
-    PatternMatch,
-    Fold,
-    PatternFold,
-    Obs,
-    Unfold,
-    Cofold,
-    TypeAbs,
-    TypeApp,
     Let,
+    Fold,
     FoldHandler,
-    PatternHandler,
+    Unfold,
     UnfoldGenerator,
-    CofoldHandler,
 } from "./terms.ts";
-
-import { isSubtype, typeEquals } from "./subtyping.ts";
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
 
@@ -147,6 +113,7 @@ export class TypeRegistry {
  * The `registry` provides named types (Stack, Stream, etc.) that the grammar
  * resolves during parsing.
  */
+// deno-lint-ignore no-explicit-any
 @invariant((self: AbstractLC<any>) => self.start() !== undefined)
 export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     /** The type registry, set before parsing. */
@@ -590,16 +557,16 @@ export class LCAST extends AbstractLC<{ expr: Term; atom: Term; type: Type }> {
         return e;
     }
 
-    protected variantCon(name: string, args: Term[]): Term {
+    protected variantCon(name: string, _args: Term[]): Term {
         // Look up the type from registry to find the DataType
         // For now, we need the DataType — but we don't know which type this variant belongs to.
         // This is a limitation: variant construction needs to know the type.
         // For testing, we'll handle this by looking up the variant in the registry.
         // A proper implementation would have a variant-to-type mapping.
-        throw new Error("variantCon not yet implemented — needs type registry lookup");
+        throw new Error(`variantCon not yet implemented for ${name} — needs type registry lookup`);
     }
 
-    protected obs(scrutinee: Term, observerName: string): Term {
+    protected obs(_scrutinee: Term, _observerName: string): Term {
         // Need the CodataType — similar issue as variantCon
         throw new Error("obs not yet implemented — needs type registry lookup");
     }

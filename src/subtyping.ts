@@ -22,9 +22,6 @@ import {
     AnyType,
     NothingType,
     IntersectionType,
-    Any,
-    Nothing,
-    Token,
     TypeVarEnv,
 } from "./types.ts";
 
