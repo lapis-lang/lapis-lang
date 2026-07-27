@@ -1,7 +1,8 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@lapis-lang/zipper-grammar@*": "3.0.0"
+    "jsr:@lapis-lang/zipper-grammar@*": "3.0.0",
+    "jsr:@lapis-lang/zipper-grammar@3.0.0": "3.0.0"
   },
   "jsr": {
     "@lapis-lang/zipper-grammar@3.0.0": {

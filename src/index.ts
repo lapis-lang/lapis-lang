@@ -62,3 +62,6 @@ export {
 
 // Subtyping (lc.md §4)
 export { isSubtype, typeEquals } from "./subtyping.ts";
+
+// Typing (lc.md §5)
+export { TypeChecker, TypeError_, substituteType } from "./typing.ts";
