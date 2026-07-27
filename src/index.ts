@@ -1,113 +1,61 @@
-export { LapisParser } from './grammar.ts';
-export type { LapisShape } from './grammar.ts';
-export {
-    Node,
-    // Literals
-    IntLit,
-    StringLit,
-    SymbolLit,
-    // References
-    Ident,
-    VariantRef,
-    SelfRef,
-    FamilyRef,
-    CoSelfRef,
-    OldRef,
-    PrevRef,
-    AuxRef,
-    // Composite expressions
-    Block,
-    Record,
-    RecordEntry,
-    ArrayLit,
-    // Operations
-    BinarySend,
-    UnarySend,
-    KeywordSend,
-    PrefixSend,
-    // Spec
-    Spec,
-    SpecEntry,
-    // Contract
-    ContractClause,
-    // Field & variant
-    Field,
-    Variant,
-    CaseArm,
-    Satisfies,
-    // Sub-declarations
-    FoldDecl,
-    UnfoldDecl,
-    MapDecl,
-    MergeDecl,
-    // Top-level declarations
-    DataDecl,
-    BehaviorDecl,
-    ProtocolDecl,
-    RelationDecl,
-    QueryDecl,
-    IoDecl,
-    // Module
-    Module,
-} from './ast.ts';
-export type {
-    ContractKind,
-    DataBodyItem,
-    BehaviorBodyItem,
-    ProtocolBodyItem,
-    TopLevelDecl,
-} from './ast.ts';
+/**
+ * Lapis Core Calculus (F_{<:μν}) — public exports.
+ *
+ * See _docs/theory/lc.md for the formal specification.
+ */
 
-// ── Semantic types ────────────────────────────────────────────────────────────
-// The type system for the Lapis Core (LC). See _docs/theory/lc.md and
-// src/types.ts for the full documentation.
-
+// Types (lc.md §2.1)
 export {
-    // Type classes
-    LapisType,
-    BaseType,
-    AnyType,
-    NothingType,
+    Type,
     TypeVar,
     FunType,
     DataType,
+    Variant,
+    Field,
+    PatternDataType,
     CodataType,
-    VariantType,
-    FieldDecl,
+    Observer,
+    TokenType,
+    AnyType,
+    NothingType,
     IntersectionType,
-    ProtocolType,
-    FamilyRefType,
-    SelfRefType,
-    // Typed AST
-    TypedExpr,
-    // Environments
+    TypeVarEnv,
     TypeEnv,
-    NameEnv,
-    // Convenience constructors
+    Token,
     Any,
     Nothing,
-    Int,
-    String_ as StringType,
-    Bool,
-    Number_ as NumberType,
-    Object_ as ObjectType,
-    Array_ as ArrayType,
-} from './types.ts';
+} from "./types.ts";
 
-// ── Name resolution ───────────────────────────────────────────────────────────
-// The first semantic layer: resolves names in the AST. See src/nameresolver.ts.
-
+// Terms (lc.md §2.2)
 export {
-    resolveModule,
-    NameResolutionError,
-    ResolvedIdent,
-    ResolvedVariantRef,
-} from './nameresolver.ts';
+    Term,
+    Var,
+    Lam,
+    App,
+    VariantCon,
+    PatternMatch,
+    FoldHandler,
+    PatternHandler,
+    Fold,
+    PatternFold,
+    Obs,
+    UnfoldGenerator,
+    Unfold,
+    CofoldHandler,
+    Cofold,
+    TypeAbs,
+    TypeApp,
+    Let,
+} from "./terms.ts";
 
-// ── Type checking ────────────────────────────────────────────────────────────
-// The second semantic layer: type-checks the resolved AST. See src/typechecker.ts.
-
+// Values (lc.md §2.3)
 export {
-    typeCheckModule,
-    TypeError_ as LapisTypeError,
-} from './typechecker.ts';
+    Value,
+    Closure,
+    VariantVal,
+    MatchVal,
+    CodataVal,
+    ValueEnv,
+    isValue,
+    isFullyEvaluated,
+} from "./values.ts";
