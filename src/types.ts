@@ -307,11 +307,16 @@ export class TypeVarEnv {
  * `Γ` — the term variable context, mapping term names to their types.
  * This is the inherited attribute threaded through the typing rules.
  */
+let typeEnvCounter = 0;
+
 export class TypeEnv {
     private readonly bindings: Map<string, Type>;
+    /** Unique ID for treeKey distinction (@rule caching in zipper-grammar). */
+    readonly _id: number;
 
     constructor(entries?: Map<string, Type>) {
         this.bindings = entries ?? new Map();
+        this._id = ++typeEnvCounter;
     }
 
     lookup(name: string): Type | undefined {

@@ -44,7 +44,6 @@ import {
     seq,
     epsilon,
     empty,
-    keyword,
     sepBy,
     type Parser,
 } from "jsr:@lapis-lang/zipper-grammar@3.0.0";
@@ -57,6 +56,8 @@ import {
     PatternDataType,
     CodataType,
     Any,
+    Nothing,
+    Token,
 } from "./types.ts";
 
 import {
@@ -174,6 +175,10 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             seq(char("("), this.ws, this.typeProd, this.ws, char(")"))
                 .map(([, , t]) => t),
             this.typeName.map((name) => {
+                // Built-in types
+                if (name === "Any") return Any;
+                if (name === "Nothing") return Nothing;
+                if (name === "Token") return Token;
                 // Resolve type name from registry
                 const resolved = this.registry.lookup(name);
                 if (resolved) return resolved;
@@ -502,7 +507,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     protected kw(word: string): Parser<string> {
-        return keyword(word, ["let", "in", "fold", "unfold"]);
+        return literal(word);
     }
 
     // ── Whitespace ────────────────────────────────────────────────────────────
