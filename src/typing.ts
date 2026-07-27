@@ -33,7 +33,7 @@ import {
     ensures,
     invariant,
     epsilon,
-} from "jsr:@lapis-lang/zipper-grammar@3.0.0";
+} from "@lapis-lang/zipper-grammar";
 
 import {
     type Type,

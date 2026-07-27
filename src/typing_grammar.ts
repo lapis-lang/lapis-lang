@@ -21,7 +21,7 @@ import {
     epsilon,
     empty,
     type Parser,
-} from "jsr:@lapis-lang/zipper-grammar@3.0.0";
+} from "@lapis-lang/zipper-grammar";
 
 import {
     type Type,
