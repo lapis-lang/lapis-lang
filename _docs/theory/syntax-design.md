@@ -4,34 +4,34 @@
 
 This document sketches the surface syntax of the Lapis programming language.
 
-The syntax is heavily influenced by **Self** and **Smalltalk**: message sends, keyword
-arguments, blocks as the universal building block, uniform access, and `self` always in
-scope. Like Python, significant indentation defines block scope — eliminating explicit
-delimiters around declaration bodies and case tables, with newlines as statement
-separators. The departure from vanilla Smalltalk is that Lapis replaces conditionals
-with **fold-based structural dispatch** and adds first-class bialgebraic constructs —
-`data`, `behavior`, `relation`, and `query` — as the primary declaration forms.
+The syntax is heavily influenced by **Self** and **Smalltalk**: message sends, keyword arguments,
+blocks as the universal building block, uniform access, and `self` always in scope. Like Python,
+significant indentation defines block scope — eliminating explicit delimiters around declaration
+bodies and case tables, with newlines as statement separators. The departure from vanilla Smalltalk
+is that Lapis replaces conditionals with **fold-based structural dispatch** and adds first-class
+bialgebraic constructs — `data`, `behavior`, `relation`, and `query` — as the primary declaration
+forms.
 
 ---
 
 ## Core Syntax Conventions
 
-| Convention | Description |
-|---|---|
-| Indentation | Defines block extent; replaces `[...]` for multi-line declaration bodies and case tables |
-| Newline | Statement separator |
-| `[params \| expr]` | First-class block value (lambda) — used for callbacks, guards, and contract clauses |
+| Convention               | Description                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Indentation              | Defines block extent; replaces `[...]` for multi-line declaration bodies and case tables                                               |
+| Newline                  | Statement separator                                                                                                                    |
+| `[params \| expr]`       | First-class block value (lambda) — used for callbacks, guards, and contract clauses                                                    |
 | `Variant fields -> body` | Pattern case in fold/unfold: `->` separates the pattern from the body; single-expression bodies inline, multi-line bodies indent below |
-| `(key: val, ...)` | Inline spec / named-argument record |
-| Keyword message | Multi-argument send: `size: 3` or `contains: 2` |
-| Unary message | Zero or single argument: `instance size`, `Color Red toHex` |
-| Uniform access | No call/getter distinction — `size`, `toHex`, `head` are all unary messages |
-| `self` | Always in scope; the current object instance |
-| `Family` | Self-referential type placeholder in `data` blocks |
-| `Self` | Coalgebraic self-reference in `behavior` blocks |
-| Last expression | Implicit result — no explicit `return` keyword |
-| PascalCase | Variant names (used as case keys in fold/unfold tables) |
-| camelCase | Operations, spec clauses, and field names |
+| `(key: val, ...)`        | Inline spec / named-argument record                                                                                                    |
+| Keyword message          | Multi-argument send: `size: 3` or `contains: 2`                                                                                        |
+| Unary message            | Zero or single argument: `instance size`, `Color Red toHex`                                                                            |
+| Uniform access           | No call/getter distinction — `size`, `toHex`, `head` are all unary messages                                                            |
+| `self`                   | Always in scope; the current object instance                                                                                           |
+| `Family`                 | Self-referential type placeholder in `data` blocks                                                                                     |
+| `Self`                   | Coalgebraic self-reference in `behavior` blocks                                                                                        |
+| Last expression          | Implicit result — no explicit `return` keyword                                                                                         |
+| PascalCase               | Variant names (used as case keys in fold/unfold tables)                                                                                |
+| camelCase                | Operations, spec clauses, and field names                                                                                              |
 
 ---
 
@@ -58,8 +58,8 @@ Color Red isWarm                      "=> true"
 Color Red instanceof: Color           "=> true"
 ```
 
-Each case arm uses `->` to separate the pattern from the body. Single-expression
-bodies appear on the same line; multi-line bodies indent below.
+Each case arm uses `->` to separate the pattern from the body. Single-expression bodies appear on
+the same line; multi-line bodies indent below.
 
 ---
 
@@ -83,16 +83,16 @@ p distanceFromOrigin      "=> 5.0"
 p asString                "=> '(3, 4)'"
 ```
 
-Each handler case binds the variant's fields as named parameters on the left-hand
-side of `->`, in declaration order. `x` is the fold result for field `x`; for
-non-recursive fields that is the raw stored value.
+Each handler case binds the variant's fields as named parameters on the left-hand side of `->`, in
+declaration order. `x` is the fold result for field `x`; for non-recursive fields that is the raw
+stored value.
 
 ---
 
 ### Recursive ADT
 
-`Family` is the implicit self-referential type. Fold results for recursive fields
-contain the already-folded value.
+`Family` is the implicit self-referential type. Fold results for recursive fields contain the
+already-folded value.
 
 ```lapis
 data Stack
@@ -130,9 +130,9 @@ s contains: 2     "=> true"
 
 ### Paramorphism (`<para>`)
 
-A paramorphism gives each handler both the folded result *and* the raw original
-sub-node (`old field`). This eliminates the need for `self`/`this`-based back-references
-in recursive operations.
+A paramorphism gives each handler both the folded result _and_ the raw original sub-node
+(`old field`). This eliminates the need for `self`/`this`-based back-references in recursive
+operations.
 
 ```lapis
 data Stack
@@ -163,7 +163,8 @@ data Fib
         Succ pred -> pred + prev pred
 ```
 
-In `<histo>` folds, fields bind the current fold result; `prev fieldName` steps back one level in the course of values.
+In `<histo>` folds, fields bind the current fold result; `prev fieldName` steps back one level in
+the course of values.
 
 ---
 
@@ -205,8 +206,8 @@ ExtendedColor Yellow instanceof: ExtendedColor  "=> true"
 Color Red instanceof: ExtendedColor             "=> false"
 ```
 
-Inherited variants and their handlers are resolved automatically. New variants require
-only the new cases.
+Inherited variants and their handlers are resolved automatically. New variants require only the new
+cases.
 
 ---
 
@@ -274,8 +275,8 @@ nats take: 5                  "=> [0, 1, 2, 3, 4]"
 (nats map: [n | n * 2]) take: 3   "=> [0, 2, 4]"
 ```
 
-`Self` in the observer spec declares a continuation (lazy self-reference). Observations
-are memoized — accessing `nats tail` twice returns the same instance.
+`Self` in the observer spec declares a continuation (lazy self-reference). Observations are memoized
+— accessing `nats tail` twice returns the same instance.
 
 ---
 
@@ -308,14 +309,15 @@ data Num
 (Num N: 3) instanceof: Ordered     "=> true"
 ```
 
-Abstract methods declare a signature with `<spec>`; an indented body below provides the default implementation. Conformance is declared with `satisfies:` and verified structurally.
+Abstract methods declare a signature with `<spec>`; an indented body below provides the default
+implementation. Conformance is declared with `satisfies:` and verified structurally.
 
 ---
 
 ## Algebraic Property Annotations
 
-Properties are declared inside the fold spec block and enable the runtime to verify
-and exploit algebraic laws automatically.
+Properties are declared inside the fold spec block and enable the runtime to verify and exploit
+algebraic laws automatically.
 
 ```lapis
 data Num
@@ -328,15 +330,15 @@ data Num
         N value -> Num N: value * other value
 ```
 
-Declared properties trigger `LawError` at runtime when violated on random samples, and
-enable the Horner-rule merge optimisation when `distributiveOver:` is present.
+Declared properties trigger `LawError` at runtime when violated on random samples, and enable the
+Horner-rule merge optimisation when `distributiveOver:` is present.
 
 ---
 
 ## Design by Contract
 
-Contract clauses are keyword parts of the fold spec — the same block mechanism, no
-special language forms.
+Contract clauses are keyword parts of the fold spec — the same block mechanism, no special language
+forms.
 
 ```lapis
 data Stack
@@ -359,12 +361,12 @@ data Stack
         Push value rest -> Family Push value: value rest: (rest append: val)
 ```
 
-| Clause | Meaning |
-|---|---|
-| `invariant:` | Checked on every mutation; declared per-variant |
-| `demands:` | Precondition; checked before fold executes |
-| `ensures:` | Postcondition; `old` is the pre-call snapshot |
-| `rescue:` | Structured recovery; `retry` re-runs with new args |
+| Clause       | Meaning                                            |
+| ------------ | -------------------------------------------------- |
+| `invariant:` | Checked on every mutation; declared per-variant    |
+| `demands:`   | Precondition; checked before fold executes         |
+| `ensures:`   | Postcondition; `old` is the pre-call snapshot      |
+| `rescue:`    | Structured recovery; `retry` re-runs with new args |
 
 ---
 
@@ -398,8 +400,8 @@ Ancestor reachableFrom: closed from: {'alice'}    "=> {'bob', 'carol', 'dave'}"
 Ancestor reachingTo: closed to: {'dave'}          "=> {'alice', 'bob', 'carol'}"
 ```
 
-The join invariant for `Transitive` (`hop destination = rest origin`) is auto-generated
-from the declared `origin` and `destination` projections.
+The join invariant for `Transitive` (`hop destination = rest origin`) is auto-generated from the
+declared `origin` and `destination` projections.
 
 ---
 
@@ -425,9 +427,9 @@ PathFinder explore: (start: 'a', goal: 'e', graph: myGraph)
 PathFinder explore: (start: 'a', goal: 'e', graph: myGraph) options: (maxResults: 1)
 ```
 
-`[output: #path]`, `[accept: #solved]`, `[done: #done]` are cospan projection
-declarations — they name the observer fields that serve each coalgebraic role.
-`explore:` drives the greatest-fixpoint coinductive loop.
+`[output: #path]`, `[accept: #solved]`, `[done: #done]` are cospan projection declarations — they
+name the observer fields that serve each coalgebraic role. `explore:` drives the greatest-fixpoint
+coinductive loop.
 
 ---
 
@@ -452,23 +454,23 @@ asynchronously.
 
 ## Syntax Summary
 
-| Lapis construct | Description |
-|---|---|
-| `data` + indented body | Algebraic data type: variants and operations |
-| `behavior` + indented body | Final coalgebra: observers, unfolds, folds, maps, merges |
-| `fold name <spec>` + indented cases | Structural dispatch — catamorphism; replaces `ifTrue:ifFalse:` |
-| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism |
-| `merge name <#a, #b>` | Fold-fold fusion (single-traversal composition) |
-| `protocol` + indented body | Trait / interface with optional default method bodies |
-| `relation` + indented body | Data ADT with allegory / Datalog operations |
-| `query` + indented body | Behavior with cospan structure / Prolog-style search |
-| `io` + indented body | Mealy machine: state fields + PascalCase step handlers |
-| `[params \| expr]` | First-class block value (lambda) — used for callbacks, guards, and contract clauses |
-| `(key: val, ...)` | Inline spec or named-argument record |
-| `Variant fields -> body` | Pattern case: `->` separates pattern from body; single-expression bodies inline, multi-line bodies indent below |
-| `in: paramName Type` | Names the `in:` argument for use across all case arms of a fold or unfold |
-| `old fieldName` | Raw pre-fold sub-node (paramorphism) |
-| `prev fieldName` | Previous fold result, one step back (histomorphism) |
-| `aux foldName` | Auxiliary fold result (zygomorphism) |
-| `self` | Current instance, always in scope |
-| `Family` / `Self` | Recursive self-reference (data / behavior) |
+| Lapis construct                            | Description                                                                                                     |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `data` + indented body                     | Algebraic data type: variants and operations                                                                    |
+| `behavior` + indented body                 | Final coalgebra: observers, unfolds, folds, maps, merges                                                        |
+| `fold name <spec>` + indented cases        | Structural dispatch — catamorphism; replaces `ifTrue:ifFalse:`                                                  |
+| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism                                                                           |
+| `merge name <#a, #b>`                      | Fold-fold fusion (single-traversal composition)                                                                 |
+| `protocol` + indented body                 | Trait / interface with optional default method bodies                                                           |
+| `relation` + indented body                 | Data ADT with allegory / Datalog operations                                                                     |
+| `query` + indented body                    | Behavior with cospan structure / Prolog-style search                                                            |
+| `io` + indented body                       | Mealy machine: state fields + PascalCase step handlers                                                          |
+| `[params \| expr]`                         | First-class block value (lambda) — used for callbacks, guards, and contract clauses                             |
+| `(key: val, ...)`                          | Inline spec or named-argument record                                                                            |
+| `Variant fields -> body`                   | Pattern case: `->` separates pattern from body; single-expression bodies inline, multi-line bodies indent below |
+| `in: paramName Type`                       | Names the `in:` argument for use across all case arms of a fold or unfold                                       |
+| `old fieldName`                            | Raw pre-fold sub-node (paramorphism)                                                                            |
+| `prev fieldName`                           | Previous fold result, one step back (histomorphism)                                                             |
+| `aux foldName`                             | Auxiliary fold result (zygomorphism)                                                                            |
+| `self`                                     | Current instance, always in scope                                                                               |
+| `Family` / `Self`                          | Recursive self-reference (data / behavior)                                                                      |
