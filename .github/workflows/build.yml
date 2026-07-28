@@ -1,24 +1,24 @@
 name: build
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - name: Format check
-        run: deno fmt --check
-      - name: Lint
-        run: deno lint
-      - name: Type check
-        run: deno check src/index.ts
-      - name: Test
-        run: deno test
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: denoland/setup-deno@v2
+              with:
+                  deno-version: v2.x
+            - name: Format check
+              run: deno fmt --check
+            - name: Lint
+              run: deno lint
+            - name: Type check
+              run: deno check src/index.ts
+            - name: Test
+              run: deno test
