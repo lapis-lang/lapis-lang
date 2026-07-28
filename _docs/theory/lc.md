@@ -1,28 +1,26 @@
 # LC — The Lapis Core Calculus
 
-> **Status:** Draft v0.1. This document presents LC in TAPL style: syntax,
-> evaluation rules, typing rules, and soundness. It is the formal specification
-> that the implementation checks against. For design rationale, elaboration of
-> surface constructs, and discussion, see [`elaboration.md`](./elaboration.md)
-> and [`design-decisions.md`](../design-decisions.md).
+> **Status:** Draft v0.1. This document presents LC in TAPL style: syntax, evaluation rules, typing
+> rules, and soundness. It is the formal specification that the implementation checks against. For
+> design rationale, elaboration of surface constructs, and discussion, see
+> [`elaboration.md`](./elaboration.md) and [`design-decisions.md`](../design-decisions.md).
 
 ## 1. Overview
 
-LC (formally, $F_{<:\mu\nu}$) is **F<: with recursive and corecursive types**,
-where **fold and unfold are the only recursion forms**. Two properties define it:
+LC (formally, $F_{<:\mu\nu}$) is **F<: with recursive and corecursive types**, where **fold and
+unfold are the only recursion forms**. Two properties define it:
 
 1. **F<:.** Subtyping subsumes generics.
-2. **μ/ν, not general fix.** Data is μ (initial algebra); codata is ν (final
-   coalgebra). No `fix` or `Y`. Termination and productivity follow from structure.
+2. **μ/ν, not general fix.** Data is μ (initial algebra); codata is ν (final coalgebra). No `fix` or
+   `Y`. Termination and productivity follow from structure.
 
 The calculus is pure — no effect type or operation appears in the syntax.
 
-`cofold [T]` is an elimination form for codata (the dual of fold), not a
-recursion form — it observes, it does not recurse.
+`cofold [T]` is an elimination form for codata (the dual of fold), not a recursion form — it
+observes, it does not recurse.
 
-`match(pₖ)` is a value introduced by the lexer (external to the calculus).
-It appears as a term and a value, but no evaluation rule produces it; it is
-an axiom of the operational semantics.
+`match(pₖ)` is a value introduced by the lexer (external to the calculus). It appears as a term and
+a value, but no evaluation rule produces it; it is an axiom of the operational semantics.
 
 ## 2. Syntax
 
@@ -75,24 +73,24 @@ v ::= λx:σ. t                           closure
 
 ### 2.5 Notation
 
-| Notation | Meaning |
-|---|---|
-| `μ α. Σᵢ Cᵢ(σᵢ)` | recursive data type (sum of named variants) |
-| `μ α. Σᵢ pᵢ` | pattern-matched data type (sum of pattern constructors) |
-| `ν α. Πⱼ oⱼ(σⱼ)` | corecursive codata type (product of observers) |
-| `Token` | raw matched text (the one non-μ/ν primitive) |
-| `match(pₖ)` | pattern-matched construction (introduction via lexer match) |
-| `Fᵢ` | field type functor for variant Cᵢ: maps recursive position α to Cᵢ's field types |
-| `Gⱼ` | observer type functor for observer oⱼ: maps corecursive position α (Self) to oⱼ's type |
-| `Fᵢ(σ)[α := σ]` | substitute result type σ for recursive position α in variant Cᵢ's fields |
-| `Gⱼ(Σ)[α := Σ]` | substitute seed type Σ for Self in observer oⱼ's type |
-| `fold [T] t {Cᵢ → tᵢ}` | catamorphism over data `t : T` (handlers tᵢ) |
-| `unfold [T] s {oⱼ → gⱼ}` | anamorphism from seed `s : Σ` into codata `T` (generators gⱼ) |
-| `cofold [T] e {oⱼ → t}` | codata elimination (behavior fold; handler t receives all observations) |
-| `Λα <: σ. t` | bounded type abstraction (F<:) |
-| `σ <: τ` | subtyping |
-| `σ ∧ τ` | intersection type (protocol conformance) |
-| `Any` / `Nothing` | top / bottom of the subtyping lattice |
+| Notation                 | Meaning                                                                                |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| `μ α. Σᵢ Cᵢ(σᵢ)`         | recursive data type (sum of named variants)                                            |
+| `μ α. Σᵢ pᵢ`             | pattern-matched data type (sum of pattern constructors)                                |
+| `ν α. Πⱼ oⱼ(σⱼ)`         | corecursive codata type (product of observers)                                         |
+| `Token`                  | raw matched text (the one non-μ/ν primitive)                                           |
+| `match(pₖ)`              | pattern-matched construction (introduction via lexer match)                            |
+| `Fᵢ`                     | field type functor for variant Cᵢ: maps recursive position α to Cᵢ's field types       |
+| `Gⱼ`                     | observer type functor for observer oⱼ: maps corecursive position α (Self) to oⱼ's type |
+| `Fᵢ(σ)[α := σ]`          | substitute result type σ for recursive position α in variant Cᵢ's fields               |
+| `Gⱼ(Σ)[α := Σ]`          | substitute seed type Σ for Self in observer oⱼ's type                                  |
+| `fold [T] t {Cᵢ → tᵢ}`   | catamorphism over data `t : T` (handlers tᵢ)                                           |
+| `unfold [T] s {oⱼ → gⱼ}` | anamorphism from seed `s : Σ` into codata `T` (generators gⱼ)                          |
+| `cofold [T] e {oⱼ → t}`  | codata elimination (behavior fold; handler t receives all observations)                |
+| `Λα <: σ. t`             | bounded type abstraction (F<:)                                                         |
+| `σ <: τ`                 | subtyping                                                                              |
+| `σ ∧ τ`                  | intersection type (protocol conformance)                                               |
+| `Any` / `Nothing`        | top / bottom of the subtyping lattice                                                  |
 
 ## 3. Evaluation
 
@@ -161,9 +159,9 @@ cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
 ### 4.1 Function subtyping
 
 ```
-   Δ ⊢ τ₁ <: σ₁    Δ ⊢ σ₂ <: τ₂
-   ─────────────────────────────                (S-Fun)
-       Δ ⊢ σ₁ → σ₂ <: τ₁ → τ₂
+Δ ⊢ τ₁ <: σ₁    Δ ⊢ σ₂ <: τ₂
+─────────────────────────────                (S-Fun)
+    Δ ⊢ σ₁ → σ₂ <: τ₁ → τ₂
 ```
 
 ### 4.2 Data subtyping (μ-types)
@@ -171,19 +169,19 @@ cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
 **Width** (more variants = subtype):
 
 ```
-   T = μ α. Σᵢ∈I Cᵢ(Fᵢ(α))     T' = μ α. Σⱼ∈J Cⱼ(F'ⱼ(α))     J ⊆ I
-   (∀ j ∈ J) Δ ⊢ Fⱼ(α) <: F'ⱼ(α)   (T's field types <: T''s, for shared variants)
-   ────────────────────────────────────────────────────────────────  (S-Data-Width)
-                       Δ ⊢ T <: T'
+T = μ α. Σᵢ∈I Cᵢ(Fᵢ(α))     T' = μ α. Σⱼ∈J Cⱼ(F'ⱼ(α))     J ⊆ I
+(∀ j ∈ J) Δ ⊢ Fⱼ(α) <: F'ⱼ(α)   (T's field types <: T''s, for shared variants)
+────────────────────────────────────────────────────────────────  (S-Data-Width)
+                    Δ ⊢ T <: T'
 ```
 
 **Depth** (field narrowing = subtype):
 
 ```
-   T = μ α. Σᵢ Cᵢ(Fᵢ(α))     T' = μ α. Σᵢ Cᵢ(F'ᵢ(α))     (same variants)
-   (∀ i) Δ, α <: T' ⊢ Fᵢ(α) <: F'ᵢ(α)   (T's field types <: T''s)
-   ────────────────────────────────────────────────────────────────  (S-Data-Depth)
-                       Δ ⊢ T <: T'
+T = μ α. Σᵢ Cᵢ(Fᵢ(α))     T' = μ α. Σᵢ Cᵢ(F'ᵢ(α))     (same variants)
+(∀ i) Δ, α <: T' ⊢ Fᵢ(α) <: F'ᵢ(α)   (T's field types <: T''s)
+────────────────────────────────────────────────────────────────  (S-Data-Depth)
+                    Δ ⊢ T <: T'
 ```
 
 ### 4.3 Codata subtyping (ν-types)
@@ -191,19 +189,19 @@ cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
 **Width** (more observers = subtype):
 
 ```
-   T = ν α. Πⱼ∈J oⱼ(Gⱼ(α))     T' = ν α. Πⱼ∈I oⱼ(G'ⱼ(α))     J ⊇ I
-   (∀ i ∈ I) Δ, α <: T' ⊢ G'ᵢ(α) <: Gᵢ(α)   (T''s observer types <: T's, contravariant)
-   ────────────────────────────────────────────────────────────────  (S-Codata-Width)
-                       Δ ⊢ T <: T'
+T = ν α. Πⱼ∈J oⱼ(Gⱼ(α))     T' = ν α. Πⱼ∈I oⱼ(G'ⱼ(α))     J ⊇ I
+(∀ i ∈ I) Δ, α <: T' ⊢ G'ᵢ(α) <: Gᵢ(α)   (T''s observer types <: T's, contravariant)
+────────────────────────────────────────────────────────────────  (S-Codata-Width)
+                    Δ ⊢ T <: T'
 ```
 
 **Depth** (observer type narrowing = subtype):
 
 ```
-   T = ν α. Πⱼ oⱼ(Gⱼ(α))     T' = ν α. Πⱼ oⱼ(G'ⱼ(α))     (same observers)
-   (∀ j) Δ, α <: T' ⊢ G'ⱼ(α) <: Gⱼ(α)   (T''s observer types <: T's, contravariant)
-   ────────────────────────────────────────────────────────────────  (S-Codata-Depth)
-                       Δ ⊢ T <: T'
+T = ν α. Πⱼ oⱼ(Gⱼ(α))     T' = ν α. Πⱼ oⱼ(G'ⱼ(α))     (same observers)
+(∀ j) Δ, α <: T' ⊢ G'ⱼ(α) <: Gⱼ(α)   (T''s observer types <: T's, contravariant)
+────────────────────────────────────────────────────────────────  (S-Codata-Depth)
+                    Δ ⊢ T <: T'
 ```
 
 ### 4.4 Intersection subtyping
@@ -250,55 +248,54 @@ cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
 ### 5.2 Fold (catamorphism — data elimination)
 
 ```
-   T = μ α. Σᵢ Cᵢ(Fᵢ(α))
-   Γ ⊢ e : T
-   Γ ⊢ tᵢ : Fᵢ(σ)[α := σ] → σ   (for each variant Cᵢ)
-   ────────────────────────────────────────────────────────────────  (T-Fold)
-   Γ ⊢ fold [T] e {Cᵢ(xⱼ) → tᵢ} : σ
+T = μ α. Σᵢ Cᵢ(Fᵢ(α))
+Γ ⊢ e : T
+Γ ⊢ tᵢ : Fᵢ(σ)[α := σ] → σ   (for each variant Cᵢ)
+────────────────────────────────────────────────────────────────  (T-Fold)
+Γ ⊢ fold [T] e {Cᵢ(xⱼ) → tᵢ} : σ
 ```
 
 ### 5.2b Pattern-matched fold
 
 ```
-   T = μ α. Σᵢ pᵢ
-   Γ ⊢ e : T
-   Γ ⊢ tᵢ : Token → σ   (for each pattern pᵢ)
-   ────────────────────────────────────────────────────────────────  (T-FoldMatch)
-   Γ ⊢ fold [T] e {pᵢ → tᵢ} : σ
+T = μ α. Σᵢ pᵢ
+Γ ⊢ e : T
+Γ ⊢ tᵢ : Token → σ   (for each pattern pᵢ)
+────────────────────────────────────────────────────────────────  (T-FoldMatch)
+Γ ⊢ fold [T] e {pᵢ → tᵢ} : σ
 ```
 
 ### 5.3 Observation (codata elimination)
 
 ```
-   T = ν α. Πⱼ oⱼ(Gⱼ(α))     oₖ ∈ {oⱼ}
-   Γ ⊢ e : T
-   ────────────────────────────────────────────────────────────────  (T-Obs)
-   Γ ⊢ e.oₖ : Gₖ(T)[α := T]
+T = ν α. Πⱼ oⱼ(Gⱼ(α))     oₖ ∈ {oⱼ}
+Γ ⊢ e : T
+────────────────────────────────────────────────────────────────  (T-Obs)
+Γ ⊢ e.oₖ : Gₖ(T)[α := T]
 ```
 
 ### 5.4 Unfold (anamorphism — codata introduction)
 
 ```
-   T = ν α. Πⱼ oⱼ(Gⱼ(α))
-   Γ ⊢ s : Σ
-   Γ ⊢ gⱼ : Σ → Gⱼ(Σ)[α := Σ]   (for each observer oⱼ)
-   ────────────────────────────────────────────────────────────────  (T-Unfold)
-   Γ ⊢ unfold [T] s {oⱼ → gⱼ} : T
+T = ν α. Πⱼ oⱼ(Gⱼ(α))
+Γ ⊢ s : Σ
+Γ ⊢ gⱼ : Σ → Gⱼ(Σ)[α := Σ]   (for each observer oⱼ)
+────────────────────────────────────────────────────────────────  (T-Unfold)
+Γ ⊢ unfold [T] s {oⱼ → gⱼ} : T
 ```
 
 ### 5.5 Cofold (codata elimination — behavior fold)
 
-`cofold` is the codata dual of `fold`: it eliminates a codata value by
-observing all observers simultaneously (the product). `T-Obs` observes one
-observer at a time; `T-Cofold` observes all at once, with continuation fields
-exposed as fold functions.
+`cofold` is the codata dual of `fold`: it eliminates a codata value by observing all observers
+simultaneously (the product). `T-Obs` observes one observer at a time; `T-Cofold` observes all at
+once, with continuation fields exposed as fold functions.
 
 ```
-   T = ν α. Πⱼ oⱼ(Gⱼ(α))
-   Γ ⊢ e : T
-   Γ ⊢ t : Πⱼ(Gⱼ(σ)[α := σ]) → σ
-   ────────────────────────────────────────────────────────────────  (T-Cofold)
-   Γ ⊢ cofold [T] e {oⱼ(xⱼ) → t} : σ
+T = ν α. Πⱼ oⱼ(Gⱼ(α))
+Γ ⊢ e : T
+Γ ⊢ t : Πⱼ(Gⱼ(σ)[α := σ]) → σ
+────────────────────────────────────────────────────────────────  (T-Cofold)
+Γ ⊢ cofold [T] e {oⱼ(xⱼ) → t} : σ
 ```
 
 ### 5.6 Bounded polymorphism (F<:)
@@ -329,41 +326,39 @@ exposed as fold functions.
 
 ### 6.1 Progress
 
-**Theorem (Progress):** If $\Gamma \vdash t : \sigma$ (with $\Gamma$ closed),
-then either $t$ is a value or $t \to t'$ for some $t'$.
+**Theorem (Progress):** If $\Gamma \vdash t : \sigma$ (with $\Gamma$ closed), then either $t$ is a
+value or $t \to t'$ for some $t'$.
 
 **Sketch:** By induction on the typing derivation.
 
-- **Fold:** `fold [T] e {Cᵢ → tᵢ}` — `e` is either a value or steps. If
-  `e = Cₖ(vⱼ)`, the fold steps to `tₖ[xⱼ ↦ vⱼ']` (E-Fold). If `e = match(pₖ)`, the
-  fold steps to `tₖ[match ↦ tok]` (E-FoldMatch). Since `T` is a μ-type (finite), the
-  recursion terminates.
+- **Fold:** `fold [T] e {Cᵢ → tᵢ}` — `e` is either a value or steps. If `e = Cₖ(vⱼ)`, the fold steps
+  to `tₖ[xⱼ ↦ vⱼ']` (E-Fold). If `e = match(pₖ)`, the fold steps to `tₖ[match ↦ tok]` (E-FoldMatch).
+  Since `T` is a μ-type (finite), the recursion terminates.
 
-- **Unfold:** `unfold [T] s {oⱼ → gⱼ}` is a value. It does not step until observed.
-  Observation `e.oₖ` steps to `gₖ(s)` (E-Obs), productive by the typing of `gₖ`.
+- **Unfold:** `unfold [T] s {oⱼ → gⱼ}` is a value. It does not step until observed. Observation
+  `e.oₖ` steps to `gₖ(s)` (E-Obs), productive by the typing of `gₖ`.
 
-- **Cofold:** Steps by observing `e` and applying the handler (E-Cofold). Each
-  step produces one observation.
+- **Cofold:** Steps by observing `e` and applying the handler (E-Cofold). Each step produces one
+  observation.
 
 ### 6.2 Preservation
 
-**Theorem (Preservation):** If $\Gamma \vdash t : \sigma$ and $t \to t'$,
-then $\Gamma \vdash t' : \sigma$.
+**Theorem (Preservation):** If $\Gamma \vdash t : \sigma$ and $t \to t'$, then
+$\Gamma \vdash t' : \sigma$.
 
 **Sketch:** By induction on the typing derivation, case on the step.
 
-- **E-Fold:** `fold [T] (Cₖ(vⱼ)) {Cᵢ → tᵢ} → tₖ[xⱼ ↦ vⱼ']`. By T-Fold,
-  `tₖ : Fₖ(σ)[α:=σ] → σ` and `vⱼ' : Fₖ(σ)[α:=σ]`. By the typing of `tₖ`, the
-  result is `σ`.
+- **E-Fold:** `fold [T] (Cₖ(vⱼ)) {Cᵢ → tᵢ} → tₖ[xⱼ ↦ vⱼ']`. By T-Fold, `tₖ : Fₖ(σ)[α:=σ] → σ` and
+  `vⱼ' : Fₖ(σ)[α:=σ]`. By the typing of `tₖ`, the result is `σ`.
 
-- **E-FoldMatch:** `fold [T] (match(pₖ)) {pᵢ → tᵢ} → tₖ[match ↦ tok]`. By
-  T-FoldMatch, `tₖ : Token → σ` and `tok : Token`. Result is `σ`.
+- **E-FoldMatch:** `fold [T] (match(pₖ)) {pᵢ → tᵢ} → tₖ[match ↦ tok]`. By T-FoldMatch,
+  `tₖ : Token → σ` and `tok : Token`. Result is `σ`.
 
-- **E-Obs:** `e.oₖ → gₖ(s)`. By T-Unfold, `gₖ : Σ → Gₖ(Σ)[α:=Σ]` and `s : Σ`.
-  Result is `Gₖ(Σ)[α:=Σ]`, consistent with `Gₖ(T)[α:=T]` by the unfold's typing.
+- **E-Obs:** `e.oₖ → gₖ(s)`. By T-Unfold, `gₖ : Σ → Gₖ(Σ)[α:=Σ]` and `s : Σ`. Result is
+  `Gₖ(Σ)[α:=Σ]`, consistent with `Gₖ(T)[α:=T]` by the unfold's typing.
 
-- **E-TApp:** `[α ↦ T₂] t`. By the substitution lemma, the result type is
-  `τ[α:=T₂]`, and `T₂ <: σ` (the bound) ensures validity.
+- **E-TApp:** `[α ↦ T₂] t`. By the substitution lemma, the result type is `τ[α:=T₂]`, and `T₂ <: σ`
+  (the bound) ensures validity.
 
 **Substitution lemma:** If `Δ, α <: σ ⊢ τ₁ <: τ₂` and `Δ ⊢ T₂ <: σ`, then
 `Δ ⊢ τ₁[α:=T₂] <: τ₂[α:=T₂]` (Pierce & Steffen).

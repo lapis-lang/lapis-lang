@@ -1,0 +1,96 @@
+/**
+ * Polymorphism and cofold tests — verify T-TAbs, T-TApp, and T-Cofold.
+ */
+
+import { LCEval, LCTypeCheck, TypeRegistry } from "../src/index.ts"
+import { Any, CodataType, DataType, Field, Observer, TypeEnv, Variant } from "../src/core/types.ts"
+import { ValueEnv } from "../src/core/values.ts"
+
+import { assert, assertEquals } from "@std/assert"
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+const StackType = new DataType("Stack", [])
+StackType.variants.push(
+    new Variant("Empty", []),
+    new Variant("Push", [new Field("value", Any, false), new Field("rest", StackType, true)]),
+)
+
+const StreamType = new CodataType("Stream", [])
+;(StreamType as unknown as { observers: Observer[] }).observers = [
+    new Observer("head", Any, false),
+    new Observer("tail", StreamType, true),
+]
+
+const NatType = new DataType("Nat", [])
+NatType.variants.push(
+    new Variant("Zero", []),
+    new Variant("Succ", [new Field("pred", NatType, true)]),
+)
+
+const registry = new TypeRegistry()
+registry.register(StackType)
+registry.register(StreamType)
+registry.register(NatType)
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+Deno.test("Polymorphism: ^alpha <: Any. \\x:Any. x type-checks", () => {
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("^alpha <: Any. \\x:Any. x", new TypeEnv())
+    assert(result.size >= 1)
+    const [type] = result
+    // ∀α<:Any. (Any → Any) — a PolymorphicType, NOT a FunType
+    assertEquals(type.constructor.name, "PolymorphicType")
+})
+
+Deno.test("Polymorphism: (^alpha <: Any. \\x:Any. x) [Any] type-checks", () => {
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("(^alpha <: Any. \\x:Any. x) [Any]", new TypeEnv())
+    assert(result.size >= 1)
+    const [type] = result
+    // The result is Any → Any (the body type with α := Any)
+    assertEquals(type.constructor.name, "FunType")
+})
+
+Deno.test("Polymorphism: evaluate ^alpha <: Any. \\x:Any. x", () => {
+    const ev = new LCEval().setRegistry(registry)
+    const result = ev.parseWith("^alpha <: Any. \\x:Any. x", new ValueEnv())
+    assert(result.size >= 1)
+    // Type abstraction evaluates to the body value (type erasure)
+    const [val] = result
+    assert(val !== undefined)
+})
+
+Deno.test("Polymorphism: evaluate (^alpha <: Any. \\x:Any. x) [Any] Empty()", () => {
+    const ev = new LCEval().setRegistry(registry)
+    const result = ev.parseWith("(^alpha <: Any. \\x:Any. x) [Any] Empty()", new ValueEnv())
+    assert(result.size >= 1)
+    const [val] = result
+    // Type application evaluates the body, then applies to the argument
+    assert(val !== undefined)
+})
+
+Deno.test("Cofold: cofold [Stream] (unfold [Stream] Zero() { head -> self, tail -> self }) { head(h) -> h } type-checks", () => {
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith(
+        "cofold [Stream] (unfold [Stream] Zero() { head -> self, tail -> self }) { head(h) -> h }",
+        new TypeEnv(),
+    )
+    // Cofold type-checks — the result type is the handler body type
+    assert(result.size >= 1)
+})
+
+Deno.test("Cofold: evaluate cofold [Stream] (unfold ... { head -> Zero(), ... }) { head(h) -> h } produces Zero", () => {
+    const ev = new LCEval().setRegistry(registry)
+    const result = ev.parseWith(
+        "cofold [Stream] (unfold [Stream] Zero() { head -> Zero(), tail -> self }) { head(h) -> h }",
+        new ValueEnv(),
+    )
+    assert(result.size >= 1, "should have at least one result")
+    // Find the non-undefined result (grammar ambiguity may produce some undefined)
+    const val = [...result].find((v) => v !== undefined && v !== null)
+    assert(val !== undefined, "should produce a value")
+    assert((val as { kind?: string })?.kind === "variantVal")
+    assertEquals((val as { variantName?: string })?.variantName, "Zero")
+})

@@ -2,7 +2,8 @@
 
 # Compiling to Super-combinators
 
-Compiling to Lambda Calculus has disadvantages. 
+Compiling to Lambda Calculus has disadvantages.
+
 - May create multiple copies of the graph
 - Loss of sharing when copying
 - difficult to compile to efficient code
