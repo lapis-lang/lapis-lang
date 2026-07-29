@@ -42,7 +42,7 @@ registry.register(StreamType)
 Deno.test("LCEval: \\x:Any. x evaluates to a closure", () => {
     const ev = new LCEval().setRegistry(registry)
     const result = ev.parseWith("\\x:Any. x", new ValueEnv())
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof SpanClosure)
     assertEquals(val.param, "x")
@@ -51,7 +51,7 @@ Deno.test("LCEval: \\x:Any. x evaluates to a closure", () => {
 Deno.test("LCEval: (\\x:Any. x) Empty() evaluates to Empty", () => {
     const ev = new LCEval().setRegistry(registry)
     const result = ev.parseWith("(\\x:Any. x) Empty()", new ValueEnv())
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Empty")
@@ -60,7 +60,7 @@ Deno.test("LCEval: (\\x:Any. x) Empty() evaluates to Empty", () => {
 Deno.test("LCEval: let x:Any = Empty() in x evaluates to Empty", () => {
     const ev = new LCEval().setRegistry(registry)
     const result = ev.parseWith("let x:Any = Empty() in x", new ValueEnv())
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Empty")
@@ -69,7 +69,7 @@ Deno.test("LCEval: let x:Any = Empty() in x evaluates to Empty", () => {
 Deno.test("LCEval: Empty() evaluates to VariantVal", () => {
     const ev = new LCEval().setRegistry(registry)
     const result = ev.parseWith("Empty()", new ValueEnv())
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Empty")
@@ -78,7 +78,7 @@ Deno.test("LCEval: Empty() evaluates to VariantVal", () => {
 Deno.test("LCEval: Push(Empty(), Empty()) evaluates to VariantVal", () => {
     const ev = new LCEval().setRegistry(registry)
     const result = ev.parseWith("Push(Empty(), Empty())", new ValueEnv())
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Push")
@@ -92,7 +92,7 @@ Deno.test("LCEval: fold [Stack] Empty() { Empty() -> Empty(), Push(v rest) -> re
         "fold [Stack] Empty() { Empty() -> Empty(), Push(v rest) -> rest }",
         new ValueEnv(),
     )
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
     // fold on Empty() → Empty handler → Empty()
@@ -105,7 +105,7 @@ Deno.test("LCEval: fold [Stack] Push(Empty(), Empty()) { Empty() -> Empty(), Pus
         "fold [Stack] Push(Empty(), Empty()) { Empty() -> Empty(), Push(v rest) -> rest }",
         new ValueEnv(),
     )
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     // fold on Push(Empty(), Empty()) → Push handler → rest = Empty()
@@ -118,7 +118,7 @@ Deno.test("LCEval: unfold [Stream] Empty() { head -> Empty(), tail -> self } eva
         "unfold [Stream] Empty() { head -> Empty(), tail -> self }",
         new ValueEnv(),
     )
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof SpanCodataVal)
     assertEquals(val.codataType, StreamType)
@@ -130,7 +130,7 @@ Deno.test("LCEval: (unfold [Stream] Empty() { head -> Empty(), tail -> self }).h
         "(unfold [Stream] Empty() { head -> Empty(), tail -> self }).head",
         new ValueEnv(),
     )
-    assert(result.size >= 1, "should have at least one result")
+    assert(result.size === 1, "should have at least one result")
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Empty")

@@ -40,7 +40,7 @@ Deno.test("Codata: type-check unfold [Stream] Zero() { head -> self, tail -> sel
         "unfold [Stream] Zero() { head -> self, tail -> self }",
         new TypeEnv(),
     )
-    assert(result.size >= 1)
+    assert(result.size === 1)
     const [type] = result
     assertEquals(type, StreamType)
 })
@@ -51,7 +51,7 @@ Deno.test("Codata: evaluate unfold produces codata value", () => {
         "unfold [Stream] Zero() { head -> Zero(), tail -> self }",
         new ValueEnv(),
     )
-    assert(result.size >= 1)
+    assert(result.size === 1)
     const [val] = result
     assert(val instanceof SpanCodataVal)
     assertEquals(val.codataType, StreamType)
@@ -63,7 +63,7 @@ Deno.test("Codata: evaluate observation (head) produces Zero", () => {
         "(unfold [Stream] Zero() { head -> Zero(), tail -> self }).head",
         new ValueEnv(),
     )
-    assert(result.size >= 1)
+    assert(result.size === 1)
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Zero")
@@ -75,7 +75,7 @@ Deno.test("Codata: type-check observation (head) has type Any", () => {
         "(unfold [Stream] Zero() { head -> self, tail -> self }).head",
         new TypeEnv(),
     )
-    assert(result.size >= 1)
+    assert(result.size === 1)
     const [type] = result
     assertEquals(type, Any)
 })
@@ -86,7 +86,7 @@ Deno.test("Codata: type-check observation (tail) has type Stream", () => {
         "(unfold [Stream] Zero() { head -> self, tail -> self }).tail",
         new TypeEnv(),
     )
-    assert(result.size >= 1)
+    assert(result.size === 1)
     const [type] = result
     assertEquals(type, StreamType)
 })

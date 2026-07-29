@@ -168,7 +168,7 @@ feature:
 
 ## Attribute grammars + zipper-grammar (renamed from derivative-parser)
 
-- Parser library now published to JSR as `@lapis-lang/zipper-grammar@3.0.0`.
+- Parser library now published to JSR as `@lapis-lang/zipper-grammar@4.1.0`.
 - v2.1.0 adds: `chain` (monadic bind) for L-attributed one-pass parsing, grammar-native contracts
   (`@requires`, `@ensures`, `@invariant`, `@rescue`), `diagnostic()` for failure reporting.
 - v2.2.0 adds: `_forward` (higher-order attributes — one-pass evaluation via re-parsing substrings

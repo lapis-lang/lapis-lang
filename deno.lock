@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@lapis-lang/zipper-grammar@3.0.0": "3.0.0",
-    "jsr:@lapis-lang/zipper-grammar@4.0.0": "4.0.0",
+    "jsr:@lapis-lang/zipper-grammar@4.1.0": "4.1.0",
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14"
@@ -11,8 +11,8 @@
     "@lapis-lang/zipper-grammar@3.0.0": {
       "integrity": "4be5de2c09534f370af6c379a54c89d8505ca7ca04d23b3d484819e6dc2db6dc"
     },
-    "@lapis-lang/zipper-grammar@4.0.0": {
-      "integrity": "32713113810bf55ff615fd999ee45e408ca455535c927303b500586595365e88"
+    "@lapis-lang/zipper-grammar@4.1.0": {
+      "integrity": "7a6d1efab3c90547723f7f97671af2b018788999ae0eeed341bdb6b121afeb22"
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
@@ -26,7 +26,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@lapis-lang/zipper-grammar@4.0.0",
+      "jsr:@lapis-lang/zipper-grammar@4.1.0",
       "jsr:@std/assert@^1.0.19"
     ]
   }
