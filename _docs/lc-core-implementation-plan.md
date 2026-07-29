@@ -1,9 +1,24 @@
-# LC Core Implementation Plan — zipper-grammar v4.0.0
+# LC Core Implementation Plan — zipper-grammar v4.1.0
 
-> **Status:** Active plan. zipper-grammar v4.0.0 is installed and all 54 existing tests pass. This
+> **Status:** Active plan. zipper-grammar v4.1.0 is installed and all 62 existing tests pass. This
 > plan incorporates the new library capabilities: `parseToFixpoint` (circular attribute flow),
 > `Symbol.metadata` (contract metadata), `DerivationTree` + `SemanticPass` (tree-consuming passes),
 > and `parseSegment` / `composeSegmentsL` (segment composition).
+>
+> **v4.0.2 note (issues #28, #30):** The duplicate-parse-results bug is **resolved**. v4.0.1 (issue
+> #28) fixed the cross-`DelayedExp` sharing but left a base case that compounded to 2ⁿ for multi-arg
+> variant construction via `sepBy` (reported as issue #30). v4.0.2 (PR #31) introduces **derivation
+> paths** — each parse value carries a path string identifying its derivation through `AltExp`
+> branches; values sharing a path are cosmetic duplicates (collapsed at the top-level forest),
+> values with distinct paths are genuine ambiguity (kept). Our grammar now produces
+> `result.size === 1` for all unambiguous inputs. The last remaining duplicate
+> (`fold
+> [Stack] Empty() { ... }` under the eval grammar) was traced to a **redundant `.opt()` on
+> a `sepBy`** in `foldHandler`/`spanFoldHandler`: `sepBy(p, sep)` already matches zero elements via
+> `epsilon([])`, so `.opt()` adds a second empty-matching path (returning `undefined`), producing
+> two distinct derivation paths that map to the same object value — `Set` keeps both by reference.
+> Removing the redundant `.opt()` (zipper-grammar issue #32 investigation) resolved it. All tests
+> now assert `result.size === 1`.
 
 ## Current State
 
@@ -72,6 +87,11 @@
    unambiguous inputs.
 
 3. **Update all tests** to assert `result.size === 1` instead of `result.size >= 1`.
+
+   > **Done (v4.0.2).** All tests now assert `result.size === 1`. The last duplicate (`fold` eval on
+   > a 0-arg variant) was a redundant `.opt()` on `sepBy` in `foldHandler`/`spanFoldHandler` —
+   > `sepBy` already matches empty, so `.opt()` added a second empty path. Removed in both
+   > `grammar.ts` and `eval_grammar.ts`. See zipper-grammar #32 for the full investigation.
 
 **Files:** `src/core/grammar.ts`, all test files
 

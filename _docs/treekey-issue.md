@@ -1,5 +1,11 @@
 # zipper-grammar issue: `treeKey` fails for objects with non-enumerable state
 
+> **Resolved in v3.0.1, present in v4.0.1.** `treeKey` now keys class instances (and
+> `Map`/`Set`/`Date`/…) **by identity** via a `WeakMap<object, number>`, falling back to content
+> keying only for primitives, arrays, and plain objects. `TypeEnv`/`ValueEnv` (private `Map` fields)
+> are therefore distinguished correctly with no `_id` workaround needed. This doc is kept for
+> historical context.
+
 ## Summary
 
 `@rule` parameterised methods cache per `(instance, method, treeKey(args))`. `treeKey` uses JSON

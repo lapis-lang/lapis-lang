@@ -499,7 +499,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("("),
             this.ws,
-            sepBy(this.ident, this.ws1).opt(),
+            sepBy(this.ident, this.ws1),
             this.ws,
             char(")"),
             this.ws,

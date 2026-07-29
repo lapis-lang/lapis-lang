@@ -25,8 +25,8 @@ const ast = new LCAST().setRegistry(registry)
 
 Deno.test("DerivationTree: parseToTree produces a tree with labeled nodes", () => {
     const { forest, trees } = ast.parseToTree("Empty()")
-    assert(forest.size >= 1)
-    assert(trees.length >= 1)
+    assert(forest.size === 1)
+    assert(trees.length === 1)
     const root = trees[0]!.root
     assert(root.label !== "")
     assert(root.span.end > root.span.start)
@@ -34,7 +34,7 @@ Deno.test("DerivationTree: parseToTree produces a tree with labeled nodes", () =
 
 Deno.test("DerivationTree: tree for Push(Empty(), Empty()) has correct structure", () => {
     const { trees } = ast.parseToTree("Push(Empty(), Empty())")
-    assert(trees.length >= 1)
+    assert(trees.length === 1)
     const root = trees[0]!.root
     // Root should cover the full input
     assertEquals(root.span.start, 0)
@@ -45,7 +45,7 @@ Deno.test("DerivationTree: tree for Push(Empty(), Empty()) has correct structure
 
 Deno.test("SemanticPass: depth pass computes tree depth", () => {
     const { trees } = ast.parseToTree("Empty()")
-    assert(trees.length >= 1)
+    assert(trees.length === 1)
 
     class DepthPass extends SemanticPass<{ depth: number }> {
         protected override defaultHandler(
@@ -64,7 +64,7 @@ Deno.test("SemanticPass: depth pass computes tree depth", () => {
 
 Deno.test("SemanticPass: production count pass counts @rule nodes", () => {
     const { trees } = ast.parseToTree("Push(Empty(), Empty())")
-    assert(trees.length >= 1)
+    assert(trees.length === 1)
 
     class CountPass extends SemanticPass<{ count: number }> {
         private count = 0

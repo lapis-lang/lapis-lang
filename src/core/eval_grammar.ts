@@ -396,7 +396,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("("),
             this.ws,
-            sepBy(this.ident, this.ws1).opt(),
+            sepBy(this.ident, this.ws1),
             this.ws,
             char(")"),
             this.ws,
