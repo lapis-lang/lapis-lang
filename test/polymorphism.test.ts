@@ -2,36 +2,16 @@
  * Polymorphism and cofold tests — verify T-TAbs, T-TApp, and T-Cofold.
  */
 
-import { LCEval, LCTypeCheck, TypeRegistry } from "../src/index.ts"
-import { Any, CodataType, DataType, Field, Observer, TypeEnv, Variant } from "../src/core/types.ts"
+import { LCEval, LCTypeCheck } from "../src/index.ts"
+import { TypeEnv } from "../src/core/types.ts"
 import { ValueEnv } from "../src/core/values.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const StackType = new DataType("Stack", [])
-StackType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [new Field("value", Any, false), new Field("rest", StackType, true)]),
-)
-
-const StreamType = new CodataType("Stream", [])
-;(StreamType as unknown as { observers: Observer[] }).observers = [
-    new Observer("head", Any, false),
-    new Observer("tail", StreamType, true),
-]
-
-const NatType = new DataType("Nat", [])
-NatType.variants.push(
-    new Variant("Zero", []),
-    new Variant("Succ", [new Field("pred", NatType, true)]),
-)
-
-const registry = new TypeRegistry()
-registry.register(StackType)
-registry.register(StreamType)
-registry.register(NatType)
+const { registry } = createTestFixtures()
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

@@ -6,29 +6,15 @@
  */
 
 import { isSubtype, join, meet } from "../src/index.ts"
-import { Any, DataType, Field, FunType, Nothing, Variant } from "../src/core/types.ts"
+import { Any, FunType, Nothing } from "../src/core/types.ts"
+import { createQueueType, createStackType } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
 // ── Types for testing ─────────────────────────────────────────────────────────
 
-const StackType = new DataType("Stack", [])
-StackType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [
-        new Field("value", Any, false),
-        new Field("rest", StackType, true),
-    ]),
-)
-
-const QueueType = new DataType("Queue", [])
-QueueType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Enq", [
-        new Field("value", Any, false),
-        new Field("rest", QueueType, true),
-    ]),
-)
+const StackType = createStackType()
+const QueueType = createQueueType()
 
 // ── Join tests ───────────────────────────────────────────────────────────────
 

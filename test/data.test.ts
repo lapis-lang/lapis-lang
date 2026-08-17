@@ -3,25 +3,16 @@
  * and evaluation on a Stack data type using concrete syntax.
  */
 
-import { LCAST, LCEval, LCTypeCheck, TypeRegistry } from "../src/index.ts"
-import { Any, DataType, Field, TypeEnv, Variant } from "../src/core/types.ts"
+import { LCAST, LCEval, LCTypeCheck } from "../src/index.ts"
+import { TypeEnv } from "../src/core/types.ts"
 import { ValueEnv, VariantVal } from "../src/core/values.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
-// ── Define the Stack data type ────────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const StackType = new DataType("Stack", [])
-StackType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [
-        new Field("value", Any, false),
-        new Field("rest", StackType, true),
-    ]),
-)
-
-const registry = new TypeRegistry()
-registry.register(StackType)
+const { registry, stack: StackType } = createTestFixtures()
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

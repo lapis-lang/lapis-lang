@@ -3,34 +3,17 @@
  * and evaluation on a Stream codata type using concrete syntax.
  */
 
-import { LCEval, LCTypeCheck, TypeRegistry } from "../src/index.ts"
-import { Any, CodataType, DataType, Field, Observer, TypeEnv, Variant } from "../src/core/types.ts"
+import { LCEval, LCTypeCheck } from "../src/index.ts"
+import { Any, TypeEnv } from "../src/core/types.ts"
 import { ValueEnv, VariantVal } from "../src/core/values.ts"
 import { SpanCodataVal } from "../src/core/eval_grammar.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
-// ── Define the Stream codata type ─────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const StreamType = new CodataType("Stream", [])
-;(StreamType as unknown as { observers: Observer[] }).observers = [
-    new Observer("head", Any, false),
-    new Observer("tail", StreamType, true),
-]
-
-// ── Define a Nat data type for stream elements ───────────────────────────────
-
-const NatType = new DataType("Nat", [])
-NatType.variants.push(
-    new Variant("Zero", []),
-    new Variant("Succ", [new Field("pred", NatType, true)]),
-)
-
-// ── Registry ──────────────────────────────────────────────────────────────────
-
-const registry = new TypeRegistry()
-registry.register(StreamType)
-registry.register(NatType)
+const { registry, stream: StreamType } = createTestFixtures()
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
