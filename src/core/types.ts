@@ -179,7 +179,7 @@ export class CodataType extends Type {
 
     constructor(
         readonly name: string,
-        observers: Observer[],
+        observers: Observer[] = [],
         parent: CodataType | null = null,
     ) {
         super()
