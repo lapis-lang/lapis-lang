@@ -5,7 +5,7 @@
 > plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26, #30–#35).
 >
 > **lang-forma migration note:** The grammar engine was migrated from `zipper-grammar` to its
-> successor `lang-forma` (drop-in API-compatible). `lang-forma` adds four feature families that
+> successor `lang-forma` (drop-in API-compatible). `lang-forma` adds six feature families that
 > subsume or accelerate existing PBIs — first-class inference rules (#30), metatheory verification
 > (#31), generative counterexample search (#32), property-based testing (#33), unparse (#34), and a
 > microKanren logic system (#35). See the PBI entries below for how each maps onto the roadmap.
@@ -103,7 +103,7 @@ with the current status, milestone, and dependencies.
 
 - **Status:** Open
 - **Assignee:** @mlhaufe
-- **Goal:** Replace the hand-rolled `LCTypeCheck.toInference()` with the library''s
+- **Goal:** Replace the hand-rolled `LCTypeCheck.toInference()` with the library's
   `Grammar.rules()` / `collectRules()`. The library `FormattedInferenceRule` shape is richer (side
   conditions, frame conditions, per-clause method linkage) and standardized, and `formatRule()`
   gives us the `lc.md` rule renderer that #26 needs.

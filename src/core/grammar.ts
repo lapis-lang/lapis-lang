@@ -41,7 +41,7 @@
  *   atomType      = "(" type ")" | typeName
  *
  * An abstract grammar declares the shared structure (productions), and concrete
- * subclasses implement semantic actions (AST builder, type checker, evaluator).
+ * subclasses implement semantic actions (type checker, evaluator).
  *
  * See _docs/theory/lc.md for the formal specification.
  */
