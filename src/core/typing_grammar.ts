@@ -43,7 +43,7 @@ import {
     sepBy,
     seq,
     type Span,
-} from "@lapis-lang/zipper-grammar"
+} from "@lapis-lang/lang-forma"
 
 import {
     Any,

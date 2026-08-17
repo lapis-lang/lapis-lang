@@ -1,7 +1,14 @@
-# LC Core Implementation Plan — zipper-grammar v4.1.0
+# LC Core Implementation Plan — lang-forma v1.1.0
 
-> **Status:** Active plan. zipper-grammar v4.1.0 is installed and all 58 existing tests pass. This
-> plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26).
+> **Status:** Active plan. `@lapis-lang/lang-forma@1.1.0` is installed (migrated from
+> `@lapis-lang/zipper-grammar@4.1.0` — a compatible superset) and all 57 existing tests pass. This
+> plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26, #30–#35).
+>
+> **lang-forma migration note:** The grammar engine was migrated from `zipper-grammar` to its
+> successor `lang-forma` (drop-in API-compatible). `lang-forma` adds four feature families that
+> subsume or accelerate existing PBIs — first-class inference rules (#30), metatheory verification
+> (#31), generative counterexample search (#32), property-based testing (#33), unparse (#34), and a
+> microKanren logic system (#35). See the PBI entries below for how each maps onto the roadmap.
 >
 > **v4.0.2 note (issues #28, #30):** The duplicate-parse-results bug is **resolved**. v4.0.1 (issue
 > #28) fixed the cross-`DelayedExp` sharing but left a base case that compounded to 2ⁿ for multi-arg
@@ -92,6 +99,17 @@ with the current status, milestone, and dependencies.
 - **Assignee:** @mlhaufe
 - **Scope:** Rewrite this document to match the current codebase state (this revision).
 
+#### PBI #30: Adopt lang-forma first-class inference rules (`Grammar.rules` / `collectRules`)
+
+- **Status:** Open
+- **Assignee:** @mlhaufe
+- **Goal:** Replace the hand-rolled `LCTypeCheck.toInference()` with the library''s
+  `Grammar.rules()` / `collectRules()`. The library `FormattedInferenceRule` shape is richer (side
+  conditions, frame conditions, per-clause method linkage) and standardized, and `formatRule()`
+  gives us the `lc.md` rule renderer that #26 needs.
+- **Files:** `src/core/typing_grammar.ts`, `src/core/index.ts`, `test/metadata.test.ts`
+- **Depends on:** Nothing. Unblocks #21, #26, #31.
+
 ### Milestone v0.2.0 — Sound core
 
 #### PBI #19: `Nothing` propagation in grammar-based type checker
@@ -140,6 +158,35 @@ with the current status, milestone, and dependencies.
 - **Files:** `src/core/typing_grammar.ts`, `src/core/eval_grammar.ts`, test files
 - **Depends on:** #19, #20 (Nothing and subsumption should be settled so Progress covers all cases).
 
+#### PBI #31: Metatheory verification — mechanize Progress + Preservation via `lang-forma`
+
+- **Status:** Open
+- **Assignee:** @mlhaufe
+- **Goal:** Use `lang-forma`''s metatheory engine (`Grammar.metatheory()`, `verifyMetatheory`,
+  `checkProgress`, `checkPreservation`) to _verify_ Progress and Preservation over the LC grammar''s
+  dynamic-semantics rules, instead of arguing them by hand. Subsumes the "add a Progress proof test"
+  task in #21 and adds Preservation (which #21 does not cover).
+- **Tasks:**
+  1. Add `@requires`/`@ensures` + `rule`/`formula`/`role` metadata to `LCEval` (the eval grammar
+     currently has none) — this is the encoding work #21 was already going to do for the type
+     checker, extended to the evaluator.
+  2. Add `test/metatheory.test.ts` — call `verifyMetatheory(LCEval, LCTypeCheck)`, assert
+     `report.progress.holds` and `report.preservation.holds`.
+- **Files:** `src/core/eval_grammar.ts`, `test/metatheory.test.ts`, `_docs/theory/`
+- **Depends on:** #30 (library rule shape), #19, #20 (core must be sound first). Subsumes the
+  verification half of #21.
+
+#### PBI #32: Generative counterexample search — dynamically test Progress + Preservation
+
+- **Status:** Open
+- **Assignee:** @mlhaufe
+- **Goal:** Use `lang-forma`''s `findCounterexamples(evalGrammar, typeCheckGrammar, options)` to
+  _generate_ well-formed terms and check Progress/Preservation dynamically — the dynamic complement
+  to the static metatheory in #31. Catches soundness bugs the static analysis misses (e.g., an
+  underspecified `@requires` premise).
+- **Files:** `test/counterexamples.test.ts`, `test/fixtures.ts`
+- **Depends on:** #31 (do the static check first), #19, #20. Companion to #31 in v0.2.0.
+
 ### Milestone v0.3.0 — Laws
 
 #### PBI #22: Law/properties machinery — make algebraic laws operationally exploitable
@@ -155,6 +202,21 @@ with the current status, milestone, and dependencies.
   3. Integration with the type system (e.g., law-based rewriting, law-driven optimization).
 - **Files:** TBD
 - **Depends on:** #21 (Progress contracts must be solid before laws can build on them).
+
+#### PBI #33: Property-based testing — `GrammarGenerator` / `ValueGenerator` (`forAll` + shrinking) for LC laws
+
+- **Status:** Open
+- **Assignee:** @mlhaufe
+- **Goal:** Use `lang-forma`''s native property-testing adapter (`Grammar.toGenerator()`,
+  `ValueGenerator.forAll()`) as the _verification harness_ for #22. Algebraic laws are
+  universally-quantified properties over well-formed terms; the library generates, checks, and
+  shrinks them with grammar-aware shrinking (no hand-written `Arbitrary<T>`).
+- **Tasks:**
+  1. `test/laws.test.ts` — scaffold + identity-fold law as proof-of-concept.
+  2. Tune `GeneratorOptions` (`maxDepth`, `maxRecursion`, `branchStrategy: "random"`).
+  3. Document the law-as-property pattern in `_docs/theory/`.
+- **Files:** `test/laws.test.ts`, `test/fixtures.ts`, `_docs/theory/`
+- **Depends on:** #22 (law declarations), #19, #20, #21 (core soundness). Belongs in v0.3.0.
 
 ### Milestone v0.4.0 — Patterns & surface
 
@@ -222,6 +284,41 @@ with the current status, milestone, and dependencies.
 - **Files:** All `src/` files, `_docs/theory/lc.md`
 - **Depends on:** #25 (surface language must land first).
 
+#### PBI #34: Unparse + pretty-print — `UnparsePass` / `Grammar.unparse` for round-tripping and error reporting
+
+- **Status:** Open
+- **Assignee:** @mlhaufe
+- **Goal:** Use `lang-forma`''s unparse facility (`Grammar.unparse(tree)`, `UnparsePass`) for (a)
+  round-trip verification (parse → tree → unparse → parse, assert equality) — valuable for the
+  surface elaboration in #25 — and (b) error reporting that surfaces the exact source span of a
+  type/eval error (the `Counterexample.source` field from #32 is already unparsed).
+- **Tasks:**
+  1. `test/unparse.test.ts` — round-trip tests over representative LC inputs.
+  2. Re-export `UnparsePass`, `unparse` from `src/core/index.ts`.
+  3. (Optional) store span/tree on `EvalErrorValue` for unparse-on-demand.
+- **Files:** `test/unparse.test.ts`, `src/core/index.ts`, (optional) `src/core/eval_grammar.ts`
+- **Depends on:** None for the round-trip test; #32 for the error-reporting wiring. Belongs in
+  v0.4.0 (most valuable once #25 lands, but the core round-trip can land earlier).
+
+#### PBI #35: Unification-based type inference — evaluate `lang-forma` microKanren for law-solving
+
+- **Status:** Open (design evaluation)
+- **Assignee:** @mlhaufe
+- **Goal:** Evaluate `lang-forma`''s microKanren logic system (`Var`, `Term`, `unify`, `fresh`,
+  `conj`, `disj`, `run`) for two uses: (1) strengthening Preservation via the `unification` field of
+  `checkPreservation` (#31), and (2) law-_solving_ for #22 (expressing a law as a relation and using
+  `run` to find the fused form). This is a _design evaluation_, not an implementation — the current
+  design avoids unification by requiring declared types + subtyping (#20).
+- **Tasks:**
+  1. Inspect `report.preservation.unification` in the metatheory test (#31) — is it populated?
+  2. Prototype a law-as-relation spike (`test/laws-prototype.test.ts`).
+  3. Decision gate: integrate the logic system into #22, or keep subtyping-only? Document in
+     `_docs/theory/`.
+- **Files:** `test/metatheory.test.ts` (extends #31), `test/laws-prototype.test.ts` (exploratory),
+  `_docs/theory/`
+- **Depends on:** #31. Informs #22. No milestone — land the evaluation before v0.3.0 design is
+  finalized.
+
 ## Dependency Graph
 
 ```
@@ -230,16 +327,25 @@ v0.1.1 — Clean core
   #16 (consolidate index.ts)
   #17 (remove/justify LCAST + Term)
   #18 (this document) ← in progress
+  #30 (adopt Grammar.rules)      ← no dependency; unblocks #21, #26, #31
       ↓
 v0.2.0 — Sound core
   #19 (Nothing propagation)      ← no dependency, do first
       ↓
   #20 (T-Sub subsumption)        ← depends on #19
       ↓
-  #21 (Progress @ensures)        ← depends on #19, #20
+  #21 (Progress @ensures)        ← depends on #19, #20, #30
+      ↓
+  #31 (metatheory verification)  ← depends on #30, #19, #20; subsumes #21 verification
+      ↓
+  #32 (generative counterexamples) ← depends on #31, #19, #20
       ↓
 v0.3.0 — Laws
   #22 (law/properties machinery) ← depends on #21
+      ↓
+  #33 (property-based testing)   ← depends on #22, #19, #20, #21
+      ↓
+  #35 (unification evaluation)   ← depends on #31; informs #22 (no milestone)
       ↓
 v0.4.0 — Patterns & surface
   #24 (T-Pattern)                ← no dependency, can start anytime
@@ -247,6 +353,8 @@ v0.4.0 — Patterns & surface
   #23 (T-FoldMatch + E-FoldMatch) ← depends on #24
       ↓
   #25 (surface elaboration)      ← depends on #23, #24
+      ↓
+  #34 (unparse + round-trip)     ← no dependency for core; #32 for error reporting
       ↓
   #26 (final cleanup)            ← depends on #25
 ```
@@ -258,12 +366,19 @@ v0.4.0 — Patterns & surface
 - [x] Every contract has `ContractMeta` with rule name + formula
 - [x] `toInference()` generates rules matching `lc.md` §5
 - [x] `DerivationTree` + `SemanticPass` validated on LC grammar
+- [x] Migrated to `@lapis-lang/lang-forma@1.1.0` (compatible superset of `zipper-grammar`)
+- [ ] Adopt `Grammar.rules()` / `collectRules()` — replace hand-rolled `toInference()` (#30)
 - [ ] `Nothing` propagation in grammar-based checker (#19)
 - [ ] T-Sub subsumption decided and implemented/documented (#20)
 - [ ] `@ensures` contracts fully encode the Progress theorem (#21)
+- [ ] Progress + Preservation mechanized via `verifyMetatheory` (#31)
+- [ ] Generative counterexample search via `findCounterexamples` (#32)
 - [ ] Law/properties machinery designed and implemented (#22)
+- [ ] Property-based law testing via `forAll` + grammar-aware shrinking (#33)
+- [ ] Unification evaluation for law-solving (#35)
 - [ ] T-Pattern: pattern-matched construction (#24)
 - [ ] T-FoldMatch + E-FoldMatch: pattern-matched fold (#23)
 - [ ] Surface language elaboration pipeline (#25)
+- [ ] Unparse + round-trip verification (#34)
 - [ ] Dead code removed, `lc.md` generated from grammar, exports consolidated (#15–#17, #26)
 - [ ] All tests pass, lint clean, format clean

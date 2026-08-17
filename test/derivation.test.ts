@@ -1,9 +1,13 @@
 /**
  * Derivation tree + SemanticPass tests — verify v4.0.0's two-phase
  * parse-to-tree + tree-consuming pass architecture works with the LC grammar.
+ *
+ * Uses `LCTypeCheck.parseToTree` to obtain derivation trees (the type checker
+ * is a one-pass grammar subclass; `parseToTree` captures the derivation
+ * structure regardless of the semantic action's result type).
  */
 
-import { type DerivationNode, LCAST, SemanticPass } from "../src/index.ts"
+import { type DerivationNode, LCTypeCheck, SemanticPass } from "../src/index.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -12,12 +16,12 @@ import { assert, assertEquals } from "@std/assert"
 
 const { registry } = createTestFixtures()
 
-const ast = new LCAST().setRegistry(registry)
+const tc = new LCTypeCheck().setRegistry(registry)
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 Deno.test("DerivationTree: parseToTree produces a tree with labeled nodes", () => {
-    const { forest, trees } = ast.parseToTree("Empty()")
+    const { forest, trees } = tc.parseToTree("Empty()")
     assert(forest.size === 1)
     assert(trees.length === 1)
     const root = trees[0]!.root
@@ -26,7 +30,7 @@ Deno.test("DerivationTree: parseToTree produces a tree with labeled nodes", () =
 })
 
 Deno.test("DerivationTree: tree for Push(Empty(), Empty()) has correct structure", () => {
-    const { trees } = ast.parseToTree("Push(Empty(), Empty())")
+    const { trees } = tc.parseToTree("Push(Empty(), Empty())")
     assert(trees.length === 1)
     const root = trees[0]!.root
     // Root should cover the full input
@@ -37,7 +41,7 @@ Deno.test("DerivationTree: tree for Push(Empty(), Empty()) has correct structure
 })
 
 Deno.test("SemanticPass: depth pass computes tree depth", () => {
-    const { trees } = ast.parseToTree("Empty()")
+    const { trees } = tc.parseToTree("Empty()")
     assert(trees.length === 1)
 
     class DepthPass extends SemanticPass<{ depth: number }> {
@@ -56,7 +60,7 @@ Deno.test("SemanticPass: depth pass computes tree depth", () => {
 })
 
 Deno.test("SemanticPass: production count pass counts @rule nodes", () => {
-    const { trees } = ast.parseToTree("Push(Empty(), Empty())")
+    const { trees } = tc.parseToTree("Push(Empty(), Empty())")
     assert(trees.length === 1)
 
     class CountPass extends SemanticPass<{ count: number }> {
