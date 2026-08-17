@@ -10,7 +10,7 @@
  * interference via shared mutable singletons.
  */
 
-import { TypeRegistry } from "../src/core/grammar.ts"
+import { TypeRegistry } from "../src/index.ts"
 import { Any, CodataType, DataType, Field, Observer, Variant } from "../src/core/types.ts"
 
 // ── Type factories ────────────────────────────────────────────────────────────

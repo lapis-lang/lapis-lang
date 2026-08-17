@@ -3,9 +3,8 @@
  * and evaluation on a Stack data type using concrete syntax.
  */
 
-import { LCEval, LCTypeCheck } from "../src/index.ts"
+import { LCEval, LCTypeCheck, ValueEnv, VariantVal } from "../src/index.ts"
 import { TypeEnv } from "../src/core/types.ts"
-import { ValueEnv, VariantVal } from "../src/core/values.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
