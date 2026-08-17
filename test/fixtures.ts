@@ -73,10 +73,11 @@ export function createStreamType(): CodataType {
 
 // ── Registry factory ──────────────────────────────────────────────────────────
 
-/** Fresh type instances bundled with the registry that owns them. */
+/** Fresh type instances, alongside a registry that references most of them. */
 export interface TestFixtures {
     registry: TypeRegistry
     stack: DataType
+    /** Not registered in `registry` (see `createTestFixtures` note). */
     queue: DataType
     nat: DataType
     bool: DataType
