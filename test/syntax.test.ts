@@ -4,17 +4,21 @@
  * Semantic meaning belongs to the typing and evaluation grammars. These tests
  * only establish that source text is accepted as a complete derivation and
  * that the retained tree exposes the expected production structure.
+ *
+ * Parse acceptance is verified through `LCTypeCheck.parseToTree`: if the
+ * grammar accepts the input, the parse forest is non-empty and the retained
+ * derivation tree covers the full source span.
  */
 
 import { assert, assertEquals } from "@std/assert"
-import { LCAST } from "../src/index.ts"
+import { LCTypeCheck } from "../src/index.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 const { registry } = createTestFixtures()
-const ast = new LCAST().setRegistry(registry)
+const tc = new LCTypeCheck().setRegistry(registry)
 
 function parse(input: string) {
-    return ast.parseToTree(input)
+    return tc.parseToTree(input)
 }
 
 Deno.test("Syntax: lambda and application consume the complete input", () => {

@@ -41,7 +41,7 @@
  *   atomType      = "(" type ")" | typeName
  *
  * An abstract grammar declares the shared structure (productions), and concrete
- * subclasses implement semantic actions (AST builder, type checker, evaluator).
+ * subclasses implement semantic actions (type checker, evaluator).
  *
  * See _docs/theory/lc.md for the formal specification.
  */
@@ -60,7 +60,7 @@ import {
     rule,
     sepBy,
     seq,
-} from "@lapis-lang/zipper-grammar"
+} from "@lapis-lang/lang-forma"
 
 import {
     Any,
@@ -74,24 +74,6 @@ import {
     type Type,
     TypeVar,
 } from "./types.ts"
-
-import {
-    App,
-    Cofold,
-    CofoldHandler,
-    Fold,
-    FoldHandler,
-    Lam,
-    Let,
-    Obs,
-    type Term,
-    TypeAbs,
-    TypeApp,
-    Unfold,
-    UnfoldGenerator,
-    Var,
-    VariantCon,
-} from "./terms.ts"
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
 
@@ -753,104 +735,6 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         return pred(
             (c) => c === " " || c === "\t" || c === "\n" || c === "\r",
             "<ws>",
-        )
-    }
-}
-
-// ── Concrete: AST builder ─────────────────────────────────────────────────────
-
-/**
- * AST builder — parses LC text into Term objects.
- * No context (ctx is null). Pure syntax.
- */
-export class LCAST extends AbstractLC<{ expr: Term; atom: Term; type: Type }> {
-    override start(): Parser<Term> {
-        return this.exprProd(null)
-    }
-
-    protected lam(param: string, type: Type, body: Term): Term {
-        return new Lam(param, type, body)
-    }
-
-    protected app(fn: Term, arg: Term): Term {
-        return new App(fn, arg)
-    }
-
-    protected let_(name: string, type: Type, def: Term, body: Term): Term {
-        return new Let(name, type, def, body)
-    }
-
-    protected varRef(name: string, _ctx: unknown): Term {
-        return new Var(name)
-    }
-
-    protected paren(e: Term): Term {
-        return e
-    }
-
-    protected variantCon(name: string, args: Term[]): Term {
-        const dataType = this.registry.lookupVariant(name)
-        if (!dataType) {
-            throw new Error(`unknown variant: ${name} — not registered in TypeRegistry`)
-        }
-        return new VariantCon(name, dataType, args)
-    }
-
-    protected obs(scrutinee: Term, observerName: string): Term {
-        const codataType = this.registry.lookupObserver(observerName)
-        if (!codataType) {
-            throw new Error(`unknown observer: ${observerName} — not registered in TypeRegistry`)
-        }
-        return new Obs(scrutinee, observerName, codataType)
-    }
-
-    protected fold(
-        dataType: DataType,
-        scrutinee: Term,
-        handlers: { variantName: string; bindings: string[]; body: Term }[],
-        resultType: Type,
-    ): Term {
-        return new Fold(
-            dataType,
-            scrutinee,
-            handlers.map((h) => new FoldHandler(h.variantName, h.bindings, h.body)),
-            resultType,
-        )
-    }
-
-    protected unfold(
-        codataType: CodataType,
-        seed: Term,
-        generators: { observerName: string; body: Term }[],
-        seedType: Type,
-    ): Term {
-        return new Unfold(
-            codataType,
-            seed,
-            generators.map((g) => new UnfoldGenerator(g.observerName, g.body)),
-            seedType,
-        )
-    }
-
-    protected typeAbs(tyVar: string, bound: Type, body: Term): Term {
-        return new TypeAbs(tyVar, bound, body)
-    }
-
-    protected typeApp(body: Term, argType: Type): Term {
-        return new TypeApp(body, argType)
-    }
-
-    protected cofold(
-        codataType: CodataType,
-        scrutinee: Term,
-        handler: { observerName: string; bindings: string[]; body: Term },
-        resultType: Type,
-    ): Term {
-        return new Cofold(
-            codataType,
-            scrutinee,
-            new CofoldHandler(handler.observerName, handler.bindings, handler.body),
-            resultType,
         )
     }
 }

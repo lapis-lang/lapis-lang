@@ -10,7 +10,7 @@
  */
 
 import type { DataType, Type } from "./types.ts"
-import type { Span } from "@lapis-lang/zipper-grammar"
+import type { Span } from "@lapis-lang/lang-forma"
 
 // ── Value ─────────────────────────────────────────────────────────────────────
 

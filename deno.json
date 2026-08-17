@@ -11,7 +11,7 @@
         "lint": "deno lint"
     },
     "imports": {
-        "@lapis-lang/zipper-grammar": "jsr:@lapis-lang/zipper-grammar@4.1.0",
+        "@lapis-lang/lang-forma": "jsr:@lapis-lang/lang-forma@1.1.0",
         "@std/assert": "jsr:@std/assert@^1.0.19"
     },
     "compilerOptions": {

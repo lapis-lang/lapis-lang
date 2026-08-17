@@ -27,28 +27,6 @@ export {
     Variant,
 } from "./types.ts"
 
-// Terms (lc.md §2.2)
-export {
-    App,
-    Cofold,
-    CofoldHandler,
-    Fold,
-    FoldHandler,
-    Lam,
-    Let,
-    Obs,
-    PatternFold,
-    PatternHandler,
-    PatternMatch,
-    Term,
-    TypeAbs,
-    TypeApp,
-    Unfold,
-    UnfoldGenerator,
-    Var,
-    VariantCon,
-} from "./terms.ts"
-
 // Values (lc.md §2.3)
 export { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
 
@@ -56,10 +34,10 @@ export { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
 // Grammar — concrete syntax for LC (parse, don't validate)
-export { AbstractLC, LCAST, type LCShape, TypeRegistry } from "./grammar.ts"
+export { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
 // Derivation trees + semantic passes
-export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/zipper-grammar"
+export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/lang-forma"
 
 // Type-checking grammar subclass (lc.md §5 — parse, don't validate)
 // One-pass type checker: parses LC text and produces types.

@@ -3,7 +3,7 @@
  * and evaluation on a Stack data type using concrete syntax.
  */
 
-import { LCAST, LCEval, LCTypeCheck } from "../src/index.ts"
+import { LCEval, LCTypeCheck } from "../src/index.ts"
 import { TypeEnv } from "../src/core/types.ts"
 import { ValueEnv, VariantVal } from "../src/core/values.ts"
 import { createTestFixtures } from "./fixtures.ts"
@@ -85,13 +85,4 @@ Deno.test("Data: fold [Stack] Push(Empty(), Empty()) { ... } evaluates to Empty"
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Empty")
-})
-
-Deno.test("Data: AST parse Empty() produces VariantCon", () => {
-    const ast = new LCAST().setRegistry(registry)
-    const result = ast.parse("Empty()")
-    assert(result.size === 1)
-    const [term] = [...result]
-    assert(term !== undefined)
-    assertEquals((term as { kind: string }).kind, "variantCon")
 })
