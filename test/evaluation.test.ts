@@ -5,8 +5,7 @@
  * for closure body re-evaluation. No intermediate AST, no tree-walking.
  */
 
-import { LCEval, SpanCodataVal } from "../src/index.ts"
-import { SpanClosure, ValueEnv, VariantVal } from "../src/core/values.ts"
+import { LCEval, SpanCodataVal, SpanClosure, ValueEnv, VariantVal } from "../src/index.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"

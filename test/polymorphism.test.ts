@@ -2,9 +2,8 @@
  * Polymorphism and cofold tests — verify T-TAbs, T-TApp, and T-Cofold.
  */
 
-import { LCEval, LCTypeCheck } from "../src/index.ts"
+import { LCEval, LCTypeCheck, ValueEnv } from "../src/index.ts"
 import { TypeEnv } from "../src/core/types.ts"
-import { ValueEnv } from "../src/core/values.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
