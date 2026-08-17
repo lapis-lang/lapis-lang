@@ -6,36 +6,14 @@
  */
 
 import { LCEval, SpanCodataVal } from "../src/index.ts"
-import { Any, CodataType, DataType, Field, Observer, Variant } from "../src/core/types.ts"
 import { SpanClosure, ValueEnv, VariantVal } from "../src/core/values.ts"
-import { TypeRegistry } from "../src/core/grammar.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
-// ── Define the Stack data type ────────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const StackType = new DataType("Stack", [])
-StackType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [
-        new Field("value", Any, false),
-        new Field("rest", StackType, true),
-    ]),
-)
-
-// ── Define the Stream codata type ─────────────────────────────────────────────
-
-const StreamType = new CodataType("Stream", [])
-;(StreamType as unknown as { observers: Observer[] }).observers = [
-    new Observer("head", Any, false),
-    new Observer("tail", StreamType, true),
-]
-
-// ── Registry ──────────────────────────────────────────────────────────────────
-
-const registry = new TypeRegistry()
-registry.register(StackType)
-registry.register(StreamType)
+const { registry, stream: StreamType } = createTestFixtures()
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

@@ -3,21 +3,14 @@
  * parse-to-tree + tree-consuming pass architecture works with the LC grammar.
  */
 
-import { type DerivationNode, LCAST, SemanticPass, TypeRegistry } from "../src/index.ts"
-import { Any, DataType, Field, Variant } from "../src/core/types.ts"
+import { type DerivationNode, LCAST, SemanticPass } from "../src/index.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const StackType = new DataType("Stack", [])
-StackType.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [new Field("value", Any, false), new Field("rest", StackType, true)]),
-)
-
-const registry = new TypeRegistry()
-registry.register(StackType)
+const { registry } = createTestFixtures()
 
 const ast = new LCAST().setRegistry(registry)
 

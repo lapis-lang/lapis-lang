@@ -7,17 +7,10 @@
  */
 
 import { assert, assertEquals } from "@std/assert"
-import { LCAST, TypeRegistry } from "../src/index.ts"
-import { Any, DataType, Field, Variant } from "../src/core/types.ts"
+import { LCAST } from "../src/index.ts"
+import { createTestFixtures } from "./fixtures.ts"
 
-const stack = new DataType("Stack", [])
-stack.variants.push(
-    new Variant("Empty", []),
-    new Variant("Push", [new Field("value", Any, false), new Field("rest", stack, true)]),
-)
-
-const registry = new TypeRegistry()
-registry.register(stack)
+const { registry } = createTestFixtures()
 const ast = new LCAST().setRegistry(registry)
 
 function parse(input: string) {
