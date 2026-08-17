@@ -103,10 +103,10 @@ with the current status, milestone, and dependencies.
 
 - **Status:** Open
 - **Assignee:** @mlhaufe
-- **Goal:** Replace the hand-rolled `LCTypeCheck.toInference()` with the library's
-  `Grammar.rules()` / `collectRules()`. The library `FormattedInferenceRule` shape is richer (side
-  conditions, frame conditions, per-clause method linkage) and standardized, and `formatRule()`
-  gives us the `lc.md` rule renderer that #26 needs.
+- **Goal:** Replace the hand-rolled `LCTypeCheck.toInference()` with the library's `Grammar.rules()`
+  / `collectRules()`. The library `FormattedInferenceRule` shape is richer (side conditions, frame
+  conditions, per-clause method linkage) and standardized, and `formatRule()` gives us the `lc.md`
+  rule renderer that #26 needs.
 - **Files:** `src/core/typing_grammar.ts`, `src/core/index.ts`, `test/metadata.test.ts`
 - **Depends on:** Nothing. Unblocks #21, #26, #31.
 
