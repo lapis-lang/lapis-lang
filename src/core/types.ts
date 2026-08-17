@@ -173,12 +173,18 @@ export class PatternDataType extends Type {
  * `observers` is the product (record of observations). `parent` is the supertype.
  */
 export class CodataType extends Type {
+    /** Mutable to allow self-referential ν-type construction (create empty, then push observers). */
+    observers: Observer[]
+    parent: CodataType | null
+
     constructor(
         readonly name: string,
-        readonly observers: Observer[],
-        readonly parent: CodataType | null = null,
+        observers: Observer[] = [],
+        parent: CodataType | null = null,
     ) {
         super()
+        this.observers = observers
+        this.parent = parent
     }
 
     equals(other: Type): boolean {

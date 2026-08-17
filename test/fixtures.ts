@@ -63,7 +63,7 @@ export function createBoolType(): DataType {
 
 /** Constructs a fresh `Stream` codata type with `head`/`tail` observers. */
 export function createStreamType(): CodataType {
-    const stream = new CodataType("Stream", [])
+    const stream = new CodataType("Stream")
     stream.observers.push(
         new Observer("head", Any, false),
         new Observer("tail", stream, true),
