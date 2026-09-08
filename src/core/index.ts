@@ -39,9 +39,19 @@ export { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 // Derivation trees + semantic passes
 export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/lang-forma"
 
+// First-class inference rules (lc.md §5 — collected from @requires/@ensures metadata)
+export {
+    collectRules,
+    formatRule,
+    type FormattedInferenceRule,
+    type InferenceRule,
+    type RuleClause,
+} from "@lapis-lang/lang-forma"
+
 // Type-checking grammar subclass (lc.md §5 — parse, don't validate)
 // One-pass type checker: parses LC text and produces types.
-export { type InferenceRule, LCTypeCheck } from "./typing_grammar.ts"
+// Inference rules: `LCTypeCheck.rules` (static) or `collectRules(LCTypeCheck)`.
+export { LCTypeCheck } from "./typing_grammar.ts"
 
 // Evaluation grammar subclass (lc.md §3 — parse, don't evaluate separately)
 // One-pass evaluator: parses LC text and produces values via _forward.

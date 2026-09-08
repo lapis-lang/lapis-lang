@@ -133,20 +133,6 @@ function isWellFormedType(t: Type | undefined): boolean {
             t instanceof PolymorphicType)
 }
 
-// ── Inference rule generation ─────────────────────────────────────────────────
-
-/** A formal inference rule generated from contract metadata. */
-export interface InferenceRule {
-    /** Rule name (e.g., "T-App"). */
-    name: string
-    /** Premise formulas (from @requires metadata). */
-    premises: string[]
-    /** Conclusion formula (from @ensures metadata). */
-    conclusion: string
-    /** The grammar production method that implements this rule. */
-    production: string
-}
-
 // ── The type-checking grammar ─────────────────────────────────────────────────
 
 /**
@@ -165,37 +151,6 @@ export interface InferenceRule {
 export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     /** The source text, stored for `parseToFixpoint` re-parsing of fold handler bodies. */
     private _input: string = ""
-
-    /**
-     * Generate inference rules from contract metadata.
-     * Walks `Grammar.metadata` (via `Symbol.metadata`) and collects all
-     * `@requires`/`@ensures` with `rule` metadata into structured rules.
-     */
-    toInference(): InferenceRule[] {
-        const meta = LCTypeCheck.metadata
-        const rules = new Map<string, InferenceRule>()
-
-        for (const [method, report] of Object.entries(meta.methods)) {
-            for (const req of report.requires) {
-                const ruleName = req.meta?.rule as string | undefined
-                if (!ruleName) continue
-                const entry = rules.get(ruleName) ??
-                    { name: ruleName, premises: [], conclusion: "", production: method }
-                if (req.meta?.formula) entry.premises.push(req.meta.formula as string)
-                rules.set(ruleName, entry)
-            }
-            for (const ens of report.ensures) {
-                const ruleName = ens.meta?.rule as string | undefined
-                if (!ruleName) continue
-                const entry = rules.get(ruleName) ??
-                    { name: ruleName, premises: [], conclusion: "", production: method }
-                if (ens.meta?.formula) entry.conclusion = ens.meta.formula as string
-                rules.set(ruleName, entry)
-            }
-        }
-
-        return [...rules.values()]
-    }
 
     /**
      * Parse and type-check input under `gamma`.
