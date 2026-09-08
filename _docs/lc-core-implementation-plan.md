@@ -55,7 +55,7 @@
 
 | Component                    | Status              | Notes                                                                                                | PBI          |
 | ---------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation        | ❌ Not implemented  | Grammar-based checker doesn't propagate `Nothing` in `variantCon`, `obs`, `fold`, `unfold`           | #19          |
+| `Nothing` propagation        | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                | #19          |
 | T-Sub (subsumption)          | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed               | #20          |
 | `@ensures` for Progress      | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem        | #21          |
 | Law/properties machinery     | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet | #22          |
@@ -120,16 +120,22 @@ with the current status, milestone, and dependencies.
 
 #### PBI #19: `Nothing` propagation in grammar-based type checker
 
-- **Status:** Open
+- **Status:** Complete
 - **Assignee:** @mlhaufe
 - **Goal:** Propagate `Nothing` (bottom type) through the grammar-based checker. When a sub-term has
   type `Nothing`, the surrounding term should also be `Nothing` (or handled per the rule), not
   silently treated as well-typed.
-- **Tasks:**
-  1. Add `Nothing` checks to `variantCon`, `obs`, `fold`, `unfold` in `typing_grammar.ts`.
-  2. Add tests: a term with a `Nothing`-typed sub-term should produce `Nothing` (or fail gracefully)
-     rather than a spurious type.
-- **Files:** `src/core/typing_grammar.ts`, test files
+- **Result:** `variantCon`, `obs`, `fold` (both the semantic action and `evalFoldFixpoint`, the live
+  path), `unfold`, and `cofold` now return `Nothing` when an eagerly-evaluated sub-term has type
+  `Nothing` (principle of explosion — matches TAPL `rcdsubbot`'s `TyBot` propagation). Since
+  `Nothing <: σ` for all σ, the result still flows anywhere via subsumption. Ordering guarantee:
+  propagation applies only when the term is otherwise well-typed — genuine premise violations
+  (unknown name, non-exhaustive handlers, field type mismatch) still yield the `Any` error signal,
+  never a spurious `Nothing`. Boundary: `app` in the fn position rejects a `Nothing` function (empty
+  forest); `app`/`let` in the arg/def positions do not propagate (the sub-term is consumed, not
+  observed). 18 tests in `test/nothing.test.ts` cover propagation through all five productions,
+  non-masking of errors, boundary positions, and nested composition.
+- **Files:** `src/core/typing_grammar.ts`, `test/nothing.test.ts`
 - **Depends on:** Nothing (can start immediately).
 
 #### PBI #20: T-Sub (subsumption) — decide explicit vs implicit and implement
@@ -336,9 +342,9 @@ v0.1.1 — Clean core
   #30 (adopt Grammar.rules)      ← no dependency; unblocks #21, #26, #31
       ↓
 v0.2.0 — Sound core
-  #19 (Nothing propagation)      ← no dependency, do first
+  #19 (Nothing propagation)      ← complete
       ↓
-  #20 (T-Sub subsumption)        ← depends on #19
+  #20 (T-Sub subsumption)        ← depends on #19; next up
       ↓
   #21 (Progress @ensures)        ← depends on #19, #20, #30
       ↓
