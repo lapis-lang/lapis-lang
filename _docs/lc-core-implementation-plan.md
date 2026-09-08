@@ -370,7 +370,7 @@ v0.4.0 — Patterns & surface
 - [x] Every valid LC input produces exactly one parse tree (v4.0.2)
 - [x] Fold handler bodies type-checked under correct σ via `parseToFixpoint`
 - [x] Every contract has `ContractMeta` with rule name + formula
-- [x] `toInference()` generates rules matching `lc.md` §5
+- [x] `LCTypeCheck.rules` generates rules matching `lc.md` §5
 - [x] `DerivationTree` + `SemanticPass` validated on LC grammar
 - [x] Migrated to `@lapis-lang/lang-forma@1.1.0` (compatible superset of `zipper-grammar`)
 - [x] Adopt `Grammar.rules()` / `collectRules()` — replace hand-rolled `toInference()` (#30)
