@@ -268,7 +268,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         .map(([, argVal]) => ({ fnVal, argVal }))
                         .chain(({ fnVal, argVal }) => {
                             if (!(fnVal instanceof SpanClosure)) {
-                                return empty() as unknown as Parser<Value>
+                                return empty<Value>()
                             }
                             const bodyEnv = fnVal.env.extend(fnVal.param, argVal)
                             const savedOffset = this._inputOffset
@@ -280,7 +280,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                     this.exprProd(bodyEnv),
                                 )]
                                 if (results.length === 0) {
-                                    return empty() as unknown as Parser<Value>
+                                    return empty<Value>()
                                 }
                                 return epsilon<Value>(results[0]!)
                             } finally {
@@ -290,7 +290,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         .map(([, result]) => result)
                 )
                 .map(([, result]) => result),
-            this.typeAppProd(ctx) as unknown as Parser<Value>,
+            this.typeAppProd(ctx),
         )
     }
 
@@ -405,7 +405,7 @@ export class LCEval extends AbstractLC<EvalShape> {
         ).chain(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
-                return empty() as unknown as Parser<SpanHandler>
+                return empty<SpanHandler>()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
             let extendedCtx = ctx
@@ -549,7 +549,7 @@ export class LCEval extends AbstractLC<EvalShape> {
         ).chain(([obsName]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
-                return empty() as unknown as Parser<SpanGenerator>
+                return empty<SpanGenerator>()
             }
             const extendedCtx = this.extendCtx(ctx, "self", Any)
             return this.exprProd(extendedCtx)
@@ -634,9 +634,9 @@ export class LCEval extends AbstractLC<EvalShape> {
         ).chain(([obsName, , , , bindings]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
-                return empty() as unknown as Parser<
+                return empty<
                     { observerName: string; bindings: string[]; bodySpan: Span }
-                >
+                >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
             let extendedCtx = ctx
@@ -750,13 +750,13 @@ export class LCEval extends AbstractLC<EvalShape> {
                         .map(([, , , obsName]) => ({ scrutVal, obsName }))
                         .chain(({ scrutVal, obsName }) => {
                             if (!(scrutVal instanceof SpanCodataVal)) {
-                                return empty() as unknown as Parser<Value>
+                                return empty<Value>()
                             }
                             const generator = scrutVal.generators.find(
                                 (g) => g.observerName === obsName,
                             )
                             if (!generator) {
-                                return empty() as unknown as Parser<Value>
+                                return empty<Value>()
                             }
                             const genEnv = scrutVal.env.extend("self", scrutVal.seed)
                             const savedOffset = this._inputOffset
@@ -768,7 +768,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                     this.exprProd(genEnv),
                                 )]
                                 if (results.length === 0) {
-                                    return empty() as unknown as Parser<Value>
+                                    return empty<Value>()
                                 }
                                 return epsilon<Value>(results[0]!)
                             } finally {

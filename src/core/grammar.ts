@@ -383,9 +383,9 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         ).chain(([obsName, , , , bindings]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
-                return empty() as unknown as Parser<
+                return empty<
                     { observerName: string; bindings: string[]; body: S["expr"] }
-                >
+                >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
             let extendedCtx = ctx
@@ -490,9 +490,9 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         ).chain(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
-                return empty() as unknown as Parser<
+                return empty<
                     { variantName: string; bindings: string[]; body: S["expr"] }
-                >
+                >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
             // Extend context with bindings
@@ -570,7 +570,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         ).chain(([obsName]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
-                return empty() as unknown as Parser<{ observerName: string; body: S["expr"] }>
+                return empty<{ observerName: string; body: S["expr"] }>()
             }
             // Extend context with self: seed type
             const extendedCtx = this.extendCtx(ctx, "self", Any)
@@ -663,7 +663,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             .chain((name) => {
                 // Reject if it's a keyword
                 if (["fold", "unfold", "cofold", "let", "in"].includes(name)) {
-                    return empty() as unknown as Parser<string>
+                    return empty<string>()
                 }
                 return epsilon(name)
             })
@@ -681,7 +681,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             .map(([h, t]) => h + t)
             .chain((name) => {
                 if (["let", "in", "fold", "unfold", "cofold"].includes(name)) {
-                    return empty() as unknown as Parser<string>
+                    return empty<string>()
                 }
                 return epsilon(name)
             })
