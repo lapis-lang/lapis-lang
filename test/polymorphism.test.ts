@@ -3,7 +3,7 @@
  */
 
 import { LCEval, LCTypeCheck, ValueEnv } from "../src/index.ts"
-import { TypeEnv } from "../src/core/types.ts"
+import { Any, FunType, PolymorphicType, TypeEnv } from "../src/core/types.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -20,7 +20,10 @@ Deno.test("Polymorphism: ^alpha <: Any. \\x:Any. x type-checks", () => {
     assert(result.size === 1)
     const [type] = result
     // ∀α<:Any. (Any → Any) — a PolymorphicType, NOT a FunType
-    assertEquals(type.constructor.name, "PolymorphicType")
+    assert(type instanceof PolymorphicType, `expected PolymorphicType, got ${type}`)
+    assertEquals(type.typeVarName, "alpha")
+    assertEquals(type.bound, Any)
+    assert(type.body instanceof FunType, `expected FunType body, got ${type.body}`)
 })
 
 Deno.test("Polymorphism: (^alpha <: Any. \\x:Any. x) [Any] type-checks", () => {
@@ -29,7 +32,58 @@ Deno.test("Polymorphism: (^alpha <: Any. \\x:Any. x) [Any] type-checks", () => {
     assert(result.size === 1)
     const [type] = result
     // The result is Any → Any (the body type with α := Any)
-    assertEquals(type.constructor.name, "FunType")
+    assert(type instanceof FunType, `expected FunType, got ${type}`)
+    assertEquals(type.param, Any)
+    assertEquals(type.result, Any)
+})
+
+// ── T-TApp premise enforcement ────────────────────────────────────────────────
+
+Deno.test("Polymorphism: type application on a non-polymorphic body is rejected", () => {
+    // Zero() : Nat — not a ∀ type, so the T-TApp premise fails and the
+    // term must be rejected (empty forest), never `undefined`.
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("Zero()[Stack]", new TypeEnv())
+    assertEquals(result.size, 0, "type-applying a non-polymorphic term must be rejected")
+})
+
+Deno.test("Polymorphism: type application violating the bound is rejected", () => {
+    // Nat is not a subtype of the declared bound Stack.
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("(^alpha <: Stack. \\x:Any. x) [Nat]", new TypeEnv())
+    assertEquals(result.size, 0, "an argument type outside the bound must be rejected")
+})
+
+Deno.test("Polymorphism: chained type application on a non-polymorphic result is rejected", () => {
+    // The first application yields Any → Any (not a ∀ type), so the second
+    // T-TApp premise fails — rejection, not `undefined`.
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("(^alpha <: Any. \\x:Any. x) [Nat] [Bool]", new TypeEnv())
+    assertEquals(result.size, 0, "chaining past a non-polymorphic result must be rejected")
+})
+
+Deno.test("Polymorphism: chained type applications with satisfied bounds type-check", () => {
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith(
+        "(^alpha <: Any. ^beta <: Any. \\x:Any. x) [Nat] [Bool]",
+        new TypeEnv(),
+    )
+    assert(result.size === 1)
+    const [type] = result
+    assert(type instanceof FunType, `expected FunType, got ${type}`)
+    assertEquals(type.param, Any)
+    assertEquals(type.result, Any)
+})
+
+Deno.test("Polymorphism: type application with a concrete argument type type-checks", () => {
+    // The bound Any is satisfied by the concrete type Nat.
+    const tc = new LCTypeCheck().setRegistry(registry)
+    const result = tc.parseWith("(^alpha <: Any. \\x:Any. x) [Nat]", new TypeEnv())
+    assert(result.size === 1)
+    const [type] = result
+    assert(type instanceof FunType, `expected FunType, got ${type}`)
+    assertEquals(type.param, Any)
+    assertEquals(type.result, Any)
 })
 
 Deno.test("Polymorphism: evaluate ^alpha <: Any. \\x:Any. x", () => {

@@ -53,16 +53,17 @@
 
 ### What's Missing or Incomplete
 
-| Component                    | Status              | Notes                                                                                                | PBI          |
-| ---------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation        | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                | #19          |
-| T-Sub (subsumption)          | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed               | #20          |
-| `@ensures` for Progress      | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem        | #21          |
-| Law/properties machinery     | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet | #22          |
-| T-FoldMatch + E-FoldMatch    | ❌ Not implemented  | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                          | #23          |
-| T-Pattern                    | ❌ Not implemented  | `match(pₖ)` — pattern-matched construction (introduction)                                            | #24          |
-| Surface language elaboration | ❌ Not started      | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                     | #25          |
-| Dead code / consolidation    | ❌ Not started      | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                  | #15–#17, #26 |
+| Component                    | Status              | Notes                                                                                                 | PBI          |
+| ---------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- | ------------ |
+| `Nothing` propagation        | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                 | #19          |
+| T-TApp premise enforcement   | ✅ Complete         | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest) | #39          |
+| T-Sub (subsumption)          | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed                | #20          |
+| `@ensures` for Progress      | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem         | #21          |
+| Law/properties machinery     | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet  | #22          |
+| T-FoldMatch + E-FoldMatch    | ❌ Not implemented  | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                           | #23          |
+| T-Pattern                    | ❌ Not implemented  | `match(pₖ)` — pattern-matched construction (introduction)                                             | #24          |
+| Surface language elaboration | ❌ Not started      | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                      | #25          |
+| Dead code / consolidation    | ❌ Not started      | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                   | #15–#17, #26 |
 
 ## Plan — PBI Roadmap
 
@@ -138,6 +139,25 @@ with the current status, milestone, and dependencies.
   boundary positions, and nested composition.
 - **Files:** `src/core/typing_grammar.ts`, `test/nothing.test.ts`
 - **Depends on:** Nothing (can start immediately).
+
+#### Bug #39: `typeApp` on a non-polymorphic body puts `undefined` in the parse forest
+
+- **Status:** Complete
+- **Assignee:** @mlhaufe
+- **Goal:** Enforce the T-TApp premises in the production path. The base `typeAppProd` folds over
+  `[τ]` suffixes without checking, so a failed premise fell through to the `typeApp` semantic
+  action, which cast the body and read `.body` off a non-polymorphic type — putting `undefined` in
+  the parse forest. The `@requires` premise is declarative metadata (for the rule model), not a
+  runtime check.
+- **Result:** `typeAppProd` is overridden in `LCTypeCheck` with the same chain formulation as the
+  `appProd` override: parse atom → parse `[τ]` → check
+  `body instanceof PolymorphicType ∧
+  argType <: body.bound` → `ε(τ[α:=argType])` on success, `∅`
+  (rejection) on failure. Each application in a chain `t[τ₁][τ₂]` is checked individually.
+  Rejections: `Zero()[Stack]`, bound violations (`(^α <: Stack. …) [Nat]`), chaining past a
+  non-polymorphic result. Well-formed cases (bound satisfied, chained applications) are unchanged.
+- **Files:** `src/core/typing_grammar.ts`, `test/polymorphism.test.ts`
+- **Depends on:** Nothing (found during the #19 review; verified pre-existing on `master`).
 
 #### PBI #20: T-Sub (subsumption) — decide explicit vs implicit and implement
 
@@ -344,6 +364,7 @@ v0.1.1 — Clean core
       ↓
 v0.2.0 — Sound core
   #19 (Nothing propagation)      ← complete
+  #39 (T-TApp premise enforced)  ← complete (bug found during #19 review; independent of #19)
       ↓
   #20 (T-Sub subsumption)        ← depends on #19; next up
       ↓
@@ -381,7 +402,8 @@ v0.4.0 — Patterns & surface
 - [x] `DerivationTree` + `SemanticPass` validated on LC grammar
 - [x] Migrated to `@lapis-lang/lang-forma@1.1.0` (compatible superset of `zipper-grammar`)
 - [x] Adopt `Grammar.rules()` / `collectRules()` — replace hand-rolled `toInference()` (#30)
-- [ ] `Nothing` propagation in grammar-based checker (#19)
+- [x] `Nothing` propagation in grammar-based checker (#19)
+- [x] T-TApp premises enforced in production path — no `undefined` in the parse forest (#39)
 - [ ] T-Sub subsumption decided and implemented/documented (#20)
 - [ ] `@ensures` contracts fully encode the Progress theorem (#21)
 - [ ] Progress + Preservation mechanized via `verifyMetatheory` (#31)

@@ -459,9 +459,9 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         ).chain(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
-                return empty() as unknown as Parser<
+                return empty<
                     { variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeEnv }
-                >
+                >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
             // Build the handler context with non-recursive fields at their declared types
@@ -647,9 +647,17 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // ── T-TApp: Γ ⊢ t : ∀α<:σ.τ ∧ Δ ⊢ T₂<:σ ⟹ Γ ⊢ t[T₂] : τ[α:=T₂] ───────────
 
     /**
-     * Type application. The body must have a polymorphic type (`PolymorphicType`).
-     * The argument type must be a subtype of the bound. The result is the
-     * body type with α := T₂ (type substitution).
+     * Type application. The premises (body is a polymorphic type; argument
+     * type is a subtype of the bound) are enforced in the `typeAppProd`
+     * override — `@requires` is declarative metadata for the rule model,
+     * not a runtime check. The result is the body type with α := T₂
+     * (type substitution).
+     *
+     * The `@requires` premise is therefore purely declarative: this method
+     * is only reached after the `typeAppProd` override has checked the
+     * premises, so the cast below is safe. The decorator is kept because it
+     * feeds the rule model (`Grammar.rules`, asserted in
+     * `test/metadata.test.ts`).
      */
     @requires(
         (_self: LCTypeCheck, body: Type, argType: Type) =>
@@ -687,14 +695,64 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         .map(([, argTy]) => ({ fnTy, argTy }))
                         .chain(({ fnTy, argTy }) => {
                             if (!(fnTy instanceof FunType) || !isSubtype(argTy, fnTy.param)) {
-                                return empty() as unknown as Parser<Type>
+                                return empty<Type>()
                             }
                             return epsilon<Type>(fnTy.result)
                         })
                         .map(([, result]) => result)
                 )
                 .map(([, result]) => result),
-            this.typeAppProd(ctx) as unknown as Parser<Type>,
+            this.typeAppProd(ctx),
+        )
+    }
+
+    // ── Override typeAppProd to enforce the T-TApp premises ───────────────────
+
+    /**
+     * Override type application to enforce the T-TApp premises in the
+     * production path: parse atom → get bodyType; parse [τ] → get argType;
+     * if bodyType is a PolymorphicType and argType <: bodyType.bound,
+     * return ε(τ[α:=argType]), else ∅ (empty — ill-typed).
+     *
+     * The base production folds over `many()` without checking, so a failed
+     * premise fell through to `typeApp`, which cast the body and read `.body`
+     * off a non-polymorphic type — putting `undefined` in the parse forest.
+     * The `@requires` premise is declarative metadata (for the rule model),
+     * not a runtime check, so the premise is enforced here instead.
+     *
+     * The chain formulation is left-recursive (`typeAppProd` calls itself
+     * via `this`), which the zipper engine resolves — the same shape as the
+     * `appProd` override above. Each application in `t[τ₁][τ₂]` is checked
+     * individually.
+     *
+     * Note on the `.map(([, result]) => result)` calls: `chain` is a
+     * pair-emitting bind — it always flows `[firstVal, secondVal]` upward
+     * (see `ChainSecondCxt` in lang-forma), even when the second parser is
+     * `epsilon<Type>(...)`. The maps unwrap that pair; they are not
+     * destructuring the `Type` itself.
+     */
+    // t [τ]  — T-TApp via chain (type-checks polymorphic body + bound)
+    @rule
+    protected override typeAppProd(ctx: unknown): Parser<Type> {
+        return or(
+            this.typeAppProd(ctx)
+                .map((bodyTy) => ({ bodyTy }))
+                .chain(({ bodyTy }) =>
+                    seq(this.ws, char("["), this.ws, this.typeProd, this.ws, char("]"))
+                        .map(([, , , argTy]) => ({ bodyTy, argTy }))
+                        .chain(({ bodyTy, argTy }) => {
+                            if (
+                                !(bodyTy instanceof PolymorphicType) ||
+                                !isSubtype(argTy, bodyTy.bound)
+                            ) {
+                                return empty<Type>()
+                            }
+                            return epsilon<Type>(this.typeApp(bodyTy, argTy))
+                        })
+                        .map(([, result]) => result)
+                )
+                .map(([, result]) => result),
+            this.atomProd(ctx),
         )
     }
 }
