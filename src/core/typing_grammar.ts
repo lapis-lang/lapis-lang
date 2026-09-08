@@ -52,6 +52,7 @@ import {
     DataType,
     FunType,
     IntersectionType,
+    Nothing,
     NothingType,
     PatternDataType,
     PolymorphicType,
@@ -277,16 +278,28 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         if (!dataType) return Any // unknown variant → ill-typed (Any won't match)
         const variant = dataType.findVariant(name)
         if (!variant) return Any
+        // Arity must match exactly — extra args are as ill-typed as missing ones.
+        if (args.length !== variant.fields.length) return Any
 
         // Check each arg type is a subtype of the expected field type.
         // For recursive fields, the expected type is the DataType itself.
+        // (A Nothing arg satisfies the premise via S-Bot; it is tracked and
+        // propagated after the loop so a genuine premise violation on a
+        // later arg is not silently subsumed by Nothing.)
+        let hasNothingArg = false
         for (let i = 0; i < variant.fields.length; i++) {
             const field = variant.fields[i]!
             const argType = args[i]
             if (argType === undefined) return Any
+            if (argType instanceof NothingType) hasNothingArg = true
             const expected = field.isRecursive ? dataType : field.type
             if (!isSubtype(argType, expected)) return Any
         }
+
+        // Nothing propagation: an eagerly-evaluated arg of type Nothing makes
+        // the construction uninhabited (principle of explosion).
+        if (hasNothingArg) return Nothing
+
         return dataType
     }
 
@@ -308,6 +321,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
         // Premise: scrutinee must be a subtype of the codata type.
         if (!isSubtype(scrutinee, codataType)) return Any
+
+        // Nothing propagation: observing an uninhabited scrutinee yields an
+        // uninhabited result (principle of explosion). Checked after the
+        // premises so a genuine type error is never masked.
+        if (scrutinee instanceof NothingType) return Nothing
 
         // Result: Gₖ(T)[α:=T]. For continuation observers, the type is T itself.
         if (observer.isContinuation) {
@@ -349,6 +367,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // This uses the lattice operation from TAPL §16.4 — the join finds
         // the smallest type that all handler bodies are subtypes of.
         if (handlers.length === 0) return Any
+
+        // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
+        // makes the fold uninhabited (principle of explosion). Checked after
+        // the premises so a genuine type error is never masked.
+        if (scrutinee instanceof NothingType) return Nothing
 
         let sigma = handlers[0]!.body
         for (let i = 1; i < handlers.length; i++) {
@@ -488,6 +511,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
         if (spanHandlers.length === 0) return Any
 
+        // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
+        // makes the fold uninhabited (principle of explosion). Checked after
+        // the premises so a genuine type error is never masked.
+        if (scrutineeType instanceof NothingType) return Nothing
+
         // Use parseToFixpoint to refine σ
         // Start at the DataType itself (not Any) because recursive fields
         // have declared type = DataType. This gives a better initial estimate.
@@ -544,13 +572,13 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     )
     protected unfold(
         codataType: CodataType,
-        _seed: Type,
+        seed: Type,
         generators: { observerName: string; body: Type }[],
         _seedType: Type,
     ): Type {
         // T-Unfold: Γ ⊢ s : Σ ∧ Γ ⊢ gⱼ : Σ→Gⱼ(Σ)[α:=Σ] ⟹ Γ ⊢ unfold [T] s {...} : T
         //
-        // Premise 1: seed type is already computed (passed as _seed).
+        // Premise 1: seed type is already computed (passed as seed).
         //   The seed type Σ is whatever the seed expression typed as.
         //   We don't enforce a specific seed type here — the generators
         //   are checked in the extended context with self: Σ.
@@ -561,6 +589,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const generator = generators.find((g) => g.observerName === observer.name)
             if (!generator) return Any // missing generator → ill-typed
         }
+
+        // Nothing propagation: an eagerly-evaluated seed of type Nothing makes
+        // the unfold uninhabited (principle of explosion). Checked after the
+        // premises so a genuine type error is never masked.
+        if (seed instanceof NothingType) return Nothing
 
         // The result type is T (the codata type from the annotation).
         return codataType
@@ -594,15 +627,21 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         { rule: "T-Cofold", role: "conclusion", formula: "result : σ" },
     )
     protected cofold(
-        _codataType: CodataType,
-        _scrutinee: Type,
-        _handler: { observerName: string; bindings: string[]; body: Type },
+        codataType: CodataType,
+        scrutinee: Type,
+        handler: { observerName: string; bindings: string[]; body: Type },
         _resultType: Type,
     ): Type {
         // Premise: scrutinee must be a subtype of the codata type.
+        if (!isSubtype(scrutinee, codataType)) return Any
+
+        // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
+        // makes the cofold uninhabited (principle of explosion). Checked after
+        // the premises so a genuine type error is never masked.
+        if (scrutinee instanceof NothingType) return Nothing
+
         // The handler body type is σ.
-        // For now, return the handler body type.
-        return _handler.body
+        return handler.body
     }
 
     // ── T-TApp: Γ ⊢ t : ∀α<:σ.τ ∧ Δ ⊢ T₂<:σ ⟹ Γ ⊢ t[T₂] : τ[α:=T₂] ───────────
