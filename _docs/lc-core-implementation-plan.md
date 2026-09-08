@@ -109,6 +109,12 @@ with the current status, milestone, and dependencies.
   rule renderer that #26 needs.
 - **Files:** `src/core/typing_grammar.ts`, `src/core/index.ts`, `test/metadata.test.ts`
 - **Depends on:** Nothing. Unblocks #21, #26, #31.
+- **Breaking change (v0.1.x):** The exported `InferenceRule` type changed shape —
+  `premises: string[]` → `RuleClause[]`, `conclusion: string` → `RuleClause[]`, `production: string`
+  → `production?: string` (plus new `sideConditions`, `frameConditions`, `methods`).
+  `LCTypeCheck.toInference()` is removed; use the static `LCTypeCheck.rules` getter or
+  `collectRules(LCTypeCheck)`. Note for #26: `Grammar.rules` recomputes on every access (walks the
+  inheritance chain) — cache the result in the doc generator.
 
 ### Milestone v0.2.0 — Sound core
 

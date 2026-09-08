@@ -22,7 +22,15 @@ const expected = [
     ["T-Variant", ["variantCon"], [], ["result : T"]],
 ] as const
 
-/** Project a FormattedInferenceRule onto the compared shape. */
+/**
+ * Project a FormattedInferenceRule onto the compared shape.
+ *
+ * `production` is deliberately omitted: the library only populates it from a
+ * `production` key in contract metadata or a `@rule(meta)` carrying a `rule`
+ * key, and our contracts have neither — so it is `undefined` for all rules.
+ * The method linkage is asserted via `methods` instead. If contracts ever
+ * gain `production` meta keys, extend this shape to cover that linkage.
+ */
 function shape(rule: FormattedInferenceRule) {
     return {
         name: rule.name,
@@ -59,8 +67,31 @@ Deno.test("collectRules: standalone form agrees with Grammar.rules", () => {
 Deno.test("formatRule: renders every rule in proof-tree notation", () => {
     for (const rule of LCTypeCheck.rules) {
         const text = formatRule(rule)
-        // The rule name labels the bar; the conclusion sits below it.
-        assertEquals(text.includes(rule.name), true)
         assertEquals(rule.format(), text) // format() is always attached
+
+        // Structure: [premises, bar, conclusion] — or [bar, conclusion]
+        // for axioms (no premises; the empty premises line is omitted).
+        const lines = text.split("\n")
+        assertEquals(lines.length, rule.premises.length > 0 ? 3 : 2)
+
+        // The bar labels the rule name; the conclusion sits below it.
+        const bar = lines[lines.length - 2]!
+        const conclusion = lines[lines.length - 1]!
+        assertEquals(bar.includes(rule.name), true)
+        const conclusionFormula = rule.conclusion[0]?.formula
+        assertEquals(
+            conclusionFormula !== undefined && conclusion.includes(conclusionFormula),
+            true,
+        )
+
+        // Premises sit above the bar, split on ∧ and spaced across the line.
+        if (rule.premises.length > 0) {
+            const premises = lines[0]!
+            for (const p of rule.premises) {
+                for (const part of p.formula?.split(/\s*∧\s*/) ?? []) {
+                    assertEquals(premises.includes(part), true)
+                }
+            }
+        }
     }
 })
