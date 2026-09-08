@@ -9,8 +9,9 @@
  *
  * Ordering guarantee: `Nothing` propagation applies only when the term is
  * otherwise well-typed. A genuine premise violation (unknown name,
- * non-exhaustive handlers) still yields the `Any` error signal (a single
- * parse that won't match downstream), never a spurious `Nothing`.
+ * non-exhaustive handlers) still yields that rule's own failure signal —
+ * rejection (empty forest) or `Any`, depending on the site — never a
+ * spurious `Nothing`.
  *
  * Boundary: `app` in the fn position rejects a `Nothing` function (empty
  * forest) rather than propagating, and `app`/`let` in the arg/def positions
@@ -68,6 +69,14 @@ Deno.test("Nothing propagation: variant arg type error is not masked by Nothing"
     // the error signal (Any) must win over Nothing propagation.
     const gamma = nothingEnv().extend("b", bool)
     const result = typeOf("Push(x, b)", gamma)
+    assert(result.size === 1, "should have exactly one parse")
+    assertEquals([...result][0], Any)
+})
+
+Deno.test("Nothing propagation: extra variant arg is ill-typed, not masked by Nothing", () => {
+    // Empty() takes no fields; a Nothing-typed extra arg must not make an
+    // arity-mismatched construction look inhabited.
+    const result = typeOf("Empty(x)", nothingEnv())
     assert(result.size === 1, "should have exactly one parse")
     assertEquals([...result][0], Any)
 })
@@ -171,6 +180,13 @@ Deno.test("Nothing propagation: cofold with Nothing scrutinee is Nothing", () =>
     assert(result.size === 1, "should have exactly one parse")
     const [type] = result
     assertEquals(type, Nothing)
+})
+
+Deno.test("Nothing propagation: cofold scrutinee type error is not masked by Nothing", () => {
+    // Zero() : Nat, not a subtype of Stream — a genuine premise violation.
+    const result = typeOf("cofold [Stream] Zero() { head(h) -> Zero() }")
+    assert(result.size === 1, "should have exactly one parse")
+    assertEquals([...result][0], Any)
 })
 
 // ── Composition: Nothing flows through nested productions ────────────────────

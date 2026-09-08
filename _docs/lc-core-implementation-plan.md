@@ -130,11 +130,12 @@ with the current status, milestone, and dependencies.
   `Nothing` (principle of explosion — matches TAPL `rcdsubbot`'s `TyBot` propagation). Since
   `Nothing <: σ` for all σ, the result still flows anywhere via subsumption. Ordering guarantee:
   propagation applies only when the term is otherwise well-typed — genuine premise violations
-  (unknown name, non-exhaustive handlers, field type mismatch) still yield the `Any` error signal,
-  never a spurious `Nothing`. Boundary: `app` in the fn position rejects a `Nothing` function (empty
-  forest); `app`/`let` in the arg/def positions do not propagate (the sub-term is consumed, not
-  observed). 18 tests in `test/nothing.test.ts` cover propagation through all five productions,
-  non-masking of errors, boundary positions, and nested composition.
+  (unknown name, non-exhaustive handlers, field type mismatch) still yield the pre-existing failure
+  signal for that rule (rejection or `Any`, depending on the site), never a spurious `Nothing`.
+  Boundary: `app` in the fn position rejects a `Nothing` function (empty forest); `app`/`let` in the
+  arg/def positions do not propagate (the sub-term is consumed, not observed).
+  `test/nothing.test.ts` covers propagation through all five productions, non-masking of errors,
+  boundary positions, and nested composition.
 - **Files:** `src/core/typing_grammar.ts`, `test/nothing.test.ts`
 - **Depends on:** Nothing (can start immediately).
 

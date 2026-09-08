@@ -278,6 +278,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         if (!dataType) return Any // unknown variant → ill-typed (Any won't match)
         const variant = dataType.findVariant(name)
         if (!variant) return Any
+        // Arity must match exactly — extra args are as ill-typed as missing ones.
+        if (args.length !== variant.fields.length) return Any
 
         // Check each arg type is a subtype of the expected field type.
         // For recursive fields, the expected type is the DataType itself.
@@ -625,20 +627,20 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         { rule: "T-Cofold", role: "conclusion", formula: "result : σ" },
     )
     protected cofold(
-        _codataType: CodataType,
+        codataType: CodataType,
         scrutinee: Type,
         handler: { observerName: string; bindings: string[]; body: Type },
         _resultType: Type,
     ): Type {
         // Premise: scrutinee must be a subtype of the codata type.
-        // The handler body type is σ.
-        // For now, return the handler body type.
+        if (!isSubtype(scrutinee, codataType)) return Any
 
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the cofold uninhabited (principle of explosion). Checked after
         // the premises so a genuine type error is never masked.
         if (scrutinee instanceof NothingType) return Nothing
 
+        // The handler body type is σ.
         return handler.body
     }
 
