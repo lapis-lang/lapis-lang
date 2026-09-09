@@ -833,8 +833,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * Override `letProd` to enforce T-Let premise 1 (def type <: declared
      * type) in the production path. The base production parses the def, then
      * the body under the extended context, and calls `let_`. But `@requires`
-     * is declarative metadata only (not a runtime check — see the #39
-     * lesson), so the premise must be enforced here.
+     * is declarative metadata only (not a runtime check), so the premise
+     * must be enforced here.
      *
      * After parsing the def and getting its type σ, we check `isSubtype(σ, τ)`
      * where τ is the declared type. If the check fails, we return
