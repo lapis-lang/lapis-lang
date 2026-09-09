@@ -54,20 +54,21 @@
 
 ### What's Missing or Incomplete
 
-| Component                     | Status             | Notes                                                                                                                                        | PBI          |
-| ----------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation         | ✅ Complete        | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                        | #19          |
-| T-TApp premise enforcement    | ✅ Complete        | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                        | #39          |
-| Type-variable reference       | ✅ Complete        | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                  | #42          |
-| Type-variable lexical scoping | ✅ Complete        | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected | #44          |
-| T-Sub (subsumption)           | ✅ Complete        | Implicit subsumption at use sites via `isSubtype` in `@requires`; T-Let premise 1 enforced in `letProd` override                             | #20          |
-| `@ensures` for Progress       | ✅ Complete        | Contracts on all typing rules encode Progress cases; verified by `checkProgress` (no gaps)                                                   | #21          |
-| Metatheory verification       | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`          | #31          |
-| Law/properties machinery      | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                         | #22          |
-| T-FoldMatch + E-FoldMatch     | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                  | #23          |
-| T-Pattern                     | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                    | #24          |
-| Surface language elaboration  | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                             | #25          |
-| Dead code / consolidation     | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                          | #15–#17, #26 |
+| Component                        | Status             | Notes                                                                                                                                        | PBI          |
+| -------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `Nothing` propagation            | ✅ Complete        | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                        | #19          |
+| T-TApp premise enforcement       | ✅ Complete        | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                        | #39          |
+| Type-variable reference          | ✅ Complete        | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                  | #42          |
+| Type-variable lexical scoping    | ✅ Complete        | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected | #44          |
+| T-Sub (subsumption)              | ✅ Complete        | Implicit subsumption at use sites via `isSubtype` in `@requires`; T-Let premise 1 enforced in `letProd` override                             | #20          |
+| `@ensures` for Progress          | ✅ Complete        | Contracts on all typing rules encode Progress cases; verified by `checkProgress` (no gaps)                                                   | #21          |
+| Metatheory verification          | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`          | #31          |
+| Generative counterexample search | ✅ Complete        | `findCounterexamples(LCEval, LCTypeCheck)` — 500 generated terms, 0 counterexamples; 5 tests in `counterexamples.test.ts`                    | #32          |
+| Law/properties machinery         | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                         | #22          |
+| T-FoldMatch + E-FoldMatch        | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                  | #23          |
+| T-Pattern                        | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                    | #24          |
+| Surface language elaboration     | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                             | #25          |
+| Dead code / consolidation        | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                          | #15–#17, #26 |
 
 ## Plan — PBI Roadmap
 
@@ -276,13 +277,29 @@ with the current status, milestone, and dependencies.
 
 #### PBI #32: Generative counterexample search — dynamically test Progress + Preservation
 
-- **Status:** Open
+- **Status:** Complete
 - **Assignee:** @mlhaufe
-- **Goal:** Use `lang-forma`''s `findCounterexamples(evalGrammar, typeCheckGrammar, options)` to
+- **Goal:** Use `lang-forma`'s `findCounterexamples(evalGrammar, typeCheckGrammar, options)` to
   _generate_ well-formed terms and check Progress/Preservation dynamically — the dynamic complement
   to the static metatheory in #31. Catches soundness bugs the static analysis misses (e.g., an
   underspecified `@requires` premise).
-- **Files:** `test/counterexamples.test.ts`, `test/fixtures.ts`
+- **What was done:**
+  1. Created `test/counterexamples.test.ts` with 5 tests: Progress + Preservation (100 runs),
+     different seed (200 runs), eval-only Progress (no type checker), reproducibility (same seed →
+     same result), and a larger 500-run search. All pass with 0 counterexamples.
+  2. Tuned `GeneratorOptions` for the LC grammar: `branchStrategy: "random"` is required (the
+     grammar's 7-branch `exprProd` with 6 recursive alternatives causes the default depth-first
+     strategy to exhaust the step budget before reaching terminal `atomProd` → `ident`).
+     `maxDepth: 5, maxRecursion: 2, maxBacktracks: 500, maxSteps: 15000` produce ~95% generation
+     success rate with a good mix of lambdas, variant calls, and variable references.
+  3. Exported `findCounterexamples` +
+     `Counterexample`/`CounterexampleOptions`/`CounterexampleResult` types from `src/core/index.ts`.
+- **Key insight:** The LC grammar's wide `or(...)` fan-out in `exprProd` (7 alternatives, 6
+  recursive) makes the default `depth-first` branch strategy impractical — it always tries recursive
+  branches first and never reaches the terminal base case within budget. `branchStrategy: "random"`
+  gives each branch a fair chance, letting the generator find paths through `obsProd` → `appProd` →
+  `typeAppProd` → `atomProd` → `ident` (the only terminal path).
+- **Files:** `test/counterexamples.test.ts` (new), `src/core/index.ts` (exports)
 - **Depends on:** #31 (do the static check first), #19, #20. Companion to #31 in v0.2.0.
 
 ### Milestone v0.3.0 — Laws

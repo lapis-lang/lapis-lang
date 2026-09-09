@@ -37,6 +37,11 @@ export class SpanClosure extends Value {
     ) {
         super()
     }
+
+    /** Alias for `paramType`, for duck-typing compatibility with lang-forma's `inferValueType`. */
+    get type(): Type {
+        return this.paramType
+    }
 }
 
 // ── Variant value ─────────────────────────────────────────────────────────────
