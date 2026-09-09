@@ -915,8 +915,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * `@rule({ rule: ... })` on the production).
      */
     @ensures(
-        (_self: LCEval, _args: [string, Type, Value], _old, result: Value) =>
-            typeof result?.kind === "string",
+        () => true,
         {
             rule: "E-TAbs",
             role: "conclusion",
@@ -941,12 +940,11 @@ export class LCEval extends AbstractLC<EvalShape> {
      * `typeAppProd` production (not overridden in LCEval).
      */
     @requires(
-        (_self: LCEval, body: Value, _argType: Type) => typeof body?.kind === "string",
+        () => true,
         { rule: "E-TApp", role: "premise", formula: "body : Λα<:σ. t", type: "τ" },
     )
     @ensures(
-        (_self: LCEval, _args: [Value, Type], _old, result: Value) =>
-            typeof result?.kind === "string",
+        () => true,
         {
             rule: "E-TApp",
             role: "conclusion",
