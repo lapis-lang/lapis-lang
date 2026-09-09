@@ -60,6 +60,7 @@ import {
     type Type,
     TypeEnv,
     TypeVar,
+    TypeVarEnv,
 } from "./types.ts"
 
 import { AbstractLC, type LCShape } from "./grammar.ts"
@@ -72,6 +73,27 @@ interface TypeCheckShape extends LCShape {
     expr: Type
     atom: Type
     type: Type
+}
+
+// ── Combined typing context (Γ + Δ) ──────────────────────────────────────────
+
+/**
+ * The inherited context for type checking bundles the term-variable context
+ * `Γ` (TypeEnv) and the type-variable context `Δ` (TypeVarEnv). The base
+ * grammar's `ctx` is `unknown`; the type checker uses this pair so that
+ * `typeVarCtx` can extract Δ and `extendCtx`/`extendTypeVarCtx` can extend
+ * the correct half.
+ */
+class TypeCheckCtx {
+    constructor(
+        readonly gamma: TypeEnv,
+        readonly delta: TypeVarEnv = new TypeVarEnv(),
+    ) {}
+
+    /** True if `ctx` is a `TypeCheckCtx`. */
+    static is(ctx: unknown): ctx is TypeCheckCtx {
+        return ctx instanceof TypeCheckCtx
+    }
 }
 
 // ── Well-formedness check for @ensures ────────────────────────────────────────
@@ -159,18 +181,31 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      */
     parseWith(input: string, gamma: TypeEnv): Set<Type> {
         this._input = input
-        return this._parseWith(input, this.exprProd(gamma))
+        return this._parseWith(input, this.exprProd(new TypeCheckCtx(gamma)))
     }
 
     override start(): Parser<Type> {
-        return this.exprProd(new TypeEnv())
+        return this.exprProd(new TypeCheckCtx(new TypeEnv()))
     }
 
     // ── Context extension: extend Γ with x:σ ─────────────────────────────────
 
     protected override extendCtx(ctx: unknown, name: string, type: Type): unknown {
-        if (ctx instanceof TypeEnv) {
-            return ctx.extend(name, type)
+        if (TypeCheckCtx.is(ctx)) {
+            return new TypeCheckCtx(ctx.gamma.extend(name, type), ctx.delta)
+        }
+        return ctx
+    }
+
+    /** Extract Δ (type-variable context) from the inherited context. */
+    protected override typeVarCtx(ctx: unknown): TypeVarEnv {
+        return TypeCheckCtx.is(ctx) ? ctx.delta : new TypeVarEnv()
+    }
+
+    /** Extend the inherited context with an updated Δ. */
+    protected override extendTypeVarCtx(ctx: unknown, delta: TypeVarEnv): unknown {
+        if (TypeCheckCtx.is(ctx)) {
+            return new TypeCheckCtx(ctx.gamma, delta)
         }
         return ctx
     }
@@ -246,7 +281,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      */
     @requires(
         (_self: LCTypeCheck, name: string, ctx: unknown) =>
-            ctx instanceof TypeEnv && ctx.lookup(name) !== undefined,
+            TypeCheckCtx.is(ctx) && ctx.gamma.lookup(name) !== undefined,
         { rule: "T-Var", role: "premise", formula: "x : σ ∈ Γ" },
     )
     @ensures(
@@ -255,7 +290,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         { rule: "T-Var", role: "conclusion", formula: "result : σ" },
     )
     protected varRef(name: string, ctx: unknown): Type {
-        return (ctx as TypeEnv).lookup(name) as Type
+        return (ctx as TypeCheckCtx).gamma.lookup(name) as Type
     }
 
     protected paren(e: Type): Type {
@@ -396,7 +431,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.ws1,
             char("["),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("]"),
             this.ws,
@@ -407,7 +442,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                 .chain((scrutineeType) =>
                     seq(this.ws, char("{"), this.ws)
                         .chain(() =>
-                            this.spanFoldHandlers(dataType, ctx as TypeEnv)
+                            this.spanFoldHandlers(dataType, ctx as TypeCheckCtx)
                                 .chain((spanHandlers) =>
                                     seq(this.ws, char("}"))
                                         .map(() =>
@@ -431,8 +466,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     @rule
     protected spanFoldHandlers(
         dataType: DataType,
-        ctx: TypeEnv,
-    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeEnv }[]> {
+        ctx: TypeCheckCtx,
+    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }[]> {
         return sepBy(
             this.spanFoldHandler(dataType, ctx),
             seq(this.ws, char(","), this.ws),
@@ -443,8 +478,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     @rule
     protected spanFoldHandler(
         dataType: DataType,
-        ctx: TypeEnv,
-    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeEnv }> {
+        ctx: TypeCheckCtx,
+    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }> {
         return seq(
             this.variantName,
             this.ws,
@@ -460,7 +495,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const variant = dataType.findVariant(vName)
             if (!variant) {
                 return empty<
-                    { variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeEnv }
+                    { variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }
                 >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
@@ -470,7 +505,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             for (let i = 0; i < bindingList.length; i++) {
                 const field = variant.fields[i]
                 if (field) {
-                    handlerCtx = handlerCtx.extend(bindingList[i]!, field.type)
+                    handlerCtx = new TypeCheckCtx(
+                        handlerCtx.gamma.extend(bindingList[i]!, field.type),
+                        handlerCtx.delta,
+                    )
                 }
             }
             // Parse the body to capture the span (the type is discarded — it was
@@ -497,7 +535,12 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     private evalFoldFixpoint(
         dataType: DataType,
         scrutineeType: Type,
-        spanHandlers: { variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeEnv }[],
+        spanHandlers: {
+            variantName: string
+            bindings: string[]
+            bodySpan: Span
+            ctx: TypeCheckCtx
+        }[],
     ): Type {
         // Premise 1: scrutinee : T
         if (!isSubtype(scrutineeType, dataType)) return Any
@@ -537,7 +580,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         const field = variant.fields[i]
                         if (field && field.isRecursive) {
                             // Rebind recursive field to currentSigma
-                            handlerCtx = handlerCtx.extend(handler.bindings[i]!, currentSigma)
+                            handlerCtx = new TypeCheckCtx(
+                                handlerCtx.gamma.extend(handler.bindings[i]!, currentSigma),
+                                handlerCtx.delta,
+                            )
                         }
                     }
                     // Re-parse the handler body under the refined context
@@ -738,7 +784,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.typeAppProd(ctx)
                 .map((bodyTy) => ({ bodyTy }))
                 .chain(({ bodyTy }) =>
-                    seq(this.ws, char("["), this.ws, this.typeProd, this.ws, char("]"))
+                    seq(
+                        this.ws,
+                        char("["),
+                        this.ws,
+                        this.typeProd(this.typeVarCtx(ctx)),
+                        this.ws,
+                        char("]"),
+                    )
                         .map(([, , , argTy]) => ({ bodyTy, argTy }))
                         .chain(({ bodyTy, argTy }) => {
                             if (

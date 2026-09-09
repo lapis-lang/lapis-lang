@@ -73,6 +73,7 @@ import {
     Token,
     type Type,
     TypeVar,
+    TypeVarEnv,
 } from "./types.ts"
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
@@ -194,6 +195,26 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     /**
+     * Extract the type-variable context (Δ) from the inherited context.
+     * The base grammar has no Δ, so this returns an empty TypeVarEnv.
+     * Subclasses that track Δ (e.g. the type checker) override this to
+     * return the Δ portion of their context.
+     */
+    protected typeVarCtx(_ctx: unknown): TypeVarEnv {
+        return new TypeVarEnv()
+    }
+
+    /**
+     * Extend the inherited context with an updated type-variable context (Δ).
+     * The base grammar has no Δ, so this is a no-op (returns ctx unchanged).
+     * Subclasses that track Δ override this to thread the extended Δ through
+     * the context.
+     */
+    protected extendTypeVarCtx(ctx: unknown, _delta: TypeVarEnv): unknown {
+        return ctx
+    }
+
+    /**
      * Hook for the type of a fold handler's field binding.
      * - AST builder: returns `field.type` (the declared type).
      * - Type checker: for recursive fields, returns `Any` (the result type σ
@@ -207,12 +228,17 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // ── Type productions ──────────────────────────────────────────────────────
 
     // σ → τ
+    //
+    // `delta` (Δ) is the type-variable context, threaded through type
+    // productions so `atomType` can resolve bound type variables before the
+    // registry. The default empty Δ is used at top level; `typeAbsProd`
+    // extends Δ when entering a type-abstraction body.
     @rule
-    get typeProd(): Parser<Type> {
+    typeProd(delta: TypeVarEnv = new TypeVarEnv()): Parser<Type> {
         return or(
-            seq(this.atomType, this.ws, this.arrow, this.ws, this.typeProd)
+            seq(this.atomType(delta), this.ws, this.arrow, this.ws, this.typeProd(delta))
                 .map(([dom, , , , cod]) => new FunType(dom, cod)),
-            this.atomType,
+            this.atomType(delta),
         )
     }
 
@@ -222,12 +248,19 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     // ( σ )  |  Ident
+    //
+    // Resolution order: bound type variable (Δ) → built-in → registry → TypeVar.
+    // Checking Δ first resolves a bound type variable to a `TypeVar` carrying
+    // its declared bound, before consulting built-ins or the registry.
     @rule
-    protected get atomType(): Parser<Type> {
+    protected atomType(delta: TypeVarEnv = new TypeVarEnv()): Parser<Type> {
         return or(
-            seq(char("("), this.ws, this.typeProd, this.ws, char(")"))
+            seq(char("("), this.ws, this.typeProd(delta), this.ws, char(")"))
                 .map(([, , t]) => t),
             this.typeName.map((name) => {
+                // Bound type variable — resolve via Δ, carrying the declared bound
+                const tyVarBound = delta.lookup(name)
+                if (tyVarBound) return new TypeVar(name, tyVarBound)
                 // Built-in types
                 if (name === "Any") return Any
                 if (name === "Nothing") return Nothing
@@ -294,7 +327,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char(":"),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("."),
             this.ws,
@@ -311,24 +344,53 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     // Λα <: σ. t  (type abstraction — ^ or Λ)
+    //
+    // The type-variable binder uses `typeName` (uppercase-first), matching the
+    // type-position grammar (`atomType` resolves via `typeName`). This lets a
+    // bound type variable be referenced in a type annotation: `^A <: Any. \x:A. x`.
+    // The bound type variable is added to Δ (type-variable context) so that
+    // references inside the body resolve to a `TypeVar` carrying the declared
+    // bound. The bound σ is parsed under the *outer* Δ (the variable is not in
+    // scope in its own bound).
+    //
+    // The binder is validated: it must not be a built-in type name (`Any`,
+    // `Nothing`, `Token`) or a registered type name. Binding such a name would
+    // shadow a real type inside the body, which is misleading even with
+    // lexical scoping. The term is rejected (empty parse forest) instead.
     @rule
     protected typeAbsProd(ctx: unknown): Parser<S["expr"]> {
+        const delta = this.typeVarCtx(ctx)
         return seq(
             or(char("^"), literal("Λ")),
-            this.ident,
+            this.typeName,
             this.ws,
             this.kw("<:"),
             this.ws,
-            this.typeProd,
+            this.typeProd(delta),
             this.ws,
             char("."),
             this.ws,
         ).chain(([, tyVar, , , , bound]) => {
             assert(typeof tyVar === "string", "type var must be a string")
             assert(bound !== undefined, "type bound must be defined")
-            return this.exprProd(ctx)
+            if (this.isReservedTypeName(tyVar)) {
+                return empty<S["expr"]>()
+            }
+            const bodyDelta = delta.extend(tyVar, bound)
+            return this.exprProd(this.extendTypeVarCtx(ctx, bodyDelta))
                 .map((body) => this.typeAbs(tyVar, bound, body))
         }).map(([, result]) => result)
+    }
+
+    /**
+     * Check whether `name` is a reserved type name — a built-in (`Any`,
+     * `Nothing`, `Token`) or a registered type. Binding such a name as a type
+     * variable would shadow a real type, which is misleading even with
+     * lexical scoping.
+     */
+    protected isReservedTypeName(name: string): boolean {
+        return name === "Any" || name === "Nothing" || name === "Token" ||
+            this.registry.lookup(name) !== undefined
     }
 
     // cofold [T] e { o₁(x₁) → t, ... }
@@ -339,7 +401,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws1,
             char("["),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("]"),
             this.ws,
@@ -407,7 +469,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char(":"),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("="),
             this.ws,
@@ -434,7 +496,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws1,
             char("["),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("]"),
             this.ws,
@@ -520,7 +582,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws1,
             char("["),
             this.ws,
-            this.typeProd,
+            this.typeProd(this.typeVarCtx(ctx)),
             this.ws,
             char("]"),
             this.ws,
@@ -616,7 +678,14 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected typeAppProd(ctx: unknown): Parser<S["expr"]> {
         return seq(
             this.atomProd(ctx),
-            seq(this.ws, char("["), this.ws, this.typeProd, this.ws, char("]"))
+            seq(
+                this.ws,
+                char("["),
+                this.ws,
+                this.typeProd(this.typeVarCtx(ctx)),
+                this.ws,
+                char("]"),
+            )
                 .map(([, , , ty]) => ty)
                 .many(),
         ).map(([atom, types]) =>
