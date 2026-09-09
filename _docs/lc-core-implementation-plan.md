@@ -203,14 +203,25 @@ with the current status, milestone, and dependencies.
 
 #### PBI #20: T-Sub (subsumption) — decide explicit vs implicit and implement
 
-- **Status:** Open
+- **Status:** Complete
 - **Assignee:** @mlhaufe
 - **Goal:** Decide whether T-Sub needs an explicit grammar production or whether the current
   implicit subsumption (via `isSubtype` in `@requires` at each use site) is sufficient. If explicit,
   implement; if implicit, document the decision and add tests.
-- **Current state:** `isSubtype` is called in `app`, `variantCon`, `obs`, `fold`, `unfold`, and
-  `typeApp` `@requires`/premises. Subsumption is built in.
-- **Files:** `src/core/typing_grammar.ts`, test files
+- **Decision:** **Implicit subsumption.** No standalone T-Sub production. Each consumer site
+  enforces `isSubtype` in its own premise — `app`, `variantCon`, `obs`, `fold`, `unfold`, `cofold`,
+  `typeApp`, and now `let_`. This is consistent with TAPL `fullfsub`, where subsumption is folded
+  into each rule's premise check rather than being a separate rule the programmer invokes.
+- **Result:** The T-Let premise 1 (`Γ ⊢ t : σ  ∧  σ <: τ`) was **completely unenforced** — `let_`
+  ignored its `_type` and `_def` arguments, so `let x:Nat = \y:Any. y in x` was accepted as `Nat`
+  even though `Any → Any` is not `<: Nat`. Fixed by overriding `letProd` in `LCTypeCheck`: after
+  parsing the def and getting its type σ, check `isSubtype(σ, τ)` (the declared type). If the check
+  fails, return `empty<Type>()` (ill-typed). If it passes, the body is parsed under `Γ + x:τ` (the
+  declared type, widened via subsumption). The `@requires` decorator on `let_` is declarative
+  metadata for the rule model (same lesson as #39 — `@requires` is not a runtime check). 11 new
+  subsumption tests in `test/typing.test.ts` (105 total): S-Refl, S-Top, S-Bot at let-bindings;
+  rejection of FunType/Bool/Any bound to a Nat declaration; nested let subsumption.
+- **Files:** `src/core/typing_grammar.ts`, `test/typing.test.ts`, `test/metadata.test.ts`
 - **Depends on:** #19 (Nothing propagation should land first so subsumption tests cover the bottom
   case).
 
@@ -410,7 +421,7 @@ v0.2.0 — Sound core
   #42 (type-var binder/reference) ← complete (bug found during #39 fix; unblocks #20 tests)
   #44 (type-var lexical scoping)  ← complete (bug found during #42 review; depends on #42)
       ↓
-  #20 (T-Sub subsumption)        ← depends on #19; next up
+  #20 (T-Sub subsumption)        ← complete (implicit subsumption; T-Let premise enforced)
       ↓
   #21 (Progress @ensures)        ← depends on #19, #20, #30
       ↓
@@ -451,7 +462,7 @@ v0.4.0 — Patterns & surface
 - [x] Type variables can be referenced in type annotations — binder uses `typeName` (#42)
 - [x] Type variables resolve to `TypeVar` with declared bound — Δ threaded through type productions;
       reserved binder names rejected (#44)
-- [ ] T-Sub subsumption decided and implemented/documented (#20)
+- [x] T-Sub subsumption decided and implemented/documented (#20)
 - [ ] `@ensures` contracts fully encode the Progress theorem (#21)
 - [ ] Progress + Preservation mechanized via `verifyMetatheory` (#31)
 - [ ] Generative counterexample search via `findCounterexamples` (#32)

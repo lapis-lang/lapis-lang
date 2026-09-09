@@ -13,7 +13,7 @@
  *   T-Var:      x:σ ∈ Γ  ⟹  Γ ⊢ x : σ
  *   T-Abs:      Γ, x:σ ⊢ t : τ  ⟹  Γ ⊢ λx:σ.t : σ → τ
  *   T-App:      Γ ⊢ t : σ→τ  ∧  Γ ⊢ u : σ  ⟹  Γ ⊢ t u : τ
- *   T-Let:      Γ ⊢ t : σ  ∧  Γ, x:σ ⊢ u : τ  ⟹  Γ ⊢ let x:σ=t in u : τ
+ *   T-Let:      Γ ⊢ t : σ  ∧  σ <: τ  ∧  Γ, x:τ ⊢ u : τ'  ⟹  Γ ⊢ let x:τ=t in u : τ'
  *   T-Variant:  Γ ⊢ tⱼ : Fₖ(T)[α:=T]  ⟹  Γ ⊢ Cₖ(tⱼ) : T
  *   T-Fold:     Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ  ⟹  Γ ⊢ fold [T] e {...} : σ
  *   T-Obs:      Γ ⊢ e : T  ⟹  Γ ⊢ e.oₖ : Gₖ(T)[α:=T]
@@ -169,7 +169,7 @@ function isWellFormedType(t: Type | undefined): boolean {
  *   T-Var:  Γ(x) = σ  ⟹  Γ ⊢ x : σ          (@requires: x must be in Γ)
  *   T-Abs:  Γ, x:σ ⊢ t : τ  ⟹  Γ ⊢ λx:σ.t : σ → τ
  *   T-App:  Γ ⊢ t : σ→τ  ∧  Γ ⊢ u : σ  ⟹  Γ ⊢ t u : τ  (@requires: domain match)
- *   T-Let:  Γ ⊢ t : σ  ∧  Γ, x:σ ⊢ u : τ  ⟹  Γ ⊢ let x:σ=t in u : τ
+ *   T-Let:  Γ ⊢ t : σ  ∧  σ <: τ  ∧  Γ, x:τ ⊢ u : τ'  ⟹  Γ ⊢ let x:τ=t in u : τ'
  */
 export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     /** The source text, stored for `parseToFixpoint` re-parsing of fold handler bodies. */
@@ -254,19 +254,37 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         return (fn as FunType).result
     }
 
-    // ── T-Let: Γ ⊢ t : σ  ∧  Γ, x:σ ⊢ u : τ  ⟹  Γ ⊢ let x:σ=t in u : τ ────────
+    // ── T-Let: Γ ⊢ t : σ  ∧  σ <: τ  ∧  Γ, x:τ ⊢ u : τ'  ⟹  Γ ⊢ let x:τ=t in u : τ' ───
 
     /**
+     * Let-binding typing rule. Premise 1 (def type <: declared type) is
+     * enforced in the `letProd` override: if the definition's type is not a
+     * subtype of the declared annotation, the override returns `empty<Type>()`
+     * (empty parse forest — ill-typed). This method is only reached after
+     * the premise check passes.
+     *
+     * This is the subsumption site for let-bindings: `let x:τ = (e : σ)`
+     * where `σ <: τ` is accepted (the body sees `x : τ`, the widened type).
+     * Subsumption is implicit — no standalone T-Sub production is needed;
+     * each consumer site checks `isSubtype` in its own premise.
+     *
      * @ensures Progress: let can always step (E-Let) if the value is not yet a
      * value, or is a value after evaluation. The result type is the body type.
      */
+    @requires(
+        (_self: LCTypeCheck, _name: string, type: Type, def: Type, _body: Type) =>
+            isSubtype(def, type),
+        { rule: "T-Let", role: "premise", formula: "def : σ  ∧  σ <: τ" },
+    )
     @ensures(
         (_self: LCTypeCheck, _args: [string, Type, Type, Type], _old, result: Type) =>
             isWellFormedType(result),
-        { rule: "T-Let", role: "conclusion", formula: "result : τ" },
+        { rule: "T-Let", role: "conclusion", formula: "result : τ'" },
     )
     protected let_(_name: string, _type: Type, _def: Type, body: Type): Type {
-        // The body type τ was computed under Γ + x:σ.
+        // Premise 1 is enforced in the `letProd` override (returns empty on
+        // failure). The body type τ was computed under Γ + x:τ (the declared
+        // type, widened via subsumption from the def's actual type σ).
         return body
     }
 
@@ -807,5 +825,56 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                 .map(([, result]) => result),
             this.atomProd(ctx),
         )
+    }
+
+    // ── Override letProd to enforce T-Let premise 1 ───────────────────────────
+
+    /**
+     * Override `letProd` to enforce T-Let premise 1 (def type <: declared
+     * type) in the production path. The base production parses the def, then
+     * the body under the extended context, and calls `let_`. But `@requires`
+     * is declarative metadata only (not a runtime check), so the premise
+     * must be enforced here.
+     *
+     * After parsing the def and getting its type σ, we check `isSubtype(σ, τ)`
+     * where τ is the declared type. If the check fails, we return
+     * `empty<Type>()` (ill-typed — empty parse forest). If it passes, the
+     * body is parsed under Γ + x:τ (the declared type, widened via
+     * subsumption), and `let_` returns the body type.
+     *
+     * This is the subsumption site for let-bindings: `let x:τ = (e : σ)`
+     * where `σ <: τ` is accepted. Subsumption is implicit — no standalone
+     * T-Sub production; each consumer site checks `isSubtype` in its own
+     * premise.
+     */
+    // let x:τ = t in u  — T-Let via chain (type-checks def <: declared)
+    @rule
+    protected override letProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.kw("let"),
+            this.ws1,
+            this.ident,
+            this.ws,
+            char(":"),
+            this.ws,
+            this.typeProd(this.typeVarCtx(ctx)),
+            this.ws,
+            char("="),
+            this.ws,
+        ).chain(([, , name, , , , ty]) => {
+            return this.exprProd(ctx)
+                .map((def) => ({ name, ty, def }))
+                .chain(({ name, ty, def }) => {
+                    // T-Let premise 1: def type σ must be <: declared type τ
+                    if (!isSubtype(def, ty)) return empty<Type>()
+                    return seq(this.ws1, this.kw("in"), this.ws1)
+                        .chain(() =>
+                            this.exprProd(this.extendCtx(ctx, name, ty))
+                                .map((body) => this.let_(name, ty, def, body))
+                        )
+                        .map(([, result]) => result)
+                })
+                .map(([, result]) => result)
+        }).map(([, result]) => result)
     }
 }

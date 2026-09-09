@@ -13,7 +13,7 @@ const expected = [
     ["T-App", ["app"], ["fn : σ → τ  ∧  arg <: σ"], ["result : τ"]],
     ["T-Cofold", ["cofold"], [], ["result : σ"]],
     ["T-Fold", ["fold"], [], ["result : σ (join of handler body types)"]],
-    ["T-Let", ["let_"], [], ["result : τ"]],
+    ["T-Let", ["let_"], ["def : σ  ∧  σ <: τ"], ["result : τ'"]],
     ["T-Obs", ["obs"], [], ["result : Gₖ(T)[α:=T]"]],
     ["T-TAbs", ["typeAbs"], [], ["result : ∀α<:σ.τ"]],
     ["T-TApp", ["typeApp"], ["body : ∀α<:σ.τ  ∧  T₂ <: σ"], ["result : τ[α:=T₂]"]],
