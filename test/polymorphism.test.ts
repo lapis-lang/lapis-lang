@@ -91,9 +91,8 @@ Deno.test("Polymorphism: lowercase type-variable binder is rejected", () => {
 })
 
 // ── Type-variable lexical scoping ──────────────────────────────────────────────
-// A bound type variable shadows a registered type of the same name inside its
-// scope. Δ (TypeVarEnv) is threaded through type productions so `atomType`
-// checks Δ before the registry.
+// Δ (TypeVarEnv) is threaded through type productions so `atomType` resolves
+// bound type variables to a `TypeVar` carrying their declared bound.
 
 Deno.test("Polymorphism: type variable bound carries declared bound from Δ", () => {
     // `^A <: Nat. \x:A. x` — the bound `Nat` refers to the registered DataType

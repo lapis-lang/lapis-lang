@@ -250,15 +250,15 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // ( σ )  |  Ident
     //
     // Resolution order: bound type variable (Δ) → built-in → registry → TypeVar.
-    // Checking Δ first ensures a bound type variable shadows a registered type
-    // of the same name inside its scope (lexical scoping).
+    // Checking Δ first resolves a bound type variable to a `TypeVar` carrying
+    // its declared bound, before consulting built-ins or the registry.
     @rule
     protected atomType(delta: TypeVarEnv = new TypeVarEnv()): Parser<Type> {
         return or(
             seq(char("("), this.ws, this.typeProd(delta), this.ws, char(")"))
                 .map(([, , t]) => t),
             this.typeName.map((name) => {
-                // Bound type variable (shadows registry/builtins inside its scope)
+                // Bound type variable — resolve via Δ, carrying the declared bound
                 const tyVarBound = delta.lookup(name)
                 if (tyVarBound) return new TypeVar(name, tyVarBound)
                 // Built-in types
@@ -348,10 +348,10 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // The type-variable binder uses `typeName` (uppercase-first), matching the
     // type-position grammar (`atomType` resolves via `typeName`). This lets a
     // bound type variable be referenced in a type annotation: `^A <: Any. \x:A. x`.
-    // The bound type variable is added to Δ (type-variable context) so it
-    // shadows any registered type of the same name inside the body (lexical
-    // scoping). The bound σ is parsed under the *outer* Δ (the variable is
-    // not in scope in its own bound).
+    // The bound type variable is added to Δ (type-variable context) so that
+    // references inside the body resolve to a `TypeVar` carrying the declared
+    // bound. The bound σ is parsed under the *outer* Δ (the variable is not in
+    // scope in its own bound).
     //
     // The binder is validated: it must not be a built-in type name (`Any`,
     // `Nothing`, `Token`) or a registered type name. Binding such a name would

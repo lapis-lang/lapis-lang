@@ -90,7 +90,7 @@ class TypeCheckCtx {
         readonly delta: TypeVarEnv = new TypeVarEnv(),
     ) {}
 
-    /** True if `ctx` is a `TypeCheckCtx` wrapping the given `gamma`. */
+    /** True if `ctx` is a `TypeCheckCtx`. */
     static is(ctx: unknown): ctx is TypeCheckCtx {
         return ctx instanceof TypeCheckCtx
     }
