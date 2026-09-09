@@ -53,17 +53,19 @@
 
 ### What's Missing or Incomplete
 
-| Component                    | Status              | Notes                                                                                                 | PBI          |
-| ---------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation        | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                 | #19          |
-| T-TApp premise enforcement   | ✅ Complete         | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest) | #39          |
-| T-Sub (subsumption)          | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed                | #20          |
-| `@ensures` for Progress      | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem         | #21          |
-| Law/properties machinery     | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet  | #22          |
-| T-FoldMatch + E-FoldMatch    | ❌ Not implemented  | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                           | #23          |
-| T-Pattern                    | ❌ Not implemented  | `match(pₖ)` — pattern-matched construction (introduction)                                             | #24          |
-| Surface language elaboration | ❌ Not started      | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                      | #25          |
-| Dead code / consolidation    | ❌ Not started      | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                   | #15–#17, #26 |
+| Component                     | Status              | Notes                                                                                                 | PBI          |
+| ----------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- | ------------ |
+| `Nothing` propagation         | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                 | #19          |
+| T-TApp premise enforcement    | ✅ Complete         | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest) | #39          |
+| Type-variable reference       | ✅ Complete         | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations           | #42          |
+| Type-variable lexical scoping | ✅ Complete         | `Δ` (TypeVarEnv) threaded through type productions; bound type vars shadow registry inside scope      | #44          |
+| T-Sub (subsumption)           | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed                | #20          |
+| `@ensures` for Progress       | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem         | #21          |
+| Law/properties machinery      | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet  | #22          |
+| T-FoldMatch + E-FoldMatch     | ❌ Not implemented  | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                           | #23          |
+| T-Pattern                     | ❌ Not implemented  | `match(pₖ)` — pattern-matched construction (introduction)                                             | #24          |
+| Surface language elaboration  | ❌ Not started      | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                      | #25          |
+| Dead code / consolidation     | ❌ Not started      | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                   | #15–#17, #26 |
 
 ## Plan — PBI Roadmap
 
@@ -158,6 +160,46 @@ with the current status, milestone, and dependencies.
   non-polymorphic result. Well-formed cases (bound satisfied, chained applications) are unchanged.
 - **Files:** `src/core/typing_grammar.ts`, `test/polymorphism.test.ts`
 - **Depends on:** Nothing (found during the #19 review; verified pre-existing on `master`).
+
+#### Bug #42: Type variables cannot be referenced in type annotations
+
+- **Status:** Complete
+- **Assignee:** @mlhaufe
+- **Goal:** Align the type-variable binder and reference grammars. `typeAbsProd` bound the type
+  variable via the lowercase-first `ident` production, but type positions (`atomType` → `typeName`)
+  only accept uppercase-first identifiers — so a bound type variable could never be referenced in a
+  type annotation (`\x:alpha. x` didn't parse). This made `substituteTypeVar` dead code for any term
+  that mentioned α, and blocked meaningful subsumption tests for #20.
+- **Result:** `typeAbsProd` now uses `typeName` (uppercase-first) for the binder, matching the
+  type-position grammar. An unregistered uppercase name already resolves to a `TypeVar` in
+  `atomType`, so the binder and reference sites share one identifier grammar. Type variables are now
+  uppercase (e.g. `^A <: Any. \x:A. x`), consistent with the TAPL `fullfsub` convention
+  (`lambda X. lambda x:X. x`). The `substituteTypeVar` machinery is now exercisable:
+  `(^A <: Any. \x:A. x) [Nat]` yields `Nat → Nat`.
+- **Files:** `src/core/grammar.ts`, `test/polymorphism.test.ts`
+- **Depends on:** Nothing (found during the #39 fix; verified pre-existing on `master`). Unblocks
+  meaningful #20 subsumption tests.
+
+#### Bug #44: Type variable name clashing with a registered type name resolves to the DataType
+
+- **Status:** Complete
+- **Assignee:** @mlhaufe
+- **Goal:** Ensure a bound type variable shadows a registered type of the same name inside its
+  scope. Previously `atomType` resolved names via `this.registry.lookup(name)` before falling
+  through to `TypeVar`, so `^Nat <: Any. \x:Nat. x` resolved the body's `Nat` to the registered
+  `DataType`, not `TypeVar("Nat")` — silently losing substitution.
+- **Result:** `Δ` (TypeVarEnv) is now threaded through type productions (`typeProd`/`atomType`), the
+  same way `Γ` (TypeEnv) is threaded through term productions. `atomType` checks `Δ` **before** the
+  registry, so a bound type variable shadows a registered type inside its scope (lexical scoping).
+  The type checker uses a combined `TypeCheckCtx` bundling `Γ` and `Δ`. The bound `σ` in
+  `^A <: σ. t` is parsed under the outer `Δ` (the variable is not in scope in its own bound).
+  `TypeVar.bound` now carries the declared bound (not always `Any`). Binder validation rejects
+  built-in type names (`Any`, `Nothing`, `Token`) and registered type names — binding such a name
+  would shadow a real type, which is misleading even with lexical scoping. The term is rejected
+  (empty parse forest) instead.
+- **Files:** `src/core/grammar.ts`, `src/core/typing_grammar.ts`, `src/core/eval_grammar.ts`,
+  `test/polymorphism.test.ts`
+- **Depends on:** #42 (type-variable reference must work before scoping can be fixed).
 
 #### PBI #20: T-Sub (subsumption) — decide explicit vs implicit and implement
 
@@ -365,6 +407,8 @@ v0.1.1 — Clean core
 v0.2.0 — Sound core
   #19 (Nothing propagation)      ← complete
   #39 (T-TApp premise enforced)  ← complete (bug found during #19 review; independent of #19)
+  #42 (type-var binder/reference) ← complete (bug found during #39 fix; unblocks #20 tests)
+  #44 (type-var lexical scoping)  ← complete (bug found during #42 review; depends on #42)
       ↓
   #20 (T-Sub subsumption)        ← depends on #19; next up
       ↓
@@ -404,6 +448,9 @@ v0.4.0 — Patterns & surface
 - [x] Adopt `Grammar.rules()` / `collectRules()` — replace hand-rolled `toInference()` (#30)
 - [x] `Nothing` propagation in grammar-based checker (#19)
 - [x] T-TApp premises enforced in production path — no `undefined` in the parse forest (#39)
+- [x] Type variables can be referenced in type annotations — binder uses `typeName` (#42)
+- [x] Type variables shadow registered types inside their scope — Δ threaded through type
+      productions (#44)
 - [ ] T-Sub subsumption decided and implemented/documented (#20)
 - [ ] `@ensures` contracts fully encode the Progress theorem (#21)
 - [ ] Progress + Preservation mechanized via `verifyMetatheory` (#31)
