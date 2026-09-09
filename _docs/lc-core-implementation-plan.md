@@ -27,25 +27,26 @@
 
 ## Current State
 
-### What Works (59 tests passing, v4.1.0)
+### What Works (117 tests passing, lang-forma v1.1.0)
 
-| Component                                                      | Status                                                                                                        | Files                                  |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Types                                                          | ✅ Complete                                                                                                   | `types.ts`                             |
-| Terms                                                          | ✅ Complete                                                                                                   | `terms.ts`                             |
-| Values (incl. `SpanClosure`, `SpanCodataVal`)                  | ✅ Complete                                                                                                   | `values.ts`                            |
-| Subtyping (S-Refl through S-And-Elim)                          | ✅ Complete                                                                                                   | `subtyping.ts`                         |
-| `join` / `meet` lattice operations                             | ✅ Complete                                                                                                   | `subtyping.ts`                         |
-| Concrete syntax grammar (AbstractLC + LCAST)                   | ✅ Complete                                                                                                   | `grammar.ts`                           |
-| TypeRegistry with reverse lookups                              | ✅ Complete                                                                                                   | `grammar.ts`                           |
-| Type-checking grammar (LCTypeCheck)                            | ✅ T-Var, T-Abs, T-App, T-Let, T-Variant, T-Obs, T-Fold, T-Unfold, T-TAbs, T-TApp, T-Cofold, T-Sub (implicit) | `typing_grammar.ts`                    |
-| Evaluation grammar (LCEval)                                    | ✅ E-App, E-Let, E-Fold, E-Unfold, E-Obs, E-Cofold, E-TApp via `_forward`                                     | `eval_grammar.ts`                      |
-| `parseToFixpoint` for fold σ                                   | ✅ Complete — wired into `foldProd` (line 539)                                                                | `typing_grammar.ts`                    |
-| Contract metadata (`@requires`/`@ensures`/`@rule`)             | ✅ Complete — all rules have `rule` + `formula` metadata                                                      | `typing_grammar.ts`, `eval_grammar.ts` |
-| First-class inference rules (`Grammar.rules` / `collectRules`) | ✅ Complete — lang-forma rule model replaces hand-rolled `toInference()`                                      | `typing_grammar.ts`                    |
-| `@ensures` Progress contracts                                  | ✅ Complete — each production encodes its Progress case                                                       | `typing_grammar.ts`                    |
-| `DerivationTree` + `SemanticPass`                              | ✅ Validated — `parseToTree` + tree-consuming passes work on LC grammar                                       | `grammar.ts`, test files               |
-| Grammar ambiguity (single parse tree)                          | ✅ Resolved (v4.0.2) — all tests assert `result.size === 1`                                                   | all test files                         |
+| Component                                                      | Status                                                                                                                     | Files                                        |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Types                                                          | ✅ Complete                                                                                                                | `types.ts`                                   |
+| Terms                                                          | ✅ Complete                                                                                                                | `terms.ts`                                   |
+| Values (incl. `SpanClosure`, `SpanCodataVal`)                  | ✅ Complete                                                                                                                | `values.ts`                                  |
+| Subtyping (S-Refl through S-And-Elim)                          | ✅ Complete                                                                                                                | `subtyping.ts`                               |
+| `join` / `meet` lattice operations                             | ✅ Complete                                                                                                                | `subtyping.ts`                               |
+| Concrete syntax grammar (AbstractLC + LCAST)                   | ✅ Complete                                                                                                                | `grammar.ts`                                 |
+| TypeRegistry with reverse lookups                              | ✅ Complete                                                                                                                | `grammar.ts`                                 |
+| Type-checking grammar (LCTypeCheck)                            | ✅ T-Var, T-Abs, T-App, T-Let, T-Variant, T-Obs, T-Fold, T-Unfold, T-TAbs, T-TApp, T-Cofold, T-Sub (implicit)              | `typing_grammar.ts`                          |
+| Evaluation grammar (LCEval)                                    | ✅ E-App, E-Let, E-Fold, E-Unfold, E-Obs, E-Cofold, E-TApp via `_forward`; `@requires`/`@ensures` contracts on all 9 rules | `eval_grammar.ts`                            |
+| `parseToFixpoint` for fold σ                                   | ✅ Complete — wired into `foldProd` (line 539)                                                                             | `typing_grammar.ts`                          |
+| Contract metadata (`@requires`/`@ensures`/`@rule`)             | ✅ Complete — all typing + eval rules have `rule` + `formula` + `type` metadata                                            | `typing_grammar.ts`, `eval_grammar.ts`       |
+| First-class inference rules (`Grammar.rules` / `collectRules`) | ✅ Complete — lang-forma rule model replaces hand-rolled `toInference()`                                                   | `typing_grammar.ts`, `eval_grammar.ts`       |
+| `@ensures` Progress contracts                                  | ✅ Complete — each production encodes its Progress case; verified by `checkProgress`                                       | `typing_grammar.ts`, `eval_grammar.ts`       |
+| Metatheory verification (`verifyMetatheory`)                   | ✅ Complete — Progress + Preservation (static + unification) all hold                                                      | `eval_grammar.ts`, `test/metatheory.test.ts` |
+| `DerivationTree` + `SemanticPass`                              | ✅ Validated — `parseToTree` + tree-consuming passes work on LC grammar                                                    | `grammar.ts`, test files                     |
+| Grammar ambiguity (single parse tree)                          | ✅ Resolved (v4.0.2) — all tests assert `result.size === 1`                                                                | all test files                               |
 
 > **Note:** There are no `typing.ts`, `eval.ts`, or `soundness.ts` files. The grammar-based
 > `LCTypeCheck` and `LCEval` are the sole implementations; soundness is encoded directly in
@@ -53,19 +54,20 @@
 
 ### What's Missing or Incomplete
 
-| Component                     | Status              | Notes                                                                                                                                        | PBI          |
-| ----------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation         | ✅ Complete         | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                        | #19          |
-| T-TApp premise enforcement    | ✅ Complete         | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                        | #39          |
-| Type-variable reference       | ✅ Complete         | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                  | #42          |
-| Type-variable lexical scoping | ✅ Complete         | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected | #44          |
-| T-Sub (subsumption)           | ⚠️ Implicit         | Applied at use sites via `isSubtype` in `@requires`; decide if explicit rule is needed                                                       | #20          |
-| `@ensures` for Progress       | ⚠️ Present but weak | Contracts exist with Progress comments; need to verify they fully encode the Progress theorem                                                | #21          |
-| Law/properties machinery      | ❌ Not started      | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                         | #22          |
-| T-FoldMatch + E-FoldMatch     | ❌ Not implemented  | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                  | #23          |
-| T-Pattern                     | ❌ Not implemented  | `match(pₖ)` — pattern-matched construction (introduction)                                                                                    | #24          |
-| Surface language elaboration  | ❌ Not started      | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                             | #25          |
-| Dead code / consolidation     | ❌ Not started      | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                          | #15–#17, #26 |
+| Component                     | Status             | Notes                                                                                                                                        | PBI          |
+| ----------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `Nothing` propagation         | ✅ Complete        | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                        | #19          |
+| T-TApp premise enforcement    | ✅ Complete        | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                        | #39          |
+| Type-variable reference       | ✅ Complete        | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                  | #42          |
+| Type-variable lexical scoping | ✅ Complete        | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected | #44          |
+| T-Sub (subsumption)           | ✅ Complete        | Implicit subsumption at use sites via `isSubtype` in `@requires`; T-Let premise 1 enforced in `letProd` override                             | #20          |
+| `@ensures` for Progress       | ✅ Complete        | Contracts on all typing rules encode Progress cases; verified by `checkProgress` (no gaps)                                                   | #21          |
+| Metatheory verification       | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`          | #31          |
+| Law/properties machinery      | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                         | #22          |
+| T-FoldMatch + E-FoldMatch     | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                  | #23          |
+| T-Pattern                     | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                    | #24          |
+| Surface language elaboration  | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                             | #25          |
+| Dead code / consolidation     | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                          | #15–#17, #26 |
 
 ## Plan — PBI Roadmap
 
@@ -227,38 +229,48 @@ with the current status, milestone, and dependencies.
 
 #### PBI #21: Strengthen `@ensures` contracts to encode Progress theorem
 
-- **Status:** Open
+- **Status:** Complete (subsumed by #31)
 - **Assignee:** @mlhaufe
 - **Goal:** Make `@ensures` contracts strong enough that a successful parse _is_ a Progress proof
   for the parsed term. The `@requires`/`@ensures` split mirrors the premise/conclusion structure of
   the inference rule; Progress is a consequence of the premises, not a separate postcondition.
-- **Current state:** `@ensures` contracts exist on all productions with Progress comments (e.g.,
-  `lam`: `result instanceof FunType`; `app`: follows from `@requires`; `variantCon`: value or step;
-  `obs`: step; `fold`: step; `unfold`: value). Need to verify contract composition and add a
-  Progress proof test.
-- **Tasks:**
-  1. Verify contract composition — sub-term Progress implies super-term Progress across the grammar
-     hierarchy.
-  2. Add Progress proof test — parse a term, verify `@ensures` contracts were checked (via
-     metadata), verify Progress holds.
-- **Files:** `src/core/typing_grammar.ts`, `src/core/eval_grammar.ts`, test files
+- **Result:** `@ensures` contracts on all typing rules encode Progress cases. The verification
+  (contract composition + Progress proof test) is mechanized by #31 —
+  `checkProgress(LCEval.rules,
+  LCEval)` reports `holds: true` with no gaps. The
+  `@ensures`-strengthening work was the _encoding_; #31 provided the _checking_ via the lang-forma
+  metatheory engine.
+- **Files:** `src/core/typing_grammar.ts`, `src/core/eval_grammar.ts`, `test/metatheory.test.ts`
 - **Depends on:** #19, #20 (Nothing and subsumption should be settled so Progress covers all cases).
+- **Subsumed by:** #31 (metatheory verification — `checkProgress` replaces hand-verified contract
+  composition).
 
 #### PBI #31: Metatheory verification — mechanize Progress + Preservation via `lang-forma`
 
-- **Status:** Open
+- **Status:** Complete
 - **Assignee:** @mlhaufe
-- **Goal:** Use `lang-forma`''s metatheory engine (`Grammar.metatheory()`, `verifyMetatheory`,
-  `checkProgress`, `checkPreservation`) to _verify_ Progress and Preservation over the LC grammar''s
-  dynamic-semantics rules, instead of arguing them by hand. Subsumes the "add a Progress proof test"
-  task in #21 and adds Preservation (which #21 does not cover).
-- **Tasks:**
-  1. Add `@requires`/`@ensures` + `rule`/`formula`/`role` metadata to `LCEval` (the eval grammar
-     currently has none) — this is the encoding work #21 was already going to do for the type
-     checker, extended to the evaluator.
-  2. Add `test/metatheory.test.ts` — call `verifyMetatheory(LCEval, LCTypeCheck)`, assert
-     `report.progress.holds` and `report.preservation.holds`.
-- **Files:** `src/core/eval_grammar.ts`, `test/metatheory.test.ts`, `_docs/theory/`
+- **Goal:** Use `lang-forma`'s metatheory engine (`verifyMetatheory`, `checkProgress`,
+  `checkPreservation`) to _verify_ Progress and Preservation over the LC grammar's dynamic-semantics
+  rules, instead of arguing them by hand. Subsumes the "add a Progress proof test" task in #21 and
+  adds Preservation (which #21 does not cover).
+- **What was done:**
+  1. Added `@requires`/`@ensures` + `rule`/`formula`/`role`/`type` metadata to all 9 `LCEval`
+     semantic action methods (E-Lam, E-App, E-Let, E-Fold, E-Unfold, E-Obs, E-Cofold, E-TAbs,
+     E-TApp). Value-rules (E-Lam, E-Unfold, E-TAbs) have no premises; step-rules (E-App, E-Let,
+     E-Fold, E-Obs, E-Cofold, E-TApp) have one premise each.
+  2. Added `@rule({ rule: "E-...", production: "...Prod" })` metadata to the 7 overridden production
+     methods in `LCEval` (lambdaProd, appProd, letProd, foldProd, unfoldProd, obsProd, cofoldProd)
+     for constructor-coverage linkage. E-TAbs and E-TApp use `production` in their `@ensures`
+     metadata instead (their productions are not overridden in LCEval).
+  3. Added `type: "τ"` to all premise/conclusion metadata so the Preservation check can verify type
+     consistency (the `clauseTypeTokens` extractor checks `meta.type` first).
+  4. Created `test/metatheory.test.ts` (12 tests): rule collection, classification, Progress,
+     Preservation (static + unification), combined `verifyMetatheory`, rule formatting.
+  5. Exported metatheory API (`checkProgress`, `checkPreservation`, `verifyMetatheory`, types) from
+     `src/core/index.ts`.
+- **Result:** `verifyMetatheory(LCEval, LCTypeCheck)` → `holds: true` (Progress: no gaps;
+  Preservation: all 6 step-rules preserve type τ; unification: τ unifies with τ).
+- **Files:** `src/core/eval_grammar.ts`, `src/core/index.ts`, `test/metatheory.test.ts`
 - **Depends on:** #30 (library rule shape), #19, #20 (core must be sound first). Subsumes the
   verification half of #21.
 
