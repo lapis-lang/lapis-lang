@@ -24,8 +24,12 @@
  * for closure-producing terms.
  */
 
-import { type CounterexampleResult, findCounterexamples } from "@lapis-lang/lang-forma"
-import { LCEval, LCTypeCheck } from "../src/index.ts"
+import {
+    type CounterexampleResult,
+    findCounterexamples,
+    LCEval,
+    LCTypeCheck,
+} from "../src/index.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"

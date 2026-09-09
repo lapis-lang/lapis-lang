@@ -285,7 +285,7 @@ with the current status, milestone, and dependencies.
   underspecified `@requires` premise).
 - **What was done:**
   1. Created `test/counterexamples.test.ts` with 5 tests: Progress + Preservation (100 runs),
-     different seed (200 runs), eval-only Progress (no type checker), reproducibility (same seed →
+     different seed (100 runs), eval-only Progress (no type checker), reproducibility (same seed →
      same result), and a larger 500-run search. All pass with 0 counterexamples.
   2. Tuned `GeneratorOptions` for the LC grammar: `branchStrategy: "random"` is required (the
      grammar's 7-branch `exprProd` with 6 recursive alternatives causes the default depth-first
