@@ -39,13 +39,27 @@ export { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 // Derivation trees + semantic passes
 export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/lang-forma"
 
-// First-class inference rules (lc.md §5 — collected from @requires/@ensures metadata)
+// First-class inference rules + metatheory verification
+// (lc.md §3+§5 — collected from @requires/@ensures metadata; Progress + Preservation via lang-forma)
 export {
+    checkPreservation,
+    checkProgress,
+    type ClassifiedRule,
+    classifyRule,
+    classifyRules,
     collectRules,
     formatRule,
     type FormattedInferenceRule,
     type InferenceRule,
+    type MetatheoryReport,
+    type PreservationCheck,
+    type PreservationResult,
+    type ProgressGap,
+    type ProgressResult,
     type RuleClause,
+    type RuleKind,
+    type RuleRole,
+    verifyMetatheory,
 } from "@lapis-lang/lang-forma"
 
 // Type-checking grammar subclass (lc.md §5 — parse, don't validate)

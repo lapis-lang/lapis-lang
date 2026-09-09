@@ -33,10 +33,12 @@ import {
     assert,
     char,
     empty,
+    ensures,
     epsilon,
     invariant,
     or,
     type Parser,
+    requires,
     rule,
     sepBy,
     seq,
@@ -218,7 +220,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * the closure is applied (`appProd` re-parses the substring via `_forward`).
      */
     // λx:σ. t  — E-Lam (captures body span for _forward)
-    @rule
+    @rule({ rule: "E-Lam", production: "lambdaProd" })
     protected override lambdaProd(ctx: unknown): Parser<Value> {
         return seq(
             this.lambdaHead,
@@ -258,7 +260,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * extended env; else empty (eval error).
      */
     // t u  — E-App via chain + _forward
-    @rule
+    @rule({ rule: "E-App", production: "appProd" })
     protected override appProd(ctx: unknown): Parser<Value> {
         return or(
             this.appProd(ctx)
@@ -303,7 +305,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * runs under `ρ[name:=def]` directly. No span capture or `_forward` needed.
      */
     // let x:σ = t in u  — E-Let (same-pass evaluation)
-    @rule
+    @rule({ rule: "E-Let", production: "letProd" })
     protected override letProd(ctx: unknown): Parser<Value> {
         return seq(
             this.kw("let"),
@@ -341,7 +343,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * handler body via `_forward` under the extended environment.
      */
     // fold [T] e {Cᵢ(xⱼ) → tᵢ}  — E-Fold (span-captured handlers + _forward)
-    @rule
+    @rule({ rule: "E-Fold", production: "foldProd" })
     protected override foldProd(ctx: unknown): Parser<Value> {
         return seq(
             this.kw("fold"),
@@ -484,7 +486,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * re-evaluated via `_forward`.
      */
     // unfold [T] s {oⱼ → gⱼ}  — E-Unfold (span-captured generators)
-    @rule
+    @rule({ rule: "E-Unfold", production: "unfoldProd" })
     protected override unfoldProd(ctx: unknown): Parser<Value> {
         return seq(
             this.kw("unfold"),
@@ -575,7 +577,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      *           → [xⱼ ↦ gⱼ(s)] t
      */
     // cofold [T] e {oⱼ(xⱼ) → t}  — E-Cofold (span-captured handler + _forward)
-    @rule
+    @rule({ rule: "E-Cofold", production: "cofoldProd" })
     protected override cofoldProd(ctx: unknown): Parser<Value> {
         return seq(
             this.kw("cofold"),
@@ -740,7 +742,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * and re-evaluate the generator body via `_forward`.
      */
     // e.o  — E-Obs via chain + _forward
-    @rule
+    @rule({ rule: "E-Obs", production: "obsProd" })
     protected override obsProd(ctx: unknown): Parser<Value> {
         return or(
             this.obsProd(ctx)
@@ -785,18 +787,98 @@ export class LCEval extends AbstractLC<EvalShape> {
     // ── Stubs for abstract methods not used by overridden productions ─────────
     // These are never called because we override the productions that call them.
 
+    // ── Semantic-action stubs with metatheory contracts ─────────────────────
+    //
+    // These methods are never called at runtime (the productions that invoke
+    // them are overridden above). The @requires/@ensures contracts are
+    // declarative metadata for the lang-forma rule model (collectRules /
+    // checkProgress / checkPreservation) — they encode the evaluation rules'
+    // premise/conclusion structure so the metatheory engine can verify
+    // Progress and Preservation without hand-written proofs.
+
+    /**
+     * E-Lam: a lambda evaluates to a closure (a value). No premises — a
+     * lambda is always a normal form (value-rule).
+     */
+    @ensures(
+        (_self: LCEval, _args: [string, Type, Value], _old, result: Value) =>
+            result instanceof SpanClosure,
+        { rule: "E-Lam", role: "conclusion", formula: "result : ⟨x, σ, span, ρ⟩" },
+    )
     protected lam(_param: string, _type: Type, _body: Value): Value {
         throw new Error("LCEval.lam: unreachable — lambdaProd is overridden")
     }
+
+    /**
+     * E-App: (λx:σ. t) v → [x ↦ v] t. Premise: fn is a SpanClosure.
+     * Step-rule — the application transitions by re-evaluating the body.
+     */
+    @requires(
+        (_self: LCEval, fn: Value, _arg: Value) => fn instanceof SpanClosure,
+        { rule: "E-App", role: "premise", formula: "fn : ⟨x, σ, span, ρ⟩", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-App", role: "conclusion", formula: "result : w", type: "τ" },
+    )
     protected app(_fn: Value, _arg: Value): Value {
         throw new Error("LCEval.app: unreachable — appProd is overridden")
     }
+
+    /**
+     * E-Let: let x:σ = v in u → [x ↦ v] u. Premise: def is a value.
+     * Step-rule — the let transitions by evaluating the body under the
+     * extended environment.
+     */
+    @requires(
+        () => true,
+        { rule: "E-Let", role: "premise", formula: "def : v", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-Let", role: "conclusion", formula: "result : w", type: "τ" },
+    )
     protected let_(_name: string, _type: Type, _def: Value, _body: Value): Value {
         throw new Error("LCEval.let_: unreachable — letProd is overridden")
     }
+
+    /**
+     * E-Obs: (unfold [T] s {oⱼ → gⱼ}).oₖ → gₖ(s). Premise: scrutinee is a
+     * SpanCodataVal. Step-rule — the observation transitions by re-evaluating
+     * the generator body.
+     */
+    @requires(
+        (_self: LCEval, scrutinee: Value, _observerName: string) =>
+            scrutinee instanceof SpanCodataVal,
+        { rule: "E-Obs", role: "premise", formula: "scrutinee : codataVal", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-Obs", role: "conclusion", formula: "result : w", type: "τ" },
+    )
     protected obs(_scrutinee: Value, _observerName: string): Value {
         throw new Error("LCEval.obs: unreachable — obsProd is overridden")
     }
+
+    /**
+     * E-Fold: fold [T] (Cₖ(vⱼ)) {Cᵢ(xⱼ) → tᵢ} → [xⱼ ↦ vⱼ] tₖ.
+     * Premise: scrutinee is a VariantVal. Step-rule — the fold transitions
+     * by re-evaluating the matching handler body.
+     */
+    @requires(
+        (
+            _self: LCEval,
+            _dataType: DataType,
+            scrutinee: Value,
+            _handlers: unknown[],
+            _resultType: Type,
+        ) => scrutinee instanceof VariantVal,
+        { rule: "E-Fold", role: "premise", formula: "scrutinee : Cₖ(vⱼ)", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-Fold", role: "conclusion", formula: "result : w", type: "τ" },
+    )
     protected fold(
         _dataType: DataType,
         _scrutinee: Value,
@@ -805,6 +887,17 @@ export class LCEval extends AbstractLC<EvalShape> {
     ): Value {
         throw new Error("LCEval.fold: unreachable — foldProd is overridden")
     }
+
+    /**
+     * E-Unfold: unfold [T] s {oⱼ → gⱼ} ⇓ codata value. No premises — an
+     * unfold is always a value (value-rule). The generators are stored as
+     * spans for lazy re-evaluation.
+     */
+    @ensures(
+        (_self: LCEval, _args: [CodataType, Value, unknown[], Type], _old, result: Value) =>
+            result instanceof SpanCodataVal,
+        { rule: "E-Unfold", role: "conclusion", formula: "result : codataVal" },
+    )
     protected unfold(
         _codataType: CodataType,
         _seed: Value,
@@ -813,6 +906,23 @@ export class LCEval extends AbstractLC<EvalShape> {
     ): Value {
         throw new Error("LCEval.unfold: unreachable — unfoldProd is overridden")
     }
+
+    /**
+     * E-TAbs: a type abstraction is a value (type erasure — no evaluation
+     * needed). No premises — value-rule. The `production` key links this
+     * rule to the `typeAbsProd` production (which is NOT overridden in
+     * LCEval, so the linkage comes from contract metadata instead of
+     * `@rule({ rule: ... })` on the production).
+     */
+    @ensures(
+        () => true,
+        {
+            rule: "E-TAbs",
+            role: "conclusion",
+            formula: "result : Λα<:σ. t",
+            production: "typeAbsProd",
+        },
+    )
     protected typeAbs(_tyVar: string, _bound: Type, _body: Value): Value {
         // E-TAbs: type abstraction is a value (no evaluation needed).
         // The body was parsed under a PLACEHOLDER env (via extendCtx), so
@@ -822,11 +932,53 @@ export class LCEval extends AbstractLC<EvalShape> {
         // abstraction is applied (typeApp returns the body directly).
         return _body
     }
+
+    /**
+     * E-TApp: (Λα<:σ. t) [τ] → [α ↦ τ] t. Premise: body is a value (the
+     * type abstraction's evaluated body). Step-rule — type erasure returns
+     * the body directly. The `production` key links this rule to the
+     * `typeAppProd` production (not overridden in LCEval).
+     */
+    @requires(
+        () => true,
+        { rule: "E-TApp", role: "premise", formula: "body : Λα<:σ. t", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        {
+            rule: "E-TApp",
+            role: "conclusion",
+            formula: "result : t[α:=τ]",
+            type: "τ",
+            production: "typeAppProd",
+        },
+    )
     protected typeApp(body: Value, _argType: Type): Value {
         // E-TApp: (Λα<:σ. t) [τ] → [α ↦ τ] t
         // Type erasure: evaluate the body directly (types erased at runtime).
         return body
     }
+
+    /**
+     * E-Cofold: cofold [T] (unfold [T] s {oⱼ → gⱼ}) {oⱼ(xⱼ) → t} →
+     * [xⱼ ↦ gⱼ(s)] t. Premise: scrutinee is a SpanCodataVal. Step-rule —
+     * the cofold transitions by running generators then re-evaluating the
+     * handler body.
+     */
+    @requires(
+        (
+            _self: LCEval,
+            _codataType: CodataType,
+            scrutinee: Value,
+            _handler: unknown,
+            _resultType: Type,
+        ) => scrutinee instanceof SpanCodataVal,
+        { rule: "E-Cofold", role: "premise", formula: "scrutinee : codataVal", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-Cofold", role: "conclusion", formula: "result : w", type: "τ" },
+    )
     protected cofold(
         _codataType: CodataType,
         _scrutinee: Value,
