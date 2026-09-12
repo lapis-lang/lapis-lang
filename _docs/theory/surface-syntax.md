@@ -343,6 +343,15 @@ flowchart LR
 | `typeParam`  | `Type`                      | Type parameter for map                 |
 | `properties` | `(prop1, prop2, ...)`       | Algebraic property annotations         |
 
+**Elaboration note:** entries in `properties` elaborate to algebraic contract claims — intrinsic
+laws (`associative`, `commutative`, `identity: E`, `idempotent`, `involutory`) about one
+operation, and relational laws (`distributive: #opName`) between two operations. The elaborated
+representation keeps the two categories distinct (different axiom schemas, different screening
+arities); the surface syntax is deliberately uniform. See
+[`elaboration.md`](./elaboration.md) §6.1. Also note: parser associativity (this document's
+left-associative grouping for binary operators) is a syntactic convention — it is independent of
+algebraic associativity declared via `properties`, which licenses the optimizer to reassociate.
+
 ## 4. Declaration Forms
 
 ### 4.1 `data` — Algebraic Data Type (μ-type)

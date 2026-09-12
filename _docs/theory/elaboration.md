@@ -726,30 +726,69 @@ DemandsError.
 
 ## 6. Properties Elaboration
 
-### 6.1 Property Declarations
+### 6.1 Algebraic Contracts
 
-`properties: (prop1, prop2, ...)` in a spec elaborates to **law constraints** attached to the
-operation. These are not core terms — they are metadata that the law-checking pass (see
-[`semantics.md`](./semantics.md) §5.4) verifies and the runtime exploitation pass (see
-[`semantics.md`](./semantics.md) §4.3) uses.
+`properties: (prop1, prop2, ...)` in a spec elaborates to **algebraic contract claims** — a sibling
+category to the execution contracts (`demands`/`ensures`/`invariant`/`rescue`). Both are contracts
+(claims about an operation made at its declaration), but they differ in what they constrain:
+
+- **Execution contracts** constrain one invocation: preconditions, postconditions, recovery.
+- **Algebraic contracts** relate _multiple invocations_: `associative` is a claim about
+  `f(f(a,b),c)` vs `f(a,f(b,c))` — not expressible as a single-call postcondition.
+
+This is why laws do not elaborate into `ensures:` clauses; they need their own claim category.
+
+**The provenance chain.** A law's authority comes from the contract system, not from the
+optimizer:
+
+```
+surface: properties: (associative, commutative, identity: e)
+    ↓ elaboration
+algebraic contract claims (validated against the closed vocabulary)
+    ↓ law-checking pass (regime-based — semantics.md §5.4)
+    ├─ falsified → LawError (declaration rejected)
+    ├─ discharged (exhaustion or derivation) → axioms in E, established
+    └─ screened (residual regime) → axioms in E, asserted (evidence, not proof)
+                      Ω carries the operation's signature + defining LC term
+    ↓ optimizer (directed rewrites licensed by E, per lc.md §7)
+    ↓ live observation (checked mode): continuous re-screening against
+      actual usage; observed counterexample withdraws the axiom from E
+```
+
+Every law in `E` carries its **provenance tag** (`primitive` | `discharged` | `asserted`). Provenance
+is evidence about the axiom, never a gate on declaring it.
+
+The properties are validated against the closed vocabulary (`associative`, `commutative`,
+`identity:e`, `distributive:g`, `involutory`, `idempotent`, `absorbing:z`). No arbitrary equations —
+user-declared laws are membership claims in a fixed catalog of algebraic structures, which is
+what keeps rewriting terminating and the `≡` theory well-behaved.
+
+**Intrinsic vs. relational claims.** `associative`, `commutative`, `identity:e`, `idempotent`,
+`involutory`, `absorbing:z` are claims about one operation. `distributive:g` is a claim about a
+_relation_ between two operations — elaboration checks that `g` names a declared operation on the
+same type and that both signatures exist in `Ω`. The elaborated representation keeps the two
+distinct.
 
 **At elaboration time:**
 
-1. The properties are validated against the closed vocabulary (`associative`, `commutative`,
-   `identity:E`, `distributive:g`, `involutory`, etc.).
-2. The law-checking pass generates samples and verifies the laws.
-3. If verification passes, runtime guards are installed (identity short-circuit, absorbing
-   short-circuit, idempotent short-circuit).
-4. If verification fails, `LawError` is thrown with the counterexample.
+1. The properties are validated against the closed vocabulary.
+2. The law-checking pass applies the regime-based check (finite/machineFinite/derivable →
+   `discharged`; residual → `asserted`) — see [`semantics.md`](./semantics.md) §5.4.
+3. If discharged, the axioms are installed in `E` **established**. If screened (residual), the
+   axioms are installed in `E` **asserted** — trusted evidence, not proof (the screen falsifies;
+   it never establishes).
+4. If any check falsifies a claim, `LawError` is thrown with the counterexample and the
+   declaration is rejected.
 
-**At runtime (for verified laws):**
+**At runtime (for screened axioms — each is an optimizer-chosen direction of an `≡` axiom):**
 
-- `identity:E` guard: if an argument is `E`, return the other argument without entering the fold.
-- `absorbing:Z` guard: if an argument is `Z`, return `Z` without entering the fold.
-- `idempotent` guard: if both arguments are identical (by reference), return the argument without
-  entering the fold.
-- `distributive:g` annotation: unlocks Horner fusion in merge pipelines.
-- `involutory` annotation: enables pair cancellation in merge pipelines.
+- `identity:e` axiom `f(e, a) ≡ a`: the eliminating direction short-circuits — if an argument is
+  `e`, return the other argument without entering the fold. Must not skip `demands` checks.
+- `absorbing:z` axiom `f(z, a) ≡ z`: same shape — if an argument is `z`, return `z`.
+- `idempotent` axiom `f(a, a) ≡ a`: if both arguments are identical (by reference), return the
+  argument.
+- `distributive:g` axiom: unlocks Horner fusion in merge pipelines.
+- `involutory` axiom `f(f(a)) ≡ a`: enables pair cancellation in merge pipelines.
 
 ### 6.2 Property Inheritance
 

@@ -14,7 +14,11 @@ unfold are the only recursion forms**. Two properties define it:
 2. **μ/ν, not general fix.** Data is μ (initial algebra); codata is ν (final coalgebra). No `fix` or
    `Y`. Termination and productivity follow from structure.
 
-The calculus is pure — no effect type or operation appears in the syntax.
+The calculus is pure — no effect type appears in the syntax. Named operations appear only as an
+**operation signature** environment `Ω` and an `op(t₁, ..., tₙ)` application form; every operation
+is _defined_ by an LC term (a fold). The **equational theory** environment `E` records the laws
+declared for operations. `Ω` and `E` are environments (like `Γ` and `Δ`), not terms: laws never
+appear in the term grammar and never step. See §7 (Algebraic Equivalence).
 
 `cofold [T]` is an elimination form for codata (the dual of fold), not a recursion form — it
 observes, it does not recurse.
@@ -53,7 +57,16 @@ t, u ::= x                              variable
        | Λα <: σ. t                     type abstraction
        | t [τ]                          type application
        | let x:σ = t in u               let-binding
+       | op(t₁, ..., tₙ)                named operation application
 ```
+
+`op(t₁, ..., tₙ)` is the application of a _named operation_ — the symbolic identity of a fold
+declared in the surface language. It elaborates from surface operator use (`a + b` → `add(a, b)`)
+and is _definitional_ sugar: `Ω` maps each operation name to its defining LC term, so
+`op(t₁, ..., tₙ)` computes by applying the definition. The form exists so that operation identity
+survives `let`-inlining and substitution: an optimizer can recognize two occurrences as the same
+algebraic operation, which anonymous folds cannot express. Laws are attached to the operation
+_name_ in `E`, never to the term.
 
 ### 2.3 Values
 
@@ -66,10 +79,32 @@ v ::= λx:σ. t                           closure
 
 ### 2.4 Contexts
 
+Following PLT convention (TAPL; Barendregt): `Γ` (term context), `Δ` (type-variable context), `E`
+(equational theory), and `Ω` (operation signature). `Σ` is reserved for the unfold **seed type**
+(`Σ`-algebra style signatures use capital Sigma in universal algebra, but `Σ` is already taken here
+by the seed type — `Ω` carries no other standard meaning, avoiding the collision).
+
 ```
 Γ ::= ∅ | Γ, x:σ          term variable context
 Δ ::= ∅ | Δ, α <: σ       type variable context (with bounds)
+Ω ::= ∅ | Ω, op:σ₁→...→σₙ→τ    operation signature (name ↦ argument/result types)
+E ::= ∅ | E, op:ℓ            equational theory (operation ↦ declared laws)
 ```
+
+`E` and `Ω` are produced by elaboration from surface `fold` declarations (with their `spec`, see
+[`elaboration.md`](./elaboration.md) §6): the fold's implementation elaborates to an LC term;
+its signature enters `Ω`; its declared `properties` enter `E` after best-effort screening. Judgments
+are optionally parameterized by them: typing `Ω; Γ ⊢ t : σ` and algebraic equivalence
+`Ω; E ⊢ t ≡ u` (§7).
+**Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
+`primitive` (pinned by the language definition — builtin operations with fixed law sets,
+authority by fiat), `discharged` (established by the compiler — finite-domain exhaustion for
+finite types, bounded-domain exhaustion for machine-finite types like binary64 Float, or
+derivation from primitive laws via fold-induction schemata), or `asserted` (programmer
+declaration, screened). No tier requires proof to declare. Soundness of law-directed rewriting
+is **relative to E**; the `discharged` and `primitive` tiers are established by their mechanisms,
+so only `asserted` laws carry declaration risk. See
+[`design-decisions.md`](../design-decisions.md) (Laws).
 
 ### 2.5 Notation
 
@@ -91,6 +126,9 @@ v ::= λx:σ. t                           closure
 | `σ <: τ`                 | subtyping                                                                              |
 | `σ ∧ τ`                  | intersection type (protocol conformance)                                               |
 | `Any` / `Nothing`        | top / bottom of the subtyping lattice                                                  |
+| `op(t₁, ..., tₙ)`        | named operation application (definitional sugar; definition in `Ω`)                     |
+| `Ω; E ⊢ t ≡ u`           | algebraic equivalence of `t` and `u` modulo the declared theory (§7)                     |
+| `Ω` / `E`                | operation signature / equational theory environments                                   |
 
 ## 3. Evaluation
 
@@ -118,6 +156,9 @@ let x:σ = v in u → [x ↦ v] u                          (E-Let)
 
 (Λα <: σ. t) [τ] → [α ↦ τ] t                          (E-TApp)
 
+op(v₁, ..., vₙ) → def(op) v₁ ... vₙ                    (E-Op)
+where Ω carries def(op) = λx₁:σ₁. ... λxₙ:σₙ. t  and  Ω(op) = σ₁ → ... → σₙ → τ
+
 t₁ → t₁'
 ─────────────────────────────                         (E-App1)
 t₁ t₂ → t₁' t₂
@@ -141,7 +182,17 @@ let x:σ = t in u → let x:σ = t' in u
 t → t'
 ─────────────────────────────                         (E-CofoldArg)
 cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
+
+tᵢ → tᵢ'   (leftmost, i minimal)
+─────────────────────────────                         (E-OpArg)
+op(v₁, ..., tᵢ, ..., tₙ) → op(v₁, ..., tᵢ', ..., tₙ)
 ```
+
+`E-Op` makes named operation application **definitional**: an `op` node computes by applying its
+definition, exactly as if the definition had been `let`-bound and called. The named form is
+semantically transparent — but it is _not_ inlined eagerly, precisely so that law-aware passes can
+recognize and rewrite operation applications before evaluation. Note that laws never add steps:
+all algebraic knowledge acts on `≡` (§7), never on `→`.
 
 ## 4. Subtyping
 
@@ -362,3 +413,102 @@ $\Gamma \vdash t' : \sigma$.
 
 **Substitution lemma:** If `Δ, α <: σ ⊢ τ₁ <: τ₂` and `Δ ⊢ T₂ <: σ`, then
 `Δ ⊢ τ₁[α:=T₂] <: τ₂[α:=T₂]` (Pierce & Steffen).
+
+## 7. Algebraic Equivalence
+
+Laws in `E` are **not evaluation rules**. They generate a separate judgment
+
+```
+Ω; E ⊢ t ≡ u          t and u are algebraically equivalent
+```
+
+an _equational theory_ on top of the operational semantics. Ordinary evaluation (`→`) is
+unchanged; the optimizer may replace a term by any member of its `≡`-class without changing
+meaning (relative to the declared theory).
+
+### 7.1 Congruence and structural rules
+
+```
+                      Ω; E ⊢ t ≡ t                    (Eq-Refl)
+
+   Ω; E ⊢ t ≡ u       Ω; E ⊢ u ≡ w
+   ───────────────────────────────                     (Eq-Trans)
+             Ω; E ⊢ t ≡ w
+
+   Ω; E ⊢ t ≡ u
+   ───────────────                                    (Eq-Sym)
+   Ω; E ⊢ u ≡ t
+
+   Ω; E ⊢ t ≡ t'    Ω; E ⊢ u ≡ u'
+   ────────────────────────────                        (Eq-App)
+        Ω; E ⊢ t u ≡ t' u'
+
+   Ω; E ⊢ tᵢ ≡ tᵢ'   (for each i)
+   ──────────────────────────────                      (Eq-Op)
+     Ω; E ⊢ op(t₁,...,tₙ) ≡ op(t₁',...,tₙ')
+
+   Ω; E ⊢ t ≡ t'
+   ──────────────────────────                          (Eq-Fold)
+   Ω; E ⊢ fold [T] t {Cᵢ→tᵢ} ≡ fold [T] t' {Cᵢ→tᵢ}
+```
+
+plus congruence for every other term constructor (λ, variant, unfold, cofold, let, Λ, `[ ]`).
+
+### 7.2 Law schemas
+
+Each declared law in `E` contributes an axiom schema. For an operation `⊕ : T → T → T` (arity 2;
+other arities generalize):
+
+```
+E(⊕) ∋ associative:
+   ⊢ ⊕(⊕(a, b), c) ≡ ⊕(a, ⊕(b, c))
+
+E(⊕) ∋ commutative:
+   ⊢ ⊕(a, b) ≡ ⊕(b, a)
+
+E(⊕) ∋ identity:e:
+   ⊢ ⊕(e, a) ≡ a        ⊢ ⊕(a, e) ≡ a
+
+E(⊕) ∋ idempotent:
+   ⊢ ⊕(a, a) ≡ a
+
+E(⊕) ∋ involutory:   (arity 1)
+   ⊢ ⊕(⊕(a)) ≡ a
+
+E(⊗) ∋ distributive:⊕:    (relational law — two operations)
+   ⊢ ⊗(a, ⊕(b, c)) ≡ ⊕(⊗(a, b), ⊗(a, c))
+```
+
+**Unary vs. relational.** `associative`/`commutative`/`identity`/`idempotent`/`involutory` are
+**intrinsic** laws about one operation. `distributive:⊕` is **relational** — a law _between_ two
+operations, requiring `Ω` to carry both signatures. The core representation keeps the two
+distinct (different axiom schemas, different screen arities).
+
+### 7.3 Evaluation vs. equivalence vs. optimization
+
+Three relations, strictly separated:
+
+```
+t → t'        evaluation (§3)          computational execution
+Ω; E ⊢ t ≡ u  algebraic equivalence    semantic interchangeability, per declared laws
+t ↝ t'        optimizer rewrite        a compiler-chosen, directed consequence of ≡
+```
+
+The optimizer picks a **direction** for each axiom (e.g. identity-elimination `⊕(e, a) ↝ a`,
+not the expansion direction) — a strategic choice, never part of the language's semantics.
+`≡` is undirected; `↝` is directed and per-exploit. Associativity + commutativity are
+_equivalence_; treating them as evaluation steps would immediately produce nontermination
+(oscillation), which is exactly why they live in `≡`.
+
+**Theorem (Law-directed rewrite soundness, relative to E):** If `Ω; E ⊢ t ≡ t'` and `t ↝ t'`
+by a rewrite licensed by `E`, then `t` and `t'` have the same denotation in every model of `E`.
+
+The two equalities from [`semantics.md`](./semantics.md) §7 are untouched: structural
+equality on data values and bisimulation on codata values are _value_ equalities (what the
+runtime `=` primitive observes); `≡` is a _term_ equality (what the optimizer may exploit).
+
+**Parser associativity is not algebraic associativity.** The surface parser groups binary
+operators left-associatively: `a + b + c` parses as `(a + b) + c`. That is a _syntactic_
+decision about source text. `E(add) ∋ associative` says `(a+b)+c ≡ a+(b+c)` — a _semantic_
+fact about meaning. The two are independent; the elaborated core term is just whichever shape the
+parser produced, and the optimizer may reassociate it under the axiom.

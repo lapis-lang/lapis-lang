@@ -114,12 +114,28 @@ Yes, partially. Here is the honest survey:
 | Smalltalk/Self | No                                           | No                        | No                   | Yes (prototypes)                           | No                               | No        |
 | Erlang         | No                                           | No                        | No                   | No                                         | Actor model                      | No        |
 | Prolog/Datalog | No (unification)                             | No                        | No                   | No                                         | N/A                              | No        |
+| **Verse**      | No (lenient logic-functional; `computes` may not terminate) | No            | No                   | Partial (`is` as fallible identity; lineage is Ontic/λℵ set-theoretic, not structural) | Effects + transactions (`transacts` rolls back) | Partial (guarded casts; all failure paths handled) |
 
 > **Coal is the closest language in spirit** — see [`lapis-vs-coal.md`](./lapis-vs-coal.md) for a
 > detailed comparison. Both enforce structural recursion and embrace the bialgebraic duality. The
 > critical difference: Coal's laws are conventions ("aren't enforced by the compiler"), while
 > Lapis's laws are verified and exploitable declarations. Coal is the "enforcement without
 > exploitation" case study — it proves the cage is habitable but doesn't hand you the key.
+
+> **Verse** (Epic Games; SPJ/Leijen/Marlow) is the most credible recent mainstream-adjacent design
+> — and the most instructive contrast. Its lineage (per Sweeney's own two-decade trajectory:
+> Ontic's committed choice → λℵ's set-theoretic terms → the untyped Verse calculus with
+> success/failure, unification, and lenient evaluation) converges with Lapis on rejecting the
+> primitive conditional: Verse's `if` *fails* when the condition doesn't hold; Lapis's
+> `ifTrue:ifFalse:` is a fold over `Bool`. But the architectures diverge sharply: Verse makes
+> logic, failure, and time **ambient** (one unified calculus, a fixed closed effect vocabulary,
+> transactions for `var`), and buys totality only per-effect (`converges` vs `computes`) — a
+> sublanguage suitable for proofs, with a planned Verse-written verifier. Lapis **stratifies**:
+> failure is data (`Result`), logic is a fixpoint fragment, time is outside the core (Mealy IO),
+> and totality is unconditional — the whole language. Notably, Verse has **no algebraic-law story
+> at all** — no laws, no `≡`, no exploitation. The full comparison — types-as-predicates vs
+> types-as-shapes, and why the terms-only foundation is incompatible with the bialgebraic core —
+> is [`lapis-vs-verse.md`](./lapis-vs-verse.md).
 
 **No existing language combines enforced algebraic structure with practical law exploitation and a
 practical ecosystem.** Charity came closest on enforcement but failed on everything else. Haskell
@@ -294,7 +310,9 @@ To sharpen the motivation, it helps to state what Lapis is _not_ trying to be:
 - **Not "a simpler Coq."** Coq is a proof assistant. Lapis is a programming language. Laws in Lapis
   are _declarations_ that are checked (statically where possible, dynamically when needed), not
   _proofs_ that must be constructed. The philosophy is "static where possible, dynamic when needed,"
-  not "prove everything."
+  not "prove everything." The full position — what the enforced representation gives for free,
+  what it cannot express, and where Lapis hands off to the provers — is
+  [`lapis-vs-provers.md`](./lapis-vs-provers.md).
 
 - **Not "Smalltalk with ADTs."** The Self/Smalltalk influence is real (message sends, uniform
   access, `self` always in scope), but the contribution is not "Smalltalk syntax on algebraic data."

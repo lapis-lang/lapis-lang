@@ -66,6 +66,20 @@ feature:
 4. **Effect-free.** No effect type. Contracts elaborate to `Result`; IO is a Mealy data value. The
    core is sound for pure fold/unfold + contracts-as-results.
 
+**Position vs. Verse (Epic Games).** The most credible recent contrast — full comparison in
+`_docs/theory/lapis-vs-verse.md`, summary in `why-lapis.md` §3. Verse's two-decade lineage (Ontic's
+committed choice → λℵ's set-theoretic single-term language → the untyped Verse calculus)
+converges with Lapis on rejecting the primitive conditional, but the foundations are incompatible:
+**types-as-predicates (sets) vs types-as-shapes (μF/νG)** — a set has no recursion structure, so a
+terms-only foundation deletes fold/unfold, the bialgebra, and the law machinery Lapis exists to
+build (λℵ's own undecidability wall is the cautionary precedent). Verse makes logic, failure, and
+time ambient in one unified calculus with a fixed closed effect vocabulary and per-effect totality
+(`converges` sublanguage); Lapis stratifies — failure is data, logic is a fixpoint fragment, time is
+external (Mealy driver) — with unconditional totality. The compatible residue: the *phase
+distinction* (types-as-shapes govern elaboration; types-as-predicates — contracts, law screens,
+`instanceof` — govern the live runtime), already Lapis's implicit practice, now stated explicitly.
+Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
+
 ## Evaluation model
 
 - Eager data (μ), lazy codata (ν). Fixed by declaration kind — NOT a user knob.
@@ -90,10 +104,126 @@ feature:
   independent of law truth.
 - Law soundness is a SEPARATE theorem, best-effort: compiler discharges statically what it can,
   runtime sample-checking (LawError) for rest.
+- **Law authority is the provenance ladder (resolved 2026-09-12).** No third-party certification:
+  Model B (external Coq/Agda/Lean certificates) is **rejected** — the trust anchors are the
+  language definition and the programmer's own declarations, exactly the trust already extended
+  by using the language. Every law in `E` is an axiom carrying a **provenance tag**:
+
+  - **`primitive`** — the language definition pins builtin operations with fixed law sets
+    (e.g. `Nat.+ : associative, commutative, identity:Zero`). Authority: language fiat; the TCB
+    is the language implementation, the same trust already granted for totality/evaluation.
+    The primitive tier is also the **axiom base** for derivations: composite laws over folds
+    built from primitives are derivable via BMF calculational rules (fold-fusion etc.).
+  - **`discharged`** — the compiler establishes the law itself, via three mechanisms:
+    1. *Finite-domain exhaustion*: for genuinely finite types (Bool, enums, records of
+       finites) the entire input space is checked — a **proof, not a screen**.
+    2. *Bounded-domain exhaustion for machine-finite types*: `Float`/`Int`/`Char` are
+       pattern-matched data over fixed alphabets and fixed encodings (binary64 has exactly 2⁶⁴
+       inhabitants, including `Inf`/`NaN` as in-domain values). Full-domain enumeration is
+       possible in principle; sub-space enumeration **certifies the checked space**.
+    3. *Derivation*: law schemas proved from primitive laws + fold-induction skeletons
+       (the BMF calculus as the discharge engine).
+  - **`asserted`** — programmer declaration, screened (falsifies, never establishes). The honest
+    residual: laws on unbounded-depth types (List/Tree-shaped μ-types) whose handler bodies
+    call non-primitive, non-discharged operations in semantically essential ways.
+
+  Soundness of `↝` is **relative to E**, and the trust boundary corresponds to a theorem: laws in
+  the `discharged`/`primitive` tiers are established unconditionally (by the discharge
+  mechanism); only `asserted` laws carry declaration risk. A rare false `asserted` law (e.g. a
+  fold that collapses at a hidden threshold — expressible despite totality, since the cage
+  constrains recursion shape, not handler-body semantics) corrupts rewrites silently, which is
+  why the residual carries visible provenance plus the observation channel below.
+- **Rice-style undecidability bounds the discharge fragment; it does not erase it.** Totality
+  does NOT make extensional properties decidable in general (equivalence of total programs is
+  still undecidable for expressive total calculi). But the correct question is *which* extensional
+  properties of this particular calculus are decidable — and the cage carves out the non-empty
+  fragments above (exhaustion, derivation) that no general-purpose language possesses.
+- **Laws are environments, not terms.** The core acquires an operation signature environment `Ω`
+  and an equational theory environment `E` (peers of `Γ`/`Δ`), plus a named operation application
+  form `op(t₁, ..., tₙ)` — definitional sugar whose definition `Ω` carries. Laws live in `E`,
+  attached to the operation _name_, never in the term grammar. Laws generate an equational theory
+  (`≡`), never evaluation steps: AC-laws as reduction rules would immediately nonterminate
+  (oscillation). The optimizer uses directed consequences (`↝`) of `≡` — the direction is a
+  compiler strategy, not semantics. See `_docs/theory/lc.md` §7. (`Σ` stays reserved for the
+  unfold seed type per lc.md §2.5.)
+- **Operation identity must survive elaboration.** Surface operator use elaborates to
+  `op(t₁, ..., tₙ)`, not to an anonymous lambda — otherwise `let`-inlining erases the very identity
+  an optimizer needs to recognize two applications of the same algebraic operation. This is the
+  one core-syntax concession laws require; it is sugar over ordinary application, so the core
+  stays computation-minimal.
+- **Closed law vocabulary.** Users declare membership in a fixed catalog (associative,
+  commutative, identity, idempotent, involutory, distributive, absorbing) — never arbitrary
+  equations. Arbitrary user equations would import the full equational-theory problem space
+  (matching modulo AC, critical pairs, undecidable equality) into the compiler.
+- **Intrinsic vs. relational laws.** One-operation laws (associative, ...) vs. two-operation
+  relations (distributive:g) are distinct in the core representation — different axiom schemas,
+  different screening arities.
 - Core carries law _declarations_ as constraints, not proofs. Checking strategy is per-law,
-  per-mode.
+  per-mode. The verification ladder is `asserted` (screening, the floor) → `discharged`
+  (exhaustion + derivation — algorithmic because the induction motive is fixed by the fold
+  schema) → `primitive` (language fiat). Provenance upgrades evidence; it never gates declaration.
+  Lapis does not compete with proof assistants on arbitrary theorems (unstatable without
+  dependent types, excluded by F<:); it substitutes for them on catalog claims — see
+  `_docs/theory/lapis-vs-provers.md`.
+- **Runtime observation as the fourth channel (live-image mode).** No finite evidence
+  establishes a universal law, but a live system accumulates it: the property harness
+  continuously re-screens declared laws against actual usage, building per-operation evidence
+  profiles; an observed counterexample **withdraws** the axiom from `E` at runtime (checked mode),
+  making bad library laws self-limiting rather than silently corrupting. For `asserted` laws on
+  unbounded-depth types this is the only additional evidence channel that exists — something
+  neither Coq nor Haskell can do, possible only because Lapis is a live system with an executable
+  theory. Package-boundary trust policy (which tiers a build may exploit from dependencies) is a
+  follow-up decision, not v0.3.0.
 - Leaves room for Lapis as a Programming Language System (Smalltalk/DBMS family): live-image mode
   with runtime checking.
+- **Parser associativity ≠ algebraic associativity.** The parser groups binary operators
+  left-associatively (a syntactic convention); `associative` declares a semantic equivalence
+  between the two groupings. Documented explicitly to prevent confusion — see lc.md §7.3.
+- **`Ω` is acyclic by construction (cycles × growth).** Named operations reintroduce a call
+  graph; unguarded cyclic op references would reintroduce general recursion through `Ω` with no
+  syntactic witness of a decreasing measure — the Charity-style per-program semantic checker this
+  language deliberately does not have. Rule: **an operation may only reference operations
+  declared earlier in `Ω`** — a decidable dependency-graph condition checked once per
+  declaration, the same stratification family as Datalog's negation stratification. The framing:
+  unsafe recursion = **cycles × value growth**. Datalog forbids growth, keeps cycles (finite
+  active domain ⇒ finite lattice ⇒ monotone ascent to lfp — termination and PTIME by
+  construction). Lapis requires growth (constructors are the point; μ-types are initial
+  algebras) and so forbids cycles. The two moves are dual. Lapis already runs the Datalog
+  argument where it applies: `relation`/`closure` is a fixpoint engine over the finite
+  span-projection space, cycles included.
+- **Cost is analyzable: certified vs. flagged (the cost algebra).** Totality guarantees
+  termination, not feasibility — but container-shaped recursion (a fold's recursion tree
+  isomorphic to its input structure, independent of handler bodies) makes a **cost/depth
+  algebra** mechanically computable over terms. The stratified fragment (no value-size feedback)
+  is **certified** — its primitive-recursive/polynomial bounds close by recurrence; affine
+  constructor use extends certification (Hofmann LFPL). The residual — higher-order
+  result-size feedback, the Ackermann shape — is undecidable in general (the correctly-stated
+  Rice wall) and is **flagged** statically, then observed at runtime (profiling — the same
+  certified/flagged split as law provenance). See `_docs/theory/semantics.md` §5.5.
+
+### Quotient types (open — deferred)
+
+- **The gap.** Data equality is structural; codata equality is bisimulation (already a coinductive
+  quotient); terms have `≡`. Missing: **quotient μ-types** `T // ≈` — data types whose elements
+  are equivalence classes of a user-declared relation (Nuprl, Hofmann). Without them, laws are
+  optimizer-visible but never runtime-observable (`equals(Bag(1,2,3), Bag(3,1,2))` is false
+  without hand-written canonicalization), and law-bearing folds lack their natural denotation:
+  the initial (Ω,E)-algebra — the term algebra quotiented by declared laws.
+- **Position (tentative, not v0.3.0).** Lapis's enforcement already makes quotients _definable_
+  (the relation `≈` is a fold; the canonicalizer is a fold); the missing piece is _declaring_
+  them. Two candidate mechanisms reuse machinery already on the books:
+  1. **Well-definedness as a screened algebraic claim (Model A).** Eliminating from `T // ≈`
+     requires proving `x ≈ y ⟹ f(x) = f(y)` in Nuprl/Coq-style systems. Lapis would make
+     "this fold respects `≈`" a law-vocabulary claim (`respect: #equalsOp`), screened by
+     sampling, trusted as an axiom in `E` — the same authority model as every other law, no
+     proof obligations. This is the distinctive option; no mainstream language has it.
+  2. **Canonical forms as computational content.** The directed rewrites (`↝`) normalize to
+     representative terms, so `T // ≈` has decidable equality and efficient hashing/dedup —
+     avoiding the setoid tax (relations threaded through every signature, no canonical
+     representation).
+- **Open sub-questions** (see `semantics.md` §9.9): cross-theory congruence for elimination into
+  another quotient; interaction of `≈` with `equals`-as-a-fold, hashing, memoization; quotient
+  subtyping (`T // ≈` vs `T // ≈'`) — no standard treatment exists; coinductively-defined `≈`.
 
 ## No primitive conditional
 
