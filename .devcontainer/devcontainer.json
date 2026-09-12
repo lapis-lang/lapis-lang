@@ -3,7 +3,11 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
-    "postStartCommand": "pgrep -x ollama >/dev/null || nohup ollama serve >/tmp/ollama.log 2>&1 &",
+    "postStartCommand": "bash .devcontainer/ensure-ollama.sh",
+    // Persists the Ollama home directory (auth keys, cloud model manifests) across rebuilds.
+    "mounts": [
+        "source=${localWorkspaceFolderBasename}-ollama,target=/home/vscode/.ollama,type=volume"
+    ],
     "customizations": {
         "vscode": {
             "extensions": [
