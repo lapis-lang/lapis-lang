@@ -12,6 +12,7 @@
 
 import { TypeRegistry } from "../src/index.ts"
 import { Any, CodataType, DataType, Field, Observer, Variant } from "../src/core/types.ts"
+import { OpRegistry, OpSig } from "../src/core/ops.ts"
 
 // ── Type factories ────────────────────────────────────────────────────────────
 
@@ -109,4 +110,71 @@ export function createTestFixtures(): TestFixtures {
     registry.register(stream)
 
     return { registry, stack, queue, nat, bool, stream }
+}
+
+// ── Operation fixtures (Ω) ────────────────────────────────────────────────────
+
+/** Fresh type instances + an `OpRegistry` (Ω) with `add`/`mul` on `Nat`. */
+export interface OpTestFixtures {
+    registry: TypeRegistry
+    opRegistry: OpRegistry
+    nat: DataType
+    /** Registered in `registry` — for codata-through-window tests. */
+    stream: CodataType
+    /** Registered in `registry` — for argument-mismatch tests. */
+    bool: DataType
+    add: OpSig
+    mul: OpSig
+}
+
+/**
+ * Creates a fresh type registry (`Nat`, `Stream`, `Bool`) and an `OpRegistry`
+ * declaring `add` and `mul` — both folds over `Nat`, with LC-source
+ * definitions.
+ *
+ * `add` is declared first; `mul`'s definition references `add` (an acyclic
+ * chain — declaration-order stratification). The definitions are ordinary LC
+ * concrete syntax: `add` recurses via the fold's recursive binding, and
+ * `mul` applies the earlier-declared `add` by name.
+ *
+ * `createTestFixtures` is intentionally unchanged — the generative tests
+ * (`counterexamples.test.ts`) build grammars from it and must not see the
+ * op productions fire (an empty `OpRegistry` keeps `opProd` inert).
+ */
+export function createOpFixtures(): OpTestFixtures {
+    const nat = createNatType()
+    const stream = createStreamType()
+    const bool = createBoolType()
+
+    const registry = new TypeRegistry()
+    registry.register(nat)
+    registry.register(stream)
+    registry.register(bool)
+
+    const add = new OpSig(
+        "add",
+        [nat, nat],
+        nat,
+        // add = fold over x: Zero → y; Succ(p) → Succ(p).
+        // The fold's recursive binding p IS add(pred(x), y) — the recursion is
+        // the fold itself, so the definition never references add by name
+        // (which the Ω-acyclicity rule would reject).
+        "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> y, Succ(p) -> Succ(p) }",
+    )
+
+    const mul = new OpSig(
+        "mul",
+        [nat, nat],
+        nat,
+        // mul = fold over x: Zero → Zero; Succ(p) → add(y, p).
+        // p IS mul(pred(x), y); the handler references the earlier-declared
+        // add by name — an acyclic chain (declaration-order stratification).
+        "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Zero(), Succ(p) -> add(y, p) }",
+    )
+
+    const opRegistry = new OpRegistry()
+    opRegistry.declare(add)
+    opRegistry.declare(mul)
+
+    return { registry, opRegistry, nat, stream, bool, add, mul }
 }

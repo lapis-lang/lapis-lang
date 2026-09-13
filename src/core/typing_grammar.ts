@@ -21,6 +21,7 @@
  *   T-Cofold:   Γ ⊢ e : T  ∧  Γ ⊢ t : Πⱼ(Gⱼ(σ)[α:=σ])→σ  ⟹  Γ ⊢ cofold [T] e {...} : σ
  *   T-TAbs:     Δ, α<:σ ⊢ t : τ  ⟹  Δ ⊢ Λα<:σ.t : ∀α<:σ.τ
  *   T-TApp:     Γ ⊢ t : ∀α<:σ.τ  ∧  Δ ⊢ T₂<:σ  ⟹  Γ ⊢ t[T₂] : τ[α:=T₂]
+ *   T-Op:       Ω(op) = σ₁→...→σₙ→τ  ∧  Γ ⊢ tᵢ : σᵢ  ⟹  Γ ⊢ op(t₁,...,tₙ) : τ
  *   T-Sub:      Γ ⊢ t : σ  ∧  σ <: τ  ⟹  Γ ⊢ t : τ  (applied at use sites via isSubtype)
  *
  * T-Fold uses parseToFixpoint for circular attribute flow: σ is refined
@@ -64,6 +65,8 @@ import {
 } from "./types.ts"
 
 import { AbstractLC, type LCShape } from "./grammar.ts"
+
+import { type OpSig } from "./ops.ts"
 
 import { isSubtype, join } from "./subtyping.ts"
 
@@ -738,6 +741,124 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // with the type variable substituted.
         const poly = body as PolymorphicType
         return substituteTypeVar(poly.body, poly.typeVarName, argType)
+    }
+
+    // ── T-Op: Ω(op) = σ₁→...→σₙ→τ  ∧  Γ ⊢ tᵢ : σᵢ  ⟹  Γ ⊢ op(t₁,...,tₙ) : τ ────
+
+    /**
+     * Named operation application (lc.md §5.8 T-Op). The premises — the
+     * operation is declared in Ω, the arity matches, and each argument type is
+     * a subtype of the declared parameter type — are enforced in the
+     * `opProd` override (the production path); `@requires` is declarative
+     * metadata for the rule model, like the other premise-enforcing
+     * overrides (`letProd`, `typeAppProd`).
+     *
+     * Nothing propagation: an eagerly-evaluated argument of type Nothing makes
+     * the application uninhabited (principle of explosion). Checked after the
+     * premises so a genuine type error is never masked.
+     */
+    @requires(
+        (_self: LCTypeCheck, opName: string, args: Type[]) =>
+            _self.opRegistry.lookup(opName) !== undefined &&
+            _self.opRegistry.lookup(opName)!.paramTypes.length === args.length,
+        { rule: "T-Op", role: "premise", formula: "Ω(op) = σ₁→...→σₙ→τ  ∧  arity matches" },
+    )
+    @ensures(
+        (_self: LCTypeCheck, _args: [string, Type[]], _old, result: Type) =>
+            isWellFormedType(result),
+        { rule: "T-Op", role: "conclusion", formula: "result : τ" },
+    )
+    protected opApp(opName: string, args: Type[]): Type {
+        const opSig = this.opRegistry.lookup(opName)
+        if (!opSig) return Any // unknown op → ill-typed (unreachable via opProd's gate)
+
+        // Premise: arity must match exactly.
+        if (args.length !== opSig.paramTypes.length) return Any
+
+        // Premise: each argument type must be a subtype of the declared
+        // parameter type. A Nothing argument is tracked and propagated after
+        // the loop so a genuine premise violation on a later arg is not
+        // silently subsumed by Nothing (the variantCon pattern).
+        let hasNothingArg = false
+        for (let i = 0; i < args.length; i++) {
+            const argType = args[i]
+            if (argType === undefined) return Any
+            if (argType instanceof NothingType) hasNothingArg = true
+            if (!isSubtype(argType, opSig.paramTypes[i]!)) return Any
+        }
+
+        // Nothing propagation (principle of explosion).
+        if (hasNothingArg) return Nothing
+
+        return opSig.resultType
+    }
+
+    // ── Override opProd to enforce T-Op premises in the production path ───────
+
+    /**
+     * Override `opProd` to enforce the T-Op premises in the production path:
+     * parse the arguments, check arity and argument types against the
+     * signature, and only then commit `opApp`'s conclusion. A failed premise
+     * returns `empty<Type>()` (ill-typed — empty parse forest), the same
+     * rejection semantics as the `letProd` and `typeAppProd` overrides.
+     *
+     * The base `opApp` action remains the rule-model conclusion (its
+     * `@requires`/`@ensures` contracts feed `collectRules`); the premises are
+     * enforced here because `@requires` is declarative metadata, not a
+     * runtime check.
+     *
+     * Note on the `.chain(([, result]) => ...)` / `.map(([, result]) => result)`
+     * calls: `chain` is a **pair-emitting** bind — it always flows
+     * `[firstVal, secondVal]` upward (see `ChainSecondCxt` in lang-forma),
+     * even when the second parser is `epsilon<Type>(...)`. So the value
+     * flowing after the first `.chain` is `[Type[], Type | undefined]`, and
+     * the destructures extract the second component — the premise result —
+     * not the `Type` itself.
+     */
+    // op(t₁, ..., tₙ)  — T-Op via chain (type-checks signature premises)
+    @rule
+    protected override opProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.opIdent,
+            char("("),
+            this.ws,
+        ).chain(([opName]) => {
+            const opSig = this.opRegistry.lookup(opName)
+            if (!opSig) {
+                return empty<Type>()
+            }
+            return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
+                .chain((args) =>
+                    seq(this.ws, char(")"))
+                        .map(() => this.checkOpPremises(opSig, args))
+                )
+                .chain(([, result]) => result === undefined ? empty<Type>() : epsilon<Type>(result))
+                .map(([, result]) => result)
+        }).map(([, result]) => result)
+    }
+
+    /**
+     * Check the T-Op premises on already-parsed argument types. Returns the
+     * conclusion type, or `undefined` when a premise fails (the production
+     * turns that into an empty parse forest — ill-typed).
+     */
+    private checkOpPremises(opSig: OpSig, args: Type[]): Type | undefined {
+        // Premise: arity must match exactly.
+        if (args.length !== opSig.paramTypes.length) return undefined
+
+        let hasNothingArg = false
+        for (let i = 0; i < args.length; i++) {
+            const argType = args[i]
+            if (argType === undefined) return undefined
+            if (argType instanceof NothingType) hasNothingArg = true
+            if (!isSubtype(argType, opSig.paramTypes[i]!)) return undefined
+        }
+
+        // Nothing propagation (principle of explosion) — checked after the
+        // premises so a genuine type error is never masked.
+        if (hasNothingArg) return Nothing
+
+        return this.opApp(opSig.name, args)
     }
 
     // ── Override appProd for type checking via chain ──────────────────────────

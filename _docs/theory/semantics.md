@@ -315,13 +315,14 @@ _useful_ for optimization. Declared laws enter the core's equational theory envi
 [`lc.md`](./lc.md) §7); exploitation is a **directed rewrite** (`↝`) justified by the algebraic
 equivalence judgment `Ω; E ⊢ t ≡ u`, never by an evaluation rule:
 
-- **Identity elimination:** `identity:e` on a fold contributes the axiom `⊕(e, a) ≡ a` to `E`.
-  The optimizer chooses the eliminating direction: when the identity element is encountered as an
-  argument, the operation application is rewritten away (`⊕(e, a) ↝ a`) and the fold is not
-  entered. The axiom is undirected; the direction is an optimizer strategy.
+- **Identity elimination:** `identity:e` on a fold contributes the axiom `⊕(e, a) ≡ a` to `E`. The
+  optimizer chooses the eliminating direction: when the identity element is encountered as an
+  argument, the operation application is rewritten away (`⊕(e, a) ↝ a`) and the fold is not entered.
+  The axiom is undirected; the direction is an optimizer strategy.
 
-- **Horner fusion:** `distributive:sum` on a fold contributes the distributivity axiom to `E`
-  (a relational law between two operations). The optimizer derives `fold(⊕) ∘ fold(⊗) ≡
+- **Horner fusion:** `distributive:sum` on a fold contributes the distributivity axiom to `E` (a
+  relational law between two operations). The optimizer derives
+  `fold(⊕) ∘ fold(⊗) ≡
   fold(⊗-then-⊕)` from it and fuses two folds into one traversal.
 
 - **Involutory cancellation:** `involutory` contributes `f(f(a)) ≡ a`; the optimizer cancels
@@ -418,10 +419,10 @@ TypeChecking.subsumption:
 
 ### 5.4 Law Checking (Synthesized: Law obligations)
 
-Law checking establishes declared `properties` where possible and screens the rest. This pass
-runs after type checking (it needs typed terms to generate valid samples). Checking is
-**regime-based** — the domain of the operation's type determines the mechanism, and the result
-determines the law's **provenance tag** in `E`:
+Law checking establishes declared `properties` where possible and screens the rest. This pass runs
+after type checking (it needs typed terms to generate valid samples). Checking is **regime-based** —
+the domain of the operation's type determines the mechanism, and the result determines the law's
+**provenance tag** in `E`:
 
 ```
 LawChecking.foldDecl(name, spec, arms):
@@ -442,35 +443,34 @@ LawChecking.foldDecl(name, spec, arms):
 
 **Screening regimes.** For a data type `T = μ α. Σᵢ Cᵢ(Fᵢ(α))`:
 
-| Regime | Types | Mechanism | Result |
-| ------ | ----- | --------- | ------ |
-| **finite** | Bool, enums, records of finites (< ~2²⁰ inhabitants) | Exhaustive check of the entire input space | **Proof** — the law is established |
-| **machineFinite** | `Float`, `Int`, `Char` — pattern-matched data over fixed alphabets and fixed encodings (binary64 = exactly 2⁶⁴ inhabitants, incl. `Inf`/`NaN`) | Full-domain enumeration in principle; sub-space enumeration in practice | Certification of the checked space |
-| **derivable** | Any type, if the fold's handler bodies fall in the primitive-law derivation fragment | Induction over the fold schema + primitive base laws (fold-fusion etc.) | **Proof** |
-| **residual** | Unbounded-depth μ-types (List/Tree/String-shaped) whose handlers call non-primitive, non-discharged operations in semantically essential ways | Bounded-depth exhaustive + random sampling (singletons, primitive records, shallow recursive) | Evidence — falsifies, never establishes |
+| Regime            | Types                                                                                                                                          | Mechanism                                                                                     | Result                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------- |
+| **finite**        | Bool, enums, records of finites (< ~2²⁰ inhabitants)                                                                                           | Exhaustive check of the entire input space                                                    | **Proof** — the law is established      |
+| **machineFinite** | `Float`, `Int`, `Char` — pattern-matched data over fixed alphabets and fixed encodings (binary64 = exactly 2⁶⁴ inhabitants, incl. `Inf`/`NaN`) | Full-domain enumeration in principle; sub-space enumeration in practice                       | Certification of the checked space      |
+| **derivable**     | Any type, if the fold's handler bodies fall in the primitive-law derivation fragment                                                           | Induction over the fold schema + primitive base laws (fold-fusion etc.)                       | **Proof**                               |
+| **residual**      | Unbounded-depth μ-types (List/Tree/String-shaped) whose handlers call non-primitive, non-discharged operations in semantically essential ways  | Bounded-depth exhaustive + random sampling (singletons, primitive records, shallow recursive) | Evidence — falsifies, never establishes |
 
-**Sample generation** (residual regime): singleton variants one each; primitive-field variants
-up to three combinations; recursive-field variants one shallow sample. Because evaluation is
-total, the screen never diverges — no timeouts.
+**Sample generation** (residual regime): singleton variants one each; primitive-field variants up to
+three combinations; recursive-field variants one shallow sample. Because evaluation is total, the
+screen never diverges — no timeouts.
 
 This is _probabilistic_ checking only in the **residual** regime. The "static where possible,
-dynamic when needed" philosophy is now precise: the `discharged` tiers are established
-(exhaustively or by derivation), and only `asserted` laws rely on the runtime re-check on actual
-inputs (§7.4, live observation).
+dynamic when needed" philosophy is now precise: the `discharged` tiers are established (exhaustively
+or by derivation), and only `asserted` laws rely on the runtime re-check on actual inputs (§7.4,
+live observation).
 
 ### 5.5 The Cost Algebra (Static Cost/Depth Analysis)
 
-Totality guarantees that programs terminate; it does not guarantee that they terminate
-feasibly. The cage nevertheless makes **cost analysis unusually tractable** — a large fragment
-is statically **certifiable**, with a decidable criterion separating it from the residual
-(which is **flagged**, then observed at runtime — the same certified/flagged split as law
-provenance, §5.4).
+Totality guarantees that programs terminate; it does not guarantee that they terminate feasibly. The
+cage nevertheless makes **cost analysis unusually tractable** — a large fragment is statically
+**certifiable**, with a decidable criterion separating it from the residual (which is **flagged**,
+then observed at runtime — the same certified/flagged split as law provenance, §5.4).
 
-**Container-shaped recursion.** A fold's recursion tree is *isomorphic to its input structure*:
-`fold [μF]` over a value with _n_ constructor nodes performs exactly _n_ recursive invocations,
-one per node, **independent of handler bodies** (the container/shapely-types decomposition —
-Abbott, Altenkirch & Ghani). The recursion skeleton is determined by the functor `F` alone, so
-cost decomposes per node:
+**Container-shaped recursion.** A fold's recursion tree is _isomorphic to its input structure_:
+`fold [μF]` over a value with _n_ constructor nodes performs exactly _n_ recursive invocations, one
+per node, **independent of handler bodies** (the container/shapely-types decomposition — Abbott,
+Altenkirch & Ghani). The recursion skeleton is determined by the functor `F` alone, so cost
+decomposes per node:
 
 ```
 cost(fold [T] t)    = Σ_nodes cost(handler at node)
@@ -480,60 +480,60 @@ cost(app t u)       = cost(t) + cost(u) + cost of substituted body
 latency(e.oₖ)       = cost of gₖ on the seed   (the codata dual — §2.4)
 ```
 
-Only handler-body costs recurse into the analysis; structure contributes a known skeleton.
-Note that folds are **not** monotone as functions (handlers may return anything) — what is
-rigid is the *call-shape*: the recursion profile is fixed by the input's shape.
+Only handler-body costs recurse into the analysis; structure contributes a known skeleton. Note that
+folds are **not** monotone as functions (handlers may return anything) — what is rigid is the
+_call-shape_: the recursion profile is fixed by the input's shape.
 
-**The busy-beaver criterion: cycles × value growth.** Unsafe (hyper-growth, infeasible)
-computation requires **both** axes:
+**The busy-beaver criterion: cycles × value growth.** Unsafe (hyper-growth, infeasible) computation
+requires **both** axes:
 
-|                     | Acyclic references        | Cyclic references |
-| ------------------: | ------------------------ | ----------------- |
-| **No value growth** | trivially safe           | **Datalog**: no function symbols ⇒ finite active domain ⇒ finite lattice; monotone rules ascend to the least fixed point (Knaster–Tarski) — termination *and* PTIME data complexity by construction |
-| **Value growth**    | **Lapis `Ω`**: declaration-order stratification — terminates by induction (see below); cost still needs the feedback analysis | **Unsafe**: every fold finite, but the dynamic call chain has no decreasing measure (`A(1) → B(3) → A(7) → …`) |
+|                     | Acyclic references                                                                                                            | Cyclic references                                                                                                                                                                                   |
+| ------------------: | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No value growth** | trivially safe                                                                                                                | **Datalog**: no function symbols ⇒ finite active domain ⇒ finite lattice; monotone rules ascend to the least fixed point (Knaster–Tarski) — termination _and_ PTIME data complexity by construction |
+|    **Value growth** | **Lapis `Ω`**: declaration-order stratification — terminates by induction (see below); cost still needs the feedback analysis | **Unsafe**: every fold finite, but the dynamic call chain has no decreasing measure (`A(1) → B(3) → A(7) → …`)                                                                                      |
 
 Datalog forbids growth, keeps cycles. Lapis requires growth (constructors — μ-types are initial
 algebras; that is the point of the language) and so forbids cycles. The two moves are dual
 stratification-class answers to the same table. Lapis already runs the Datalog argument where it
-applies: `relation`/`closure` (elaboration §3.4) is a fixpoint engine — semi-naive evaluation
-over the finite span-projection space, cycles included, exactly Datalog's lattice argument.
+applies: `relation`/`closure` (elaboration §3.4) is a fixpoint engine — semi-naive evaluation over
+the finite span-projection space, cycles included, exactly Datalog's lattice argument.
 
-**`Ω` acyclicity (the rule that preserves totality).** Named operations (#49) reintroduce a
-call graph; unguarded, cyclic op references would reintroduce general recursion through the
-back door — termination would depend on a semantic measure with no syntactic witness. The rule:
-**an operation may only reference operations declared earlier in `Ω`.** This is a decidable
-dependency-graph condition checked once per declaration (the same family as Datalog's negation
-stratification), *not* a Charity-style per-program semantic termination checker. It buys
-termination by induction on declaration order; it does **not** buy cost.
+**`Ω` acyclicity (the rule that preserves totality).** Named operations (#49) reintroduce a call
+graph; unguarded, cyclic op references would reintroduce general recursion through the back door —
+termination would depend on a semantic measure with no syntactic witness. The rule: **an operation
+may only reference operations declared earlier in `Ω`.** This is a decidable dependency-graph
+condition checked once per declaration (the same family as Datalog's negation stratification), _not_
+a Charity-style per-program semantic termination checker. It buys termination by induction on
+declaration order; it does **not** buy cost.
 
-**The feedback flag.** Within the anonymous calculus (no op references, no recursive `let`),
-the criterion for hyper-growth is nearly exact: **value-size feedback** — a fold's result
-flowing back as another fold's input without a static size bound on the intermediate. Without
-feedback, the cost algebra closes to a primitive-recursive bound mechanically (nested folds
-over independent inputs: polynomial by recurrence). With feedback through first-order results,
-cost is bounded when constructors are used affinely (Hofmann's non-size-increasing criterion —
-also syntactic). Feedback through **higher-order results** (a fold producing a function that
-re-enters with growing inputs — the Ackermann shape) is the flagged fragment: certified
-infeasible-by-observation, not decidable in general (the same Rice-style wall, correctly
-stated: totality bounds the discharge/analysis fragment, it does not erase the residual).
+**The feedback flag.** Within the anonymous calculus (no op references, no recursive `let`), the
+criterion for hyper-growth is nearly exact: **value-size feedback** — a fold's result flowing back
+as another fold's input without a static size bound on the intermediate. Without feedback, the cost
+algebra closes to a primitive-recursive bound mechanically (nested folds over independent inputs:
+polynomial by recurrence). With feedback through first-order results, cost is bounded when
+constructors are used affinely (Hofmann's non-size-increasing criterion — also syntactic). Feedback
+through **higher-order results** (a fold producing a function that re-enters with growing inputs —
+the Ackermann shape) is the flagged fragment: certified infeasible-by-observation, not decidable in
+general (the same Rice-style wall, correctly stated: totality bounds the discharge/analysis
+fragment, it does not erase the residual).
 
-| Fragment | Cost verdict |
-| -------- | ------------ |
-| First-order folds, non-nested | linear — **certified** |
-| Stratified folds (re-entry only through bounded-size results) | primitive-recursive, computed by recurrence — **certified** |
-| Affine-constructor size-preserving feedback (e.g. `map` → fold) | bounded — **certifiable** (Hofmann LFPL) |
-| Higher-order result-size feedback | hyper-growth candidate — **flagged**; runtime profiling observes |
+| Fragment                                                        | Cost verdict                                                     |
+| --------------------------------------------------------------- | ---------------------------------------------------------------- |
+| First-order folds, non-nested                                   | linear — **certified**                                           |
+| Stratified folds (re-entry only through bounded-size results)   | primitive-recursive, computed by recurrence — **certified**      |
+| Affine-constructor size-preserving feedback (e.g. `map` → fold) | bounded — **certifiable** (Hofmann LFPL)                         |
+| Higher-order result-size feedback                               | hyper-growth candidate — **flagged**; runtime profiling observes |
 
-**Codata dual: observation latency.** Productivity (§2.4) guarantees each observation is
-produced after *finite* work — not *small* work. The generator term is arbitrary, so
-`latency(e.oₖ)` is the codata-side unbounded cost. The same cost algebra applies; the flagged
-fragment here is the flagged fragment there.
+**Codata dual: observation latency.** Productivity (§2.4) guarantees each observation is produced
+after _finite_ work — not _small_ work. The generator term is arbitrary, so `latency(e.oₖ)` is the
+codata-side unbounded cost. The same cost algebra applies; the flagged fragment here is the flagged
+fragment there.
 
-**Relation to law provenance.** The split mirrors §5.4 exactly: a decidable, mechanically
-checked fragment (`certified`, by the cost algebra / exhaustion / derivation) plus an undecidable
-residual made honest by visible flagging and runtime observation (`asserted`/`flagged` → live
-profiling, withdrawal-style alerting). The cage does not make analysis decidable in general; it
-carves out the decidable fragment and names the residual.
+**Relation to law provenance.** The split mirrors §5.4 exactly: a decidable, mechanically checked
+fragment (`certified`, by the cost algebra / exhaustion / derivation) plus an undecidable residual
+made honest by visible flagging and runtime observation (`asserted`/`flagged` → live profiling,
+withdrawal-style alerting). The cage does not make analysis decidable in general; it carves out the
+decidable fragment and names the residual.
 
 ### 5.6 When to Use Hand-Written Walkers
 
@@ -626,9 +626,8 @@ runtime.
 
 ## 7. Equality
 
-There are three distinct equivalence notions in Lapis. The first two are **value** equalities
-(what the runtime `=` primitive observes); the third is a **term** equality (what the optimizer
-exploits).
+There are three distinct equivalence notions in Lapis. The first two are **value** equalities (what
+the runtime `=` primitive observes); the third is a **term** equality (what the optimizer exploits).
 
 ### 7.1 Data Equality (Structural)
 
@@ -679,30 +678,29 @@ bisimulation (codata); `instanceof` is subtype membership.
 
 ### 7.4 Algebraic Equivalence (Declared Laws)
 
-Distinct from both value equalities: `Ω; E ⊢ t ≡ u` (see [`lc.md`](./lc.md) §7) says two _terms_
-are algebraically equivalent modulo the declared laws. It is generated by the law axiom schemas
-plus congruence, is undirected, and is never evaluated — the optimizer uses it to justify directed
+Distinct from both value equalities: `Ω; E ⊢ t ≡ u` (see [`lc.md`](./lc.md) §7) says two _terms_ are
+algebraically equivalent modulo the declared laws. It is generated by the law axiom schemas plus
+congruence, is undirected, and is never evaluated — the optimizer uses it to justify directed
 rewrites (`↝`), choosing the direction per exploit.
 
 `≡` is **relative soundness**: rewrites licensed by `≡` preserve meaning in every model of the
-declared axioms `E`. For `primitive` and `discharged` laws the axioms are established (by
-language fiat or by the discharge mechanisms — §5.4), so rewrites they license are sound
-unconditionally. Only `asserted` laws carry declaration risk: a false-but-screened assertion can
-change observable behavior — the sample screen (§5.4) rejects declarations it can falsify, but
-passing the screen is evidence, not proof. The live-observation channel (§9.8) covers this
-residual.
+declared axioms `E`. For `primitive` and `discharged` laws the axioms are established (by language
+fiat or by the discharge mechanisms — §5.4), so rewrites they license are sound unconditionally.
+Only `asserted` laws carry declaration risk: a false-but-screened assertion can change observable
+behavior — the sample screen (§5.4) rejects declarations it can falsify, but passing the screen is
+evidence, not proof. The live-observation channel (§9.8) covers this residual.
 
-**Interaction with contracts.** Because `demands`/`rescue` elaborate to `Result`-typed terms, a
-law like `commutative` must specify which notion of equivalence it claims. The default reading:
-laws claim equivalence of the **elaborated `Result` values** (both sides succeed with equal
-values, or both fail). A law declared over an operation whose `demands` fails asymmetrically
-(e.g. `demands: other size <= self size` — true for `f(a, b)` but false for `f(b, a)`) is
-_falsified by the screen_. An exploiting rewrite must not skip contract checks: identity
-elimination `⊕(e, a) ↝ a` is valid only when `demands` is discharged on the remaining operand.
+**Interaction with contracts.** Because `demands`/`rescue` elaborate to `Result`-typed terms, a law
+like `commutative` must specify which notion of equivalence it claims. The default reading: laws
+claim equivalence of the **elaborated `Result` values** (both sides succeed with equal values, or
+both fail). A law declared over an operation whose `demands` fails asymmetrically (e.g.
+`demands: other size <= self size` — true for `f(a, b)` but false for `f(b, a)`) is _falsified by
+the screen_. An exploiting rewrite must not skip contract checks: identity elimination `⊕(e, a) ↝ a`
+is valid only when `demands` is discharged on the remaining operand.
 
-**Conditional laws** are not yet supported: laws are currently unconditional, global claims
-over the operation's domain. A `demands:`-restricted law (`associative` only over `A ⊆ T`)
-requires domain-aware axiom schemas and is an open question (§9.6).
+**Conditional laws** are not yet supported: laws are currently unconditional, global claims over the
+operation's domain. A `demands:`-restricted law (`associative` only over `A ⊆ T`) requires
+domain-aware axiom schemas and is an open question (§9.6).
 
 ## 8. Semantic Properties Summary
 
@@ -745,67 +743,66 @@ requires domain-aware axiom schemas and is an open question (§9.6).
    _partial_. Is this acceptable, or should cofold have a termination measure (e.g., a fuel
    parameter)?
 
-6. **Law semantics under contracts.** (§7.4) When an operation carries `demands:`/`rescue:`,
-   which equivalence does a declared law claim — success values only, or full `Result` equality
-   including failure behavior? The current default is full `Result` equality; this needs to be
-   validated against real contracted operations, and exploiting rewrites need a rule for when
-   contract checks may be skipped (identity elimination must not skip `demands`).
+6. **Law semantics under contracts.** (§7.4) When an operation carries `demands:`/`rescue:`, which
+   equivalence does a declared law claim — success values only, or full `Result` equality including
+   failure behavior? The current default is full `Result` equality; this needs to be validated
+   against real contracted operations, and exploiting rewrites need a rule for when contract checks
+   may be skipped (identity elimination must not skip `demands`).
 
 7. **Conditional laws.** (§7.4) Laws today are unconditional global claims. Supporting
-   domain-restricted laws (`associative` over `A ⊆ T`, licensed by `demands:`/`invariant:`)
-   requires parameterized axiom schemas in `E`, domain-aware screening, and an optimizer-side
-   domain check before the rewrite applies. Deferred — but the `LawDecl` representation should
-   not preclude it.
+   domain-restricted laws (`associative` over `A ⊆ T`, licensed by `demands:`/`invariant:`) requires
+   parameterized axiom schemas in `E`, domain-aware screening, and an optimizer-side domain check
+   before the rewrite applies. Deferred — but the `LawDecl` representation should not preclude it.
 
 8. **Sample screening vs. proof (RESOLVED into the provenance ladder).** Law checking is
    regime-based (§5.4): `discharged` for finite-domain exhaustion (proof), machine-finite
    bounded-exhaustive enumeration (certified sub-space), and derivation from primitive laws;
    `asserted` for the residual (unbounded-depth types with non-derivable handlers). External
    proof-assistant certificates are rejected as an authority tier — the trust anchors are the
-   language definition (`primitive`) and the programmer's own declarations. **Open remainder:**
-   the derivation fragment needs a precise characterization (which fold-handler shapes are
-   decidable); the machine-finite regime needs encoding-level declarations (fixed alphabets,
-   binary64 etc.) made explicit in the type system so exhaustion is spec-able; and the
-   live-observation channel (continuous re-screening, runtime withdrawal of falsified axioms)
-   needs design — for `asserted` laws it is the only additional evidence channel that exists.
-   Package-boundary trust policy (which tiers a build may exploit from dependencies) remains a
-   separate, later decision.
+   language definition (`primitive`) and the programmer's own declarations. **Open remainder:** the
+   derivation fragment needs a precise characterization (which fold-handler shapes are decidable);
+   the machine-finite regime needs encoding-level declarations (fixed alphabets, binary64 etc.) made
+   explicit in the type system so exhaustion is spec-able; and the live-observation channel
+   (continuous re-screening, runtime withdrawal of falsified axioms) needs design — for `asserted`
+   laws it is the only additional evidence channel that exists. Package-boundary trust policy (which
+   tiers a build may exploit from dependencies) remains a separate, later decision.
 
-9. **Quotient types and observing declared laws.** Data equality (§7.1) is purely structural —
-   there is no quotient mechanism `T // ≈` (a type whose elements are equivalence classes of a
+9. **Quotient types and observing declared laws.** Data equality (§7.1) is purely structural — there
+   is no quotient mechanism `T // ≈` (a type whose elements are equivalence classes of a
    user-declared relation). Three pressure points make this a real gap, not a nice-to-have:
 
-   - **Denotationally required.** A law-bearing fold (e.g. `merge` declared `associative,
-   commutative`) does not denote into the free term algebra: its natural denotation is the
-   initial (Ω,E)-algebra — the term algebra quotiented by the declared laws (cf. §7.4). The
-   `≡` formalization (lc.md §7) is implicitly committed to quotient semantics; the type system
-   does not yet express it.
+   - **Denotationally required.** A law-bearing fold (e.g. `merge` declared
+     `associative,
+   commutative`) does not denote into the free term algebra: its natural
+     denotation is the initial (Ω,E)-algebra — the term algebra quotiented by the declared laws (cf.
+     §7.4). The `≡` formalization (lc.md §7) is implicitly committed to quotient semantics; the type
+     system does not yet express it.
    - **Observability.** Laws currently drive optimization but can never be observed by a running
-   program: `equals(Bag(1,2,3), Bag(3,1,2))` is structurally false unless the user hand-writes a
-   canonicalizing fold. For a language whose thesis is "laws are language-level facts, not
-   comments," that is an expressive gap. Standard examples: `Set = List // permutation`,
-   `Rational = (Int × Int) // cross-multiplication` (Cook's ADTs-as-quotients), multisets as
-   AC-normalized lists.
+     program: `equals(Bag(1,2,3), Bag(3,1,2))` is structurally false unless the user hand-writes a
+     canonicalizing fold. For a language whose thesis is "laws are language-level facts, not
+     comments," that is an expressive gap. Standard examples: `Set = List // permutation`,
+     `Rational = (Int × Int) // cross-multiplication` (Cook's ADTs-as-quotients), multisets as
+     AC-normalized lists.
    - **Non-order-specific folds.** A fold over `Bag` that ignores insertion order is a fold that
-   factors through the quotient `List // permutation` — otherwise the result type over-specifies
-   order (the classic over-specification critique of left/right folds).
+     factors through the quotient `List // permutation` — otherwise the result type over-specifies
+     order (the classic over-specification critique of left/right folds).
 
    **Candidate Lapis mechanism** (distinctive, reuses machinery on the books):
 
-   - Well-definedness of elimination (every `f : T//≈ → U` must satisfy `x ≈ y ⟹ f(x) = f(y)` —
-   the standard proof obligation) becomes a **screened algebraic claim** (Model A): the fold
-   declares it respects `≈`, the law screen samples, and the claim is trusted as an axiom in `E`.
-   No proof obligation, consistent with law authority.
-   - Canonical forms supply the computational content: the directed rewrites (`↝`) normalize
-   toward representative terms, making `T // ≈` computable with decidable equality (vs.
-   setoids, which never canonicalize and drag the relation everywhere).
+   - Well-definedness of elimination (every `f : T//≈ → U` must satisfy `x ≈ y ⟹ f(x) = f(y)` — the
+     standard proof obligation) becomes a **screened algebraic claim** (Model A): the fold declares
+     it respects `≈`, the law screen samples, and the claim is trusted as an axiom in `E`. No proof
+     obligation, consistent with law authority.
+   - Canonical forms supply the computational content: the directed rewrites (`↝`) normalize toward
+     representative terms, making `T // ≈` computable with decidable equality (vs. setoids, which
+     never canonicalize and drag the relation everywhere).
 
    **Open sub-questions:** elimination into a different quotient (cross-theory congruence);
-   interaction between `≈`-equality and the `equals`-as-a-fold story (hashing, dedup, memoization
-   in the runtime); quotient subtyping (`T // ≈` vs `T // ≈'` — no standard treatment exists);
-   whether `≈` may be coinductively defined. Bisimulation (§7.2) is already a coinductive quotient
-   for codata — this question is its data-side dual. See
-   [`design-decisions.md`](../design-decisions.md) (Quotient types).
+   interaction between `≈`-equality and the `equals`-as-a-fold story (hashing, dedup, memoization in
+   the runtime); quotient subtyping (`T // ≈` vs `T // ≈'` — no standard treatment exists); whether
+   `≈` may be coinductively defined. Bisimulation (§7.2) is already a coinductive quotient for
+   codata — this question is its data-side dual. See [`design-decisions.md`](../design-decisions.md)
+   (Quotient types).
 
 ## 10. References
 
@@ -821,15 +818,15 @@ requires domain-aware axiom schemas and is an open question (§9.6).
   foundations
 - Bracha, G., "Executable Grammars in Newspeak" (2007) — grammar-subclass layering for analysis
 - Knuth, D. E., "Semantics of Context-Free Languages" (1968) — attribute grammars
-- Hofmann, M., "A Simple Model for Quotient Types" (TLCA 1995) — quotient semantics via
-  partial equivalence relations
-- Hofmann, M., _Extensional Constructs in Intensional Type Theory_ (1997) — quotients, setoids,
-  and the canonicity cost of extensional equality
-- Constable, R. L. et al., _Implementing Mathematics with the Nuprl Proof Development System_
-  (1986) — first implementation of quotient types; well-definedness obligations
+- Hofmann, M., "A Simple Model for Quotient Types" (TLCA 1995) — quotient semantics via partial
+  equivalence relations
+- Hofmann, M., _Extensional Constructs in Intensional Type Theory_ (1997) — quotients, setoids, and
+  the canonicity cost of extensional equality
+- Constable, R. L. et al., _Implementing Mathematics with the Nuprl Proof Development System_ (1986)
+  — first implementation of quotient types; well-definedness obligations
 - Altenkirch, T., "Quotients, Observational Type Theory, and Their Duality" (2009) — setoids vs.
   quotients; observational equality
-- The Univalent Foundations Program, _Homotopy Type Theory_ (2013) — higher inductive types and
-  the modern quotient construction
+- The Univalent Foundations Program, _Homotopy Type Theory_ (2013) — higher inductive types and the
+  modern quotient construction
 - Cook, W. R., "On Understanding Data Abstraction, Revisited" (OOPSLA 2009) — ADTs as
   observationally-quotiented concrete types

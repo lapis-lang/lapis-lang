@@ -2,7 +2,7 @@
 
 > **Status:** Active plan. `@lapis-lang/lang-forma@1.1.0` is installed (migrated from
 > `@lapis-lang/zipper-grammar@4.1.0` — a compatible superset) and all 57 existing tests pass. This
-> plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26, #30–#35).
+> plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26, #30–#35, #49).
 >
 > **lang-forma migration note:** The grammar engine was migrated from `zipper-grammar` to its
 > successor `lang-forma` (drop-in API-compatible). `lang-forma` adds six feature families that
@@ -54,21 +54,22 @@
 
 ### What's Missing or Incomplete
 
-| Component                        | Status             | Notes                                                                                                                                        | PBI          |
-| -------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `Nothing` propagation            | ✅ Complete        | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                        | #19          |
-| T-TApp premise enforcement       | ✅ Complete        | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                        | #39          |
-| Type-variable reference          | ✅ Complete        | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                  | #42          |
-| Type-variable lexical scoping    | ✅ Complete        | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected | #44          |
-| T-Sub (subsumption)              | ✅ Complete        | Implicit subsumption at use sites via `isSubtype` in `@requires`; T-Let premise 1 enforced in `letProd` override                             | #20          |
-| `@ensures` for Progress          | ✅ Complete        | Contracts on all typing rules encode Progress cases; verified by `checkProgress` (no gaps)                                                   | #21          |
-| Metatheory verification          | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`          | #31          |
-| Generative counterexample search | ✅ Complete        | `findCounterexamples(LCEval, LCTypeCheck)` — 500 generated terms, 0 counterexamples; 5 tests in `counterexamples.test.ts`                    | #32          |
-| Law/properties machinery         | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                         | #22          |
-| T-FoldMatch + E-FoldMatch        | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                  | #23          |
-| T-Pattern                        | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                    | #24          |
-| Surface language elaboration     | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                             | #25          |
-| Dead code / consolidation        | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                          | #15–#17, #26 |
+| Component                              | Status             | Notes                                                                                                                                              | PBI          |
+| -------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `Nothing` propagation                  | ✅ Complete        | `variantCon`, `obs`, `fold`, `unfold` propagate the bottom type (explosion semantics)                                                              | #19          |
+| T-TApp premise enforcement             | ✅ Complete        | `typeAppProd` override rejects non-polymorphic bodies and bound violations (no `undefined` in forest)                                              | #39          |
+| Type-variable reference                | ✅ Complete        | `typeAbsProd` binder uses `typeName` (uppercase); bound type vars can appear in annotations                                                        | #42          |
+| Type-variable lexical scoping          | ✅ Complete        | `Δ` (TypeVarEnv) threaded through type productions; bound type vars resolve to `TypeVar` with declared bound; reserved binder names rejected       | #44          |
+| T-Sub (subsumption)                    | ✅ Complete        | Implicit subsumption at use sites via `isSubtype` in `@requires`; T-Let premise 1 enforced in `letProd` override                                   | #20          |
+| `@ensures` for Progress                | ✅ Complete        | Contracts on all typing rules encode Progress cases; verified by `checkProgress` (no gaps)                                                         | #21          |
+| Metatheory verification                | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`                | #31          |
+| Generative counterexample search       | ✅ Complete        | `findCounterexamples(LCEval, LCTypeCheck)` — 500 generated terms, 0 counterexamples; 5 tests in `counterexamples.test.ts`                          | #32          |
+| Law/properties machinery               | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                               | #22          |
+| Core op symbols (Ω + `op` application) | ✅ Complete        | `OpRegistry` (Ω, acyclic by construction), `opProd` term form, T-Op/E-Op — operation identity survives elaboration; 38 tests in `test/ops.test.ts` | #49          |
+| T-FoldMatch + E-FoldMatch              | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                        | #23          |
+| T-Pattern                              | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                          | #24          |
+| Surface language elaboration           | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                                   | #25          |
+| Dead code / consolidation              | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                                | #15–#17, #26 |
 
 ## Plan — PBI Roadmap
 
@@ -304,6 +305,141 @@ with the current status, milestone, and dependencies.
 
 ### Milestone v0.3.0 — Laws
 
+#### PBI #49: Core op symbols — Ω environment + named operation application (T-Op/E-Op)
+
+- **Status:** Complete — 163 tests green (`deno check` / `test` / `lint` / `fmt` clean)
+- **Assignee:** @mlhaufe
+- **Goal:** Implement the named-operation layer of LC (`lc.md` §2.2, §2.4, §3 E-Op/E-OpArg, §5
+  T-Op): the operation signature environment `Ω` (`OpRegistry`), the `op(t₁, ..., tₙ)` term form
+  (`opProd`), and its typing/evaluation rules. `op` application is definitional sugar — it computes
+  by applying the definition `Ω` carries — but the named form is not eagerly inlined, so operation
+  identity survives substitution: the prerequisite for #22's exploitation phase. Includes the
+  Ω-acyclicity rule (declaration-order stratification — an operation may only reference operations
+  declared earlier in `Ω`).
+- **Design decisions:**
+  - **Lexical namespace split + tight paren.** Operations are camelCase (`add`), variants PascalCase
+    (`Zero`) — the existing `ident`/`variantName` lexemes already discriminate the namespaces.
+    `opProd` requires `(` immediately after the ident (no whitespace): `add(a, b)` is an op
+    application; `add (a)` is variable application. Whitespace is the shadowing escape hatch — a
+    let-bound `add` remains applicable with spacing.
+  - **`SpanClosure` carries its input.** An op's definition source is not part of the parse input,
+    so closures captured while evaluating it reference different text than `this._input`.
+    `SpanClosure` gains an `input` field; E-App re-parses against `closure.input`. This makes a
+    closure escaping an op application (an op returning a function) applicable later, soundly.
+  - **E-Op window discipline.** `evalOp` saves/restores `_input`/`_inputOffset` around definition
+    evaluation (the existing `savedOffset` pattern), then applies the definition closure to the
+    argument values leftmost via `_forward`. Arity is enforced against the signature — the op form
+    is fixed-arity, not curried.
+  - **E-OpArg is structural.** Like the other congruence rules (E-App1/E-FoldArg/…), leftmost
+    argument evaluation is realized by the one-pass grammar (args are atoms evaluated in `seq`
+    order); it has no rule-model entry, matching the existing rule inventory.
+  - **Acyclicity by lexical scan.** In LC concrete syntax, camelCase-ident-immediately-followed-by-
+    `(` is unambiguously an op application (application requires whitespace; variant construction is
+    PascalCase), so the declaration-time check scans the definition source for that pattern and
+    rejects references to names not already in `Ω` (self, forward, cyclic).
+  - **Definition-signature validation deferred to elaboration.** `Ω` entries are produced by
+    elaboration from surface fold declarations (`lc.md` §2.4); until that lands, entries are
+    hand-authored test fixtures and sig/definition agreement is a test responsibility. Declare-time
+    checks cover naming, duplicates, and acyclicity only.
+- **Tasks (dependency-ordered, each landing with the full suite green):**
+  1. `src/core/ops.ts` (new): `OpSig` (name, `paramTypes`, `resultType`, definition source),
+     `OpRegistry` (`declare` with naming/duplicate/acyclicity checks, `lookup`),
+     `OpDeclarationError`.
+  2. `src/core/grammar.ts`: `opProd` production (registry-gated, tight paren, atom-level args),
+     abstract `opApp` semantic action, `opRegistry` field + `setOpRegistry`, `atomProd` branch,
+     header grammar-sketch update.
+  3. `src/core/typing_grammar.ts`: T-Op — `opApp` override (Ω lookup, arity, `argᵢ <: σᵢ`, Nothing
+     propagation, result `τ`) with `@requires`/`@ensures` contracts.
+  4. `src/core/values.ts` + `src/core/eval_grammar.ts`: `SpanClosure.input` (E-App re-parses against
+     it); E-Op — `opProd` override + `evalOp` window; `opApp` stub with E-Op contracts; header
+     rule-list update.
+  5. `src/core/index.ts`: export `OpSig`, `OpRegistry`, `OpDeclarationError`.
+  6. `test/fixtures.ts`: `createOpFixtures()` — fresh `Nat` + `add`/`mul` ops with LC-source
+     definitions (existing `createTestFixtures` unchanged, so generative tests are unaffected).
+  7. `test/ops.test.ts` (new): T-Op well-typedness (accept / arity mismatch / arg mismatch / unknown
+     op); E-Op computes as if let-bound; E-OpArg strictness; identity-survival via `parseToTree`
+     (`opProd` nodes retained, names recoverable from spans; contrast with the let-bound
+     anonymous-fold encoding that loses the identity); acyclicity (acyclic chain accepted;
+     self-reference, forward reference, cyclic A↔B rejected); nested op application (op referencing
+     an earlier op — nested windows); escaping closure (op returning a function, applied after the
+     window closes).
+  8. `test/metadata.test.ts` + `test/metatheory.test.ts`: add T-Op/E-Op rows to the expected rule
+     inventories (exact-match assertions); step-rule count 6 → 7; verify Progress/Preservation still
+     hold with E-Op in the rule model.
+- **Files:** `src/core/ops.ts` (new), `src/core/grammar.ts`, `src/core/typing_grammar.ts`,
+  `src/core/values.ts`, `src/core/eval_grammar.ts`, `src/core/index.ts`, `test/fixtures.ts`,
+  `test/ops.test.ts` (new), `test/metadata.test.ts`, `test/metatheory.test.ts`, this document.
+- **Verification:** `deno check src/index.ts` → `deno test` (all existing suites green plus the new
+  ops suite) → `deno lint` → `deno fmt`.
+- **Depends on:** Nothing — root of the v0.3.0 DAG. Blocks #22 (exploitation phase), #51, #52.
+- **Result:** All 8 tasks landed as planned. Two **pre-existing evaluator correctness gaps**
+  surfaced because op definitions exercise the closure+fold combination that existing tests
+  (identity handlers, empty environments) never did — both fixed as part of this PBI:
+  1. **`evalFold` dropped the ambient scope** — it built the handler environment fresh, so a handler
+     body referencing an enclosing lambda parameter (`y`) was unbound. E-Fold is a substitution into
+     the fold's ambient scope; `evalFold` now extends the ambient `ρ` with the field bindings.
+  2. **`evalFold` bound recursive fields raw** — E-Fold requires a recursive (Family) field to bind
+     the **re-folded** value (`vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ}`, matching the type checker's σ-binding);
+     it bound the raw field value. Identity-handler tests passed either way, which is why the gap
+     went unnoticed. Also: `SpanClosure.input` (the escaping-closure fix) required updating E-App to
+     re-parse against `closure.input` — the definition window's text, not the parse input — so
+     closures captured inside an op definition stay applicable after the window closes.
+- **Code review fixes (2026-09-13):**
+  1. **Codata across the definition window** — `SpanCodataVal` now carries `input` (the codata dual
+     of `SpanClosure.input`); E-Obs and `evalCofold` re-parse generator spans against the value's
+     own input. A codata value crossing a definition window in either direction (an op returning an
+     unfold, a codata argument observed inside a definition) is now sound, including chained
+     windows.
+  2. **`evalCofold` ambient scope** — the cofold had the same fresh-env bug fixed in `evalFold`; the
+     handler env now extends the ambient `ρ` (symmetric with E-Fold).
+  3. **E-Obs capture-phase leniency** — a lambda body containing an observation
+     (`\s:Stream. s.head`) is parsed for span capture with the parameter bound to `PLACEHOLDER`;
+     E-Obs now keeps the parse alive with a placeholder (the leniency `varRef`/`variantCon` already
+     had) instead of failing the definition capture. Without it, no op definition observing a codata
+     parameter could parse.
+  4. **Keyword-named operations disambiguated positionally** — the op form's tight paren
+     (`fold(a, b)`) is positionally disjoint from every keyword position (all whitespace-delimited:
+     `fold [T] e {...}`, `let x:σ = ...`, `... in u`), so operations may be named with reserved
+     words. `opProd` now parses with a keyword-permissive `opIdent` lexeme; `LC_RESERVED_WORDS` (the
+     single source for `ident`) lives in `grammar.ts` — a syntax concern, not an Ω concern. (The
+     first cut rejected keyword-named ops at `declare`; that defended a non-existent ambiguity and
+     papered over the lexeme choice.) The reserved-word list was then minimized to what is
+     load-bearing: **only `in`** (the one keyword in a mid-expression position — without the
+     rejection, `let x:Any = f in y in z` parses twice at different types: def = `(f in) y`, body =
+     `z` vs. def = `f`, body = `(y in) z`). The keyword formers (`let`, `fold`, `unfold`, `cofold`)
+     are **not** reserved: their keyword positions are prefix positions with mandatory keyword
+     continuations, which a variable occurrence can never match — verified adversarially
+     (keyword-named variables in application, let-def, handler, and lambda positions all parse
+     exactly once). The dead `variantName` copy of the check was removed — every reserved word is
+     lowercase, and a PascalCase lexeme cannot equal one.
+  5. **T-Op specified in `lc.md` §5.8** — the rule, its Progress case (§6.1), and its Preservation
+     cases (E-Op/E-OpArg, §6.2) are now in the formal spec; code cross-references updated.
+  6. Test coverage added: Nothing propagation (both arg positions + not masking a type error),
+     escaping codata (three window-crossing shapes), cofold ambient scope, keyword-named op
+     (declares, applies, and coexists with the unambiguous fold form); misleading subsumption test
+     renamed; `OpSig.signature` justified (law-machinery forward use).
+  7. **E-Op determinism policy** — the definition window's parses are internal (the caller never
+     sees its forest), so `evalOp` requires **exactly one** parse result at each step: the
+     definition parse and every application step. An empty or ambiguous parse is an `EvalErrorValue`
+     naming the op and the failing step, never a silent first-pick — a silent pick would make
+     evaluation order-dependent and hide registry-authoring bugs. (The `> 1` guards are
+     defense-in-depth: the current grammar yields single-parse forests everywhere, per the
+     derivation-path dedup work.) Tested: unparseable definition, non-function definition, arity
+     mismatch, and the positive case.
+  8. **Acyclicity scan scope documented + built-in call forms excluded** — the dependency check is a
+     lexical scan, not a token-level one: `declare` runs before parsing infrastructure exists (`Ω`
+     is populated before grammars are constructed — the grammar holds the registry), so the check
+     must be grammar-independent. It is exact for the current LC concrete syntax (no string
+     literals, no comments); the language-level `match(pₖ)` call form (T-Pattern) is excluded via a
+     closed `BUILTIN_CALL_FORMS` vocabulary — it is a language construct, not an operation. The
+     exactness claim, its limits (future syntax revisions must extend the exclusion list or replace
+     the scan), and the loud-not-silent failure mode are documented on `referencedOps`. Tested:
+     `match` exclusion, whitespace-application / PascalCase / bare-variable non-matches, and
+     genuine-reference catching.
+- **Out of scope:** the `E` equational-theory environment and law declarations (#22); surface
+  operator syntax `a + b` → `add(a, b)` (#25 elaboration); declare-time definition-signature
+  validation (elaboration-time).
+
 #### PBI #22: Law/properties machinery — make algebraic laws operationally exploitable
 
 - **Status:** Open
@@ -316,7 +452,8 @@ with the current status, milestone, and dependencies.
   2. A law-checking pass (possibly via `SemanticPass` over `DerivationTree`).
   3. Integration with the type system (e.g., law-based rewriting, law-driven optimization).
 - **Files:** TBD
-- **Depends on:** #21 (Progress contracts must be solid before laws can build on them).
+- **Depends on:** #21 (Progress contracts must be solid before laws can build on them); the
+  exploitation phase is blocked on #49 (op identity must survive elaboration).
 
 #### PBI #33: Property-based testing — `GrammarGenerator` / `ValueGenerator` (`forAll` + shrinking) for LC laws
 
