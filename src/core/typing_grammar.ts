@@ -239,9 +239,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
     /**
      * Application typing rule. The premise (fn must be a function type whose
-     * domain matches arg's type) is checked via @requires.
-     * On failed premise, @requires returns undefined → the calling bind
-     * produces empty() → the ill-typed branch is rejected.
+     * domain matches arg's type) is enforced by the `appProd` override: it
+     * checks the premise inline and returns `empty()` on failure, so the
+     * ill-typed branch is rejected. The `@requires` decorator is declarative
+     * metadata for the rule model; this action is bypassed on the production
+     * path (the override computes the conclusion directly).
      */
     @requires(
         (_self: LCTypeCheck, fn: Type, arg: Type) =>
@@ -294,8 +296,12 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // ── T-Var: Γ(x) = σ  ⟹  Γ ⊢ x : σ ────────────────────────────────────────
 
     /**
-     * Variable typing rule. @requires: name must be bound in ctx.
-     * On failure, returns undefined → empty parse forest (ill-typed).
+     * Variable typing rule. The premise (name must be bound in Γ) is
+     * declarative metadata for the rule model: `varRef` is called from the
+     * base `atomProd` production, which has no premise-checking override,
+     * so a failed premise surfaces `undefined` in the parse forest rather
+     * than an empty forest. Callers that need strict rejection must check
+     * the binding in the production path.
      *
      * @ensures Progress: a variable in a closed term is always substituted
      * before evaluation, so it can always step (or is already a value).
@@ -942,7 +948,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * not a runtime check, so the premise is enforced here instead.
      *
      * The bind formulation is left-recursive (`typeAppProd` calls itself
-     * via `this`), which the zipper engine resolves — the same shape as the
+     * via `this`), which the lang-forma engine resolves — the same shape as the
      * `appProd` override above. Each application in `t[τ₁][τ₂]` is checked
      * individually.
      */

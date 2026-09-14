@@ -217,18 +217,26 @@ at the implementation level.
 lang-forma provides four contract decorators that map directly onto the structure of inference
 rules:
 
-| Inference rule component | Contract decorator | Failure behavior                                               |
-| ------------------------ | ------------------ | -------------------------------------------------------------- |
-| Premise (antecedent)     | `@requires(pred)`  | Graceful: returns `undefined`, parse branch produces `empty()` |
-| Conclusion (consequent)  | `@ensures(pred)`   | Throws `ContractError` (a violated postcondition is a bug)     |
-| Well-formedness          | `@invariant(pred)` | Throws `ContractError` (checked before/after each action)      |
-| Parse-failure recovery   | `@rescue(handler)` | Returns diagnostic or alternative parser                       |
+| Inference rule component | Contract decorator | Failure behavior                                                |
+| ------------------------ | ------------------ | --------------------------------------------------------------- |
+| Premise (antecedent)     | `@requires(pred)`  | Graceful: the action returns `undefined` (declarative metadata) |
+| Conclusion (consequent)  | `@ensures(pred)`   | Throws `ContractError` (a violated postcondition is a bug)      |
+| Well-formedness          | `@invariant(pred)` | Throws `ContractError` (checked before/after each action)       |
+| Parse-failure recovery   | `@rescue(handler)` | Returns diagnostic or alternative parser                        |
 
-The key insight: **`@requires` fails gracefully** (returns `undefined`, causing the calling
-`bind`/`.map` to produce `empty()`), while `@ensures` and `@invariant` throw. This is the domain
-adaptation: a failed _premise_ means the inference rule doesn't apply, so the parse branch is
-rejected (empty forest). A failed _conclusion_ means the semantic action has a bug (it produced a
-result that violates the rule's conclusion), which is a programming error, not a parse failure.
+The key insight: **`@requires` fails gracefully** (the contracted action returns `undefined` instead
+of a result), while `@ensures` and `@invariant` throw. This is the domain adaptation: a failed
+_premise_ means the inference rule doesn't apply. A failed _conclusion_ means the semantic action
+has a bug (it produced a result that violates the rule's conclusion), which is a programming error,
+not a parse failure.
+
+`@requires` is **declarative metadata** for the rule model (`Grammar.rules`, metatheory
+verification) — it does not by itself reject a parse branch. The runtime enforcement lives in the
+production path: the production override checks the premise and returns `empty()` (an empty parse
+forest), which is what makes rejection _is_ the type error. The Lapis type checker follows this
+pattern — its `appProd`/`typeAppProd`/`letProd`/`opProd` overrides enforce the premises inline and
+return `empty()` on failure, while the contracted actions (`app`, `typeApp`, `let_`, `opApp`) feed
+the rule model.
 
 ### 5.2 Subcontracting via the Inheritance Chain
 
@@ -284,14 +292,23 @@ From lang-forma's `stlc.ts`, the application typing rule encoded as a contracted
 ) => result instanceof TVar || result instanceof TFun   // conclusion: result is a valid Type
 )
 protected app(fn: Type, _arg: Type): Type {
-    // The premise is enforced by @requires; the body is the rule's conclusion.
+    // The premise is encoded by @requires (rule-model metadata); the body is
+    // the rule's conclusion.
     return (fn as TFun).cod;
 }
 ```
 
-If the premise fails (e.g., `fn` is not a function type, or the domain doesn't match), `@requires`
-returns `undefined`, the calling `bind` produces `empty()`, and the ill-typed branch is rejected.
-The parse forest is empty — **rejection _is_ the type error**.
+The `@requires`/`@ensures` contracts here are **declarative metadata** — they feed the rule model
+(`Grammar.rules`, metatheory verification) and are checked when the action is invoked through the
+contract Proxy. The runtime premise enforcement lives in the production path: `STLCTypeCheck`
+overrides `appProd` to check the domain match inline and return `empty()` on failure, bypassing this
+action entirely (the override computes the conclusion directly).
+
+If the premise fails (e.g., `fn` is not a function type, or the domain doesn't match), the
+production path must reject the branch: the `appProd` override checks the premise inline and returns
+`empty()`, so the ill-typed branch never completes. The parse forest is empty — **rejection _is_ the
+type error**. The `@requires` decorator itself is declarative metadata for the rule model; the
+production override is what enforces the premise at runtime.
 
 ### 5.5 Concrete Example: T-Var as a Contracted Semantic Action
 
@@ -309,8 +326,11 @@ protected varRef(name: string, ctx: unknown): Type {
 }
 ```
 
-An unbound variable fails the premise, produces `undefined`, and the parse branch yields an empty
-forest — the variable is rejected, not thrown.
+An unbound variable fails the premise. Unlike the application case, the variable production has no
+premise-checking override — the contracted action returns `undefined`, which surfaces in the parse
+forest rather than rejecting the branch. Strict rejection requires the production path to check the
+premise and return `empty()` (the `appProd` pattern above); the `@requires` decorator alone does not
+provide it.
 
 ## 6. Application to Lapis: T-Fold as a Contracted Production
 

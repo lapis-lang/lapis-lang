@@ -1,6 +1,6 @@
-# LC Core Implementation Plan — lang-forma v1.1.0
+# LC Core Implementation Plan — lang-forma v1.2.0
 
-> **Status:** Active plan. `@lapis-lang/lang-forma@1.1.0` is installed (migrated from
+> **Status:** Active plan. `@lapis-lang/lang-forma@1.2.0` is installed (migrated from
 > `@lapis-lang/zipper-grammar@4.1.0` — a compatible superset) and all 57 existing tests pass. This
 > plan tracks the remaining work via the GitHub issue tracker (PBIs #19–#26, #30–#35, #49).
 >
@@ -27,7 +27,7 @@
 
 ## Current State
 
-### What Works (117 tests passing, lang-forma v1.1.0)
+### What Works (117 tests passing, lang-forma v1.2.0)
 
 | Component                                                      | Status                                                                                                                     | Files                                        |
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
@@ -641,7 +641,7 @@ v0.4.0 — Patterns & surface
 - [x] Every contract has `ContractMeta` with rule name + formula
 - [x] `LCTypeCheck.rules` generates rules matching `lc.md` §5
 - [x] `DerivationTree` + `SemanticPass` validated on LC grammar
-- [x] Migrated to `@lapis-lang/lang-forma@1.1.0` (compatible superset of `zipper-grammar`)
+- [x] Migrated to `@lapis-lang/lang-forma@1.2.0` (compatible superset of `zipper-grammar`)
 - [x] Adopt `Grammar.rules()` / `collectRules()` — replace hand-rolled `toInference()` (#30)
 - [x] `Nothing` propagation in grammar-based checker (#19)
 - [x] T-TApp premises enforced in production path — no `undefined` in the parse forest (#39)
