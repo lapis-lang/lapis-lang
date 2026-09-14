@@ -15,6 +15,9 @@
  *   E-Obs:       (unfold [T] s {oⱼ → gⱼ}).oₖ → gₖ(s)
  *   E-Cofold:    cofold [T] (unfold [T] s {oⱼ → gⱼ}) {oⱼ(xⱼ) → t} → [xⱼ ↦ gⱼ(s)] t
  *   E-TApp:      (Λα <: σ. t) [τ] → [α ↦ τ] t  (type erasure)
+ *   E-Op:        op(v₁, ..., vₙ) → def(op) v₁ ... vₙ  (definition applied via _forward)
+ *   E-OpArg:     op(v₁, ..., tᵢ, ..., vₙ) → op(v₁, ..., tᵢ', ..., vₙ)  (leftmost;
+ *                realized structurally — args are atoms evaluated in seq order)
  *
  * Higher-order attributes via _forward:
  *   E-App:    re-parses closure body under ρ[x := v]
@@ -24,6 +27,14 @@
  *
  * E-Let is same-pass (no _forward): def's value is available from chain,
  * so body is parsed under ρ[x := def] directly.
+ *
+ * E-Op opens a definition window: the op's defining term (from Ω) is
+ * evaluated under a temporarily swapped `_input` (the definition source, not
+ * the parse input), then applied to the argument values leftmost via
+ * `_forward`. Closures captured inside the window carry the definition
+ * source as their `input`, so they stay applicable after the window closes.
+ * The window's parses must be unambiguous (exactly one result) — the window
+ * is internal, so ambiguity is an error, not a choice (see `evalOp`).
  *
  * See _docs/theory/lc.md §3 for the formal specification.
  * See _docs/theory/grammar-as-semantics.md for the architecture.
@@ -47,10 +58,11 @@ import {
 
 import { Any, CodataType, DataType, type Type } from "./types.ts"
 
+import { type OpSig } from "./ops.ts"
+
 import { AbstractLC, type LCShape } from "./grammar.ts"
 
 import { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
-
 // ── Shape for evaluation ──────────────────────────────────────────────────────
 
 interface EvalShape extends LCShape {
@@ -106,6 +118,14 @@ interface SpanGenerator {
 /**
  * A codata value that stores generator body spans (not pre-evaluated bodies).
  * When an observer is called, the generator body is re-evaluated via `_forward`.
+ *
+ * `input` is the source text the generator spans index into — the codata dual
+ * of `SpanClosure.input`. For unfolds in the main parse it is the parse
+ * input; for unfolds evaluated inside an operation definition (E-Op's
+ * definition window) it is the definition source. Carrying it on the value
+ * keeps an escaping codata value (e.g. an op returning an unfold) observable
+ * after the window closes, and a codata value passed into an op observable
+ * inside it.
  */
 export class SpanCodataVal extends Value {
     readonly kind = "codataVal"
@@ -114,6 +134,8 @@ export class SpanCodataVal extends Value {
         readonly seed: Value,
         readonly generators: SpanGenerator[],
         readonly env: ValueEnv,
+        /** The source text that the generator spans index into. */
+        readonly input: string = "",
     ) {
         super()
     }
@@ -246,6 +268,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                             end: span.end + this._inputOffset,
                         },
                         ctx as ValueEnv,
+                        this._input,
                     )
                 )
         }).map(([, result]) => result)
@@ -273,11 +296,13 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 return empty<Value>()
                             }
                             const bodyEnv = fnVal.env.extend(fnVal.param, argVal)
+                            const savedInput = this._input
                             const savedOffset = this._inputOffset
+                            this._input = fnVal.input
                             this._inputOffset = fnVal.bodySpan.start
                             try {
                                 const results = [...this._forward(
-                                    this._input,
+                                    fnVal.input,
                                     fnVal.bodySpan,
                                     this.exprProd(bodyEnv),
                                 )]
@@ -286,6 +311,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 }
                                 return epsilon<Value>(results[0]!)
                             } finally {
+                                this._input = savedInput
                                 this._inputOffset = savedOffset
                             }
                         })
@@ -364,7 +390,14 @@ export class LCEval extends AbstractLC<EvalShape> {
                             this.spanFoldHandlers(dataType, ctx)
                                 .chain((handlers) =>
                                     seq(this.ws, char("}"))
-                                        .map(() => this.evalFold(dataType, scrutinee, handlers))
+                                        .map(() =>
+                                            this.evalFold(
+                                                dataType,
+                                                scrutinee,
+                                                handlers,
+                                                ctx as ValueEnv,
+                                            )
+                                        )
                                 )
                                 .map(([, result]) => result)
                         )
@@ -434,6 +467,7 @@ export class LCEval extends AbstractLC<EvalShape> {
         dataType: DataType,
         scrutinee: Value,
         handlers: SpanHandler[],
+        ambientEnv: ValueEnv,
     ): Value {
         if (!(scrutinee instanceof VariantVal)) {
             return EVAL_ERROR("fold scrutinee is not a VariantVal")
@@ -448,14 +482,27 @@ export class LCEval extends AbstractLC<EvalShape> {
             return EVAL_ERROR(`variant ${scrutinee.variantName} not found in ${dataType.name}`)
         }
 
-        let handlerEnv = new ValueEnv()
+        // The handler body is evaluated in the fold's ambient scope (ρ)
+        // extended with the field bindings — the handler's free variables
+        // resolve lexically. (E-Fold: [xⱼ ↦ vⱼ] tₖ, a substitution into the
+        // ambient scope, not a fresh one.)
+        let handlerEnv = ambientEnv
         for (let i = 0; i < variant.fields.length; i++) {
             const field = variant.fields[i]!
             const binding = handler.bindings[i]
             if (binding) {
                 const fieldValue = scrutinee.fields.get(field.name)
                 if (fieldValue !== undefined) {
-                    handlerEnv = handlerEnv.extend(binding, fieldValue)
+                    // E-Fold: a recursive (Family) field binds the *folded*
+                    // result — vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — matching the
+                    // type checker, which binds recursive fields to σ (the
+                    // fold's result type). Non-recursive fields bind raw.
+                    // The recursion terminates: fieldValue is a proper
+                    // subterm of the scrutinee (structural recursion).
+                    const boundValue = field.isRecursive && fieldValue instanceof VariantVal
+                        ? this.evalFold(dataType, fieldValue, handlers, ambientEnv)
+                        : fieldValue
+                    handlerEnv = handlerEnv.extend(binding, boundValue)
                 }
             }
         }
@@ -513,6 +560,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                                 seed,
                                                 generators,
                                                 ctx as ValueEnv,
+                                                this._input,
                                             )
                                         )
                                 )
@@ -665,7 +713,7 @@ export class LCEval extends AbstractLC<EvalShape> {
         codataType: CodataType,
         scrutinee: Value,
         handler: { observerName: string; bindings: string[]; bodySpan: Span },
-        _ctx: ValueEnv,
+        ambientEnv: ValueEnv,
     ): Value {
         if (!(scrutinee instanceof SpanCodataVal)) {
             return EVAL_ERROR("cofold scrutinee is not a SpanCodataVal")
@@ -673,7 +721,10 @@ export class LCEval extends AbstractLC<EvalShape> {
 
         // Run each generator to get observation values
         const allObservers = codataType.allObservers()
-        let handlerEnv = new ValueEnv()
+        // The handler body is evaluated in the cofold's ambient scope (ρ)
+        // extended with the observation bindings — the handler's free
+        // variables resolve lexically, symmetrically with E-Fold.
+        let handlerEnv = ambientEnv
 
         // Build a map from observer name to binding for O(1) lookup
         const bindingMap = new Map<string, string>()
@@ -697,13 +748,18 @@ export class LCEval extends AbstractLC<EvalShape> {
                 return EVAL_ERROR(`no generator for observer: ${observer.name}`)
             }
 
-            // Run the generator: re-evaluate body with self = seed
+            // Run the generator: re-evaluate body with self = seed. The
+            // generator's span indexes into the codata value's own input
+            // (which may differ from the current `_input` when the cofold
+            // scrutinee crossed an E-Op definition window).
             const genEnv = scrutinee.env.extend("self", scrutinee.seed)
+            const savedInput = this._input
             const savedOffset = this._inputOffset
+            this._input = scrutinee.input
             this._inputOffset = generator.bodySpan.start
             try {
                 const results = [...this._forward(
-                    this._input,
+                    scrutinee.input,
                     generator.bodySpan,
                     this.exprProd(genEnv),
                 )]
@@ -712,6 +768,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                 }
                 handlerEnv = handlerEnv.extend(binding, results[0]!)
             } finally {
+                this._input = savedInput
                 this._inputOffset = savedOffset
             }
         }
@@ -734,6 +791,134 @@ export class LCEval extends AbstractLC<EvalShape> {
         }
     }
 
+    // ── E-Op: override opProd for definition application via _forward ────────
+
+    /**
+     * Override `opProd` to apply the operation's definition (E-Op):
+     *
+     *   op(v₁, ..., vₙ) → def(op) v₁ ... vₙ
+     *
+     * The arguments are already values (atoms evaluated in `seq` order —
+     * E-OpArg's leftmost discipline, realized structurally). The definition
+     * is evaluated under a **definition window**: `_input` is swapped to the
+     * definition source (it is not part of the parse input), so spans captured
+     * inside the window index into the definition text. The window is closed
+     * in a `finally` — nested op applications (an op referencing an earlier
+     * op) stack windows correctly by save/restore.
+     *
+     * The definition is applied to the argument values leftmost via
+     * `_forward` re-parses (the E-App mechanism), so an op computes exactly as
+     * if its definition had been `let`-bound and called — but the named form
+     * is never inlined into the parse input, keeping operation identity
+     * recognizable to law-aware passes.
+     */
+    // op(t₁, ..., tₙ)  — E-Op (definition application via _forward)
+    @rule({ rule: "E-Op", production: "opProd" })
+    protected override opProd(ctx: unknown): Parser<Value> {
+        return seq(
+            this.opIdent,
+            char("("),
+            this.ws,
+        ).chain(([opName]) => {
+            const opSig = this.opRegistry.lookup(opName)
+            if (!opSig) {
+                return empty<Value>()
+            }
+            return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
+                .chain((args) =>
+                    seq(this.ws, char(")"))
+                        .map(() => this.evalOp(opSig, args))
+                )
+                .map(([, result]) => result)
+        }).map(([, result]) => result)
+    }
+
+    /**
+     * Apply an operation's definition to argument values (E-Op).
+     *
+     * Opens the definition window, evaluates the definition source to a
+     * closure, then applies it to the argument values leftmost. Arity is
+     * enforced against the signature — the op form is fixed-arity, not
+     * curried.
+     *
+     * **Determinism policy:** each internal `_forward` parse (the definition
+     * and every application step) must yield exactly one result. The window
+     * is internal — the caller never sees its parse forest — so a silent
+     * first-pick would hide ambiguity from every caller and make evaluation
+     * order-dependent. An ambiguous (or empty) parse is reported as an
+     * `EvalErrorValue` naming the op and the step that failed, instead.
+     */
+    private evalOp(opSig: OpSig, args: Value[]): Value {
+        if (args.length !== opSig.paramTypes.length) {
+            return EVAL_ERROR(
+                `op ${opSig.name}: expected ${opSig.paramTypes.length} arguments, got ${args.length}`,
+            )
+        }
+
+        // Open the definition window: the definition source becomes `_input`
+        // so spans captured while evaluating it index into the definition.
+        const savedInput = this._input
+        const savedOffset = this._inputOffset
+        this._input = opSig.definition
+        this._inputOffset = 0
+        try {
+            // Evaluate the definition to a closure. Exactly one parse result
+            // is required: a definition that parses ambiguously (or not at
+            // all) is a registry authoring bug, not an input to choose among.
+            // Unlike a top-level parse — where the caller sees the whole
+            // forest — this window is internal, so a silent first-pick would
+            // hide ambiguity from every caller. Fail loudly instead.
+            const defResults = [...this._forward(
+                opSig.definition,
+                { start: 0, end: opSig.definition.length },
+                this.exprProd(new ValueEnv()),
+            )]
+            if (defResults.length === 0) {
+                return EVAL_ERROR(`op ${opSig.name}: definition produced no results`)
+            }
+            if (defResults.length > 1) {
+                return EVAL_ERROR(
+                    `op ${opSig.name}: definition is ambiguous (${defResults.length} parses) — ` +
+                        "operation definitions must be unambiguous",
+                )
+            }
+            let fn = defResults[0]!
+
+            // Apply the definition to the argument values, leftmost. Each
+            // application step must also yield exactly one result — same
+            // determinism requirement, same reasoning.
+            for (const arg of args) {
+                if (!(fn instanceof SpanClosure)) {
+                    return EVAL_ERROR(`op ${opSig.name}: definition is not a function`)
+                }
+                const bodyEnv = fn.env.extend(fn.param, arg)
+                this._input = fn.input
+                this._inputOffset = fn.bodySpan.start
+                const appResults = [...this._forward(
+                    fn.input,
+                    fn.bodySpan,
+                    this.exprProd(bodyEnv),
+                )]
+                if (appResults.length === 0) {
+                    return EVAL_ERROR(`op ${opSig.name}: application produced no results`)
+                }
+                if (appResults.length > 1) {
+                    return EVAL_ERROR(
+                        `op ${opSig.name}: application is ambiguous ` +
+                            `(${appResults.length} parses of the definition body) — ` +
+                            "operation definitions must be unambiguous",
+                    )
+                }
+                fn = appResults[0]!
+            }
+            return fn
+        } finally {
+            // Close the definition window.
+            this._input = savedInput
+            this._inputOffset = savedOffset
+        }
+    }
+
     // ── E-Obs: override obsProd for evaluation via chain + _forward ───────────
 
     /**
@@ -751,8 +936,22 @@ export class LCEval extends AbstractLC<EvalShape> {
                     seq(this.ws, char("."), this.ws, this.ident)
                         .map(([, , , obsName]) => ({ scrutVal, obsName }))
                         .chain(({ scrutVal, obsName }) => {
-                            if (!(scrutVal instanceof SpanCodataVal)) {
+                            // Capture-phase leniency: inside a lambda body
+                            // being parsed for span capture, a parameter is
+                            // bound to PLACEHOLDER — its observation cannot
+                            // fire yet. The same leniency varRef and
+                            // variantCon already have: keep the parse alive
+                            // with a placeholder so the surrounding closure's
+                            // span is captured; the observation runs via
+                            // _forward when the closure is applied.
+                            if (
+                                !(scrutVal instanceof SpanCodataVal) &&
+                                !(scrutVal instanceof PlaceholderValue)
+                            ) {
                                 return empty<Value>()
+                            }
+                            if (scrutVal instanceof PlaceholderValue) {
+                                return epsilon<Value>(PLACEHOLDER)
                             }
                             const generator = scrutVal.generators.find(
                                 (g) => g.observerName === obsName,
@@ -761,11 +960,17 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 return empty<Value>()
                             }
                             const genEnv = scrutVal.env.extend("self", scrutVal.seed)
+                            // The generator's span indexes into the codata
+                            // value's own input (which may differ from the
+                            // current `_input` when the value crossed an E-Op
+                            // definition window).
+                            const savedInput = this._input
                             const savedOffset = this._inputOffset
+                            this._input = scrutVal.input
                             this._inputOffset = generator.bodySpan.start
                             try {
                                 const results = [...this._forward(
-                                    this._input,
+                                    scrutVal.input,
                                     generator.bodySpan,
                                     this.exprProd(genEnv),
                                 )]
@@ -774,6 +979,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 }
                                 return epsilon<Value>(results[0]!)
                             } finally {
+                                this._input = savedInput
                                 this._inputOffset = savedOffset
                             }
                         })
@@ -986,5 +1192,25 @@ export class LCEval extends AbstractLC<EvalShape> {
         _resultType: Type,
     ): Value {
         throw new Error("LCEval.cofold: unreachable — cofoldProd is overridden")
+    }
+
+    /**
+     * E-Op: op(v₁, ..., vₙ) → def(op) v₁ ... vₙ. Premise: the operation is
+     * declared in Ω and the arguments are values. Step-rule — the application
+     * transitions by applying the definition. The `production` key links this
+     * rule to the `opProd` production (which is overridden above with
+     * `@rule({ rule: "E-Op", production: "opProd" })`).
+     */
+    @requires(
+        (_self: LCEval, opName: string, _args: Value[]) =>
+            _self.opRegistry.lookup(opName) !== undefined,
+        { rule: "E-Op", role: "premise", formula: "op ∈ Ω  ∧  args : v₁...vₙ", type: "τ" },
+    )
+    @ensures(
+        () => true,
+        { rule: "E-Op", role: "conclusion", formula: "result : w", type: "τ" },
+    )
+    protected opApp(_opName: string, _args: Value[]): Value {
+        throw new Error("LCEval.opApp: unreachable — opProd is overridden")
     }
 }

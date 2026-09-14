@@ -21,6 +21,7 @@
  *             | t [σ]                        type application (postfix)
  *             | Ident                        variable
  *             | Ident (args)                 variant construction
+ *             | ident (args)                 named operation application
  *             | ( t )                        parenthesized
  *
  *   Handlers: C(x₁ x₂ ...) → t              fold handler (variant + bindings)
@@ -36,7 +37,8 @@
  *   obsProd       = appProd ( "." ident | "[" type "]" )*
  *   appProd       = typeAppProd ( ws1 typeAppProd )*
  *   typeAppProd   = atomProd ( "[" type "]" )*
- *   atomProd      = "(" expr ")" | variantName "(" args ")" | ident
+ *   atomProd      = "(" expr ")" | variantName "(" args ")" | opProd | ident
+ *   opProd        = ident "(" args ")"   (registry-gated; tight paren — no ws)
  *   typeProd      = atomType ( "→" typeProd )?
  *   atomType      = "(" type ")" | typeName
  *
@@ -75,6 +77,36 @@ import {
     TypeVar,
     TypeVarEnv,
 } from "./types.ts"
+
+import { OpRegistry } from "./ops.ts"
+
+/**
+ * The reserved words of the LC concrete syntax — never lexed as an `ident`.
+ *
+ * The list is minimal by design: every entry must be load-bearing.
+ *
+ * `in` is the one genuinely load-bearing reservation. It is the only
+ * keyword in a mid-expression position — the `let` terminator, exactly
+ * where a variable could appear as an application argument. With `in`
+ * lexed as an `ident`, `let x:Any = f in y in z` has two parses that type
+ * at different types (def = `(f in) y`, body = `z` vs. def = `f`, body =
+ * `(y in) z`) — a type-splitting ambiguity. Rejecting `in` from `ident`
+ * kills the second reading.
+ *
+ * The keyword formers (`let`, `fold`, `unfold`, `cofold`) are NOT reserved
+ * — their keyword positions are all prefix positions with mandatory
+ * whitespace-delimited continuations (`fold [T] e {...}`, `let x:σ =
+ * ...`), which a variable occurrence can never match. A variable named
+ * `fold` parses exactly once: as a variable (`fold a b` is application)
+ * or not at all. The same positional-disjointness argument that lets
+ * `opIdent` accept keywords applies to `ident`.
+ *
+ * `opIdent` (operation names) is fully keyword-permissive for the same
+ * reason.
+ */
+export const LC_RESERVED_WORDS: readonly string[] = [
+    "in",
+] as const
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
 
@@ -152,9 +184,18 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     /** The type registry, set before parsing. */
     protected registry: TypeRegistry = new TypeRegistry()
 
+    /** The operation registry (Ω), set before parsing. */
+    protected opRegistry: OpRegistry = new OpRegistry()
+
     /** Set the type registry before parsing. */
     setRegistry(registry: TypeRegistry): this {
         this.registry = registry
+        return this
+    }
+
+    /** Set the operation registry (Ω) before parsing. */
+    setOpRegistry(opRegistry: OpRegistry): this {
+        this.opRegistry = opRegistry
         return this
     }
 
@@ -187,6 +228,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         handler: { observerName: string; bindings: string[]; body: S["expr"] },
         resultType: Type,
     ): S["expr"]
+    protected abstract opApp(opName: string, args: S["atom"][]): S["atom"]
 
     // ── Context extension hook (for type checker / evaluator subclasses) ──────
 
@@ -696,13 +738,15 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         )
     }
 
-    // ( expr )  |  Ident(args)  |  Ident
+    // ( expr )  |  Ident(args)  |  ident(args)  |  Ident
     @rule
     protected atomProd(ctx: unknown): Parser<S["atom"]> {
         return or(
             // ( expr )
             seq(char("("), this.ws, this.exprProd(ctx), this.ws, char(")"))
                 .map(([, , e]) => this.paren(e)),
+            // Named operation application: ident(args) — registry-gated, tight paren
+            this.opProd(ctx),
             // Variant construction: Ident(args)
             seq(
                 this.variantName,
@@ -721,22 +765,57 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         )
     }
 
+    // ── Named operation application (lc.md §2.2) ─────────────────────────────
+
+    /**
+     * `op(t₁, ..., tₙ)` — named operation application.
+     *
+     * Gated on the operation registry (Ω): the production only matches when
+     * the name matches a declared operation. Disambiguation from the keyword
+     * forms is positional, not lexical: every keyword position is
+     * whitespace-delimited (`fold [T] e {...}`, `let x:σ = ...`, `... in u`),
+     * while the op form requires the tight paren (`fold(a, b)`). The two are
+     * disjoint by construction, so the op lexeme (`opIdent`) accepts keywords
+     * — an operation may be named `fold` and still be appliable.
+     *
+     * Disambiguation from variables is the registry gate: `add(a, b)` parses
+     * as an op application because `add ∈ Ω`; `unknownOp(a, b)` fails the gate
+     * and falls through to variable application, which requires whitespace
+     * (`f x`, never `f(a)`), so it fails too. The tight paren is the shadowing
+     * escape hatch — a let-bound `add` remains applicable with spacing.
+     *
+     * Arguments are atoms (like variant construction), evaluated leftmost by
+     * the one-pass grammar (E-OpArg).
+     */
+    @rule
+    protected opProd(ctx: unknown): Parser<S["atom"]> {
+        return seq(
+            this.opIdent,
+            char("("),
+            this.ws,
+        ).chain(([opName]) => {
+            if (this.opRegistry.lookup(opName) === undefined) {
+                return empty<S["atom"]>()
+            }
+            return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
+                .chain((args) =>
+                    seq(this.ws, char(")"))
+                        .map(() => this.opApp(opName, args))
+                )
+                .map(([, result]) => result)
+        }).map(([, result]) => result)
+    }
+
     // ── Lexemes ───────────────────────────────────────────────────────────────
 
     // PascalCase
     @rule
     protected get variantName(): Parser<string> {
-        // PascalCase identifier
+        // PascalCase identifier — no keyword check needed: every reserved word
+        // is lowercase (ident-first is [a-z_]), so a PascalCase lexeme can
+        // never equal one.
         return seq(this.pascalFirst, this.identRest)
             .map(([h, t]) => h + t)
-            .chain((name) => {
-                // Reject if it's a keyword
-                if (["fold", "unfold", "cofold", "let", "in"].includes(name)) {
-                    return empty<string>()
-                }
-                return epsilon(name)
-            })
-            .map(([, r]) => r)
     }
 
     protected get pascalFirst(): Parser<string> {
@@ -749,12 +828,25 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         return seq(this.identFirst, this.identRest)
             .map(([h, t]) => h + t)
             .chain((name) => {
-                if (["let", "in", "fold", "unfold", "cofold"].includes(name)) {
+                if (LC_RESERVED_WORDS.includes(name)) {
                     return empty<string>()
                 }
                 return epsilon(name)
             })
             .map(([, r]) => r)
+    }
+
+    /**
+     * The operation-name lexeme: like `ident`, but keyword-permissive. The
+     * op form's tight paren (`fold(a, b)`) is positionally disjoint from every
+     * keyword position (all whitespace-delimited: `fold [T] e {...}`, `let
+     * x:σ = ...`, `... in u`), so an operation may be named `fold` — the
+     * registry gate resolves which reading applies, not the lexeme.
+     */
+    @rule
+    protected get opIdent(): Parser<string> {
+        return seq(this.identFirst, this.identRest)
+            .map(([h, t]) => h + t)
     }
 
     protected get identFirst(): Parser<string> {

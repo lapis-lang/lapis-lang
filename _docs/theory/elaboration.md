@@ -738,8 +738,7 @@ category to the execution contracts (`demands`/`ensures`/`invariant`/`rescue`). 
 
 This is why laws do not elaborate into `ensures:` clauses; they need their own claim category.
 
-**The provenance chain.** A law's authority comes from the contract system, not from the
-optimizer:
+**The provenance chain.** A law's authority comes from the contract system, not from the optimizer:
 
 ```
 surface: properties: (associative, commutative, identity: e)
@@ -755,13 +754,13 @@ algebraic contract claims (validated against the closed vocabulary)
       actual usage; observed counterexample withdraws the axiom from E
 ```
 
-Every law in `E` carries its **provenance tag** (`primitive` | `discharged` | `asserted`). Provenance
-is evidence about the axiom, never a gate on declaring it.
+Every law in `E` carries its **provenance tag** (`primitive` | `discharged` | `asserted`).
+Provenance is evidence about the axiom, never a gate on declaring it.
 
 The properties are validated against the closed vocabulary (`associative`, `commutative`,
 `identity:e`, `distributive:g`, `involutory`, `idempotent`, `absorbing:z`). No arbitrary equations —
-user-declared laws are membership claims in a fixed catalog of algebraic structures, which is
-what keeps rewriting terminating and the `≡` theory well-behaved.
+user-declared laws are membership claims in a fixed catalog of algebraic structures, which is what
+keeps rewriting terminating and the `≡` theory well-behaved.
 
 **Intrinsic vs. relational claims.** `associative`, `commutative`, `identity:e`, `idempotent`,
 `involutory`, `absorbing:z` are claims about one operation. `distributive:g` is a claim about a
@@ -775,10 +774,10 @@ distinct.
 2. The law-checking pass applies the regime-based check (finite/machineFinite/derivable →
    `discharged`; residual → `asserted`) — see [`semantics.md`](./semantics.md) §5.4.
 3. If discharged, the axioms are installed in `E` **established**. If screened (residual), the
-   axioms are installed in `E` **asserted** — trusted evidence, not proof (the screen falsifies;
-   it never establishes).
-4. If any check falsifies a claim, `LawError` is thrown with the counterexample and the
-   declaration is rejected.
+   axioms are installed in `E` **asserted** — trusted evidence, not proof (the screen falsifies; it
+   never establishes).
+4. If any check falsifies a claim, `LawError` is thrown with the counterexample and the declaration
+   is rejected.
 
 **At runtime (for screened axioms — each is an optimizer-chosen direction of an `≡` axiom):**
 

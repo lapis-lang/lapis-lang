@@ -36,6 +36,7 @@ Deno.test("metatheory: LCEval produces evaluation rules from contract metadata",
         "E-Lam",
         "E-Let",
         "E-Obs",
+        "E-Op",
         "E-TAbs",
         "E-TApp",
         "E-Unfold",
@@ -78,8 +79,8 @@ Deno.test("metatheory: rules are classified as value-rules or step-rules", () =>
     // Value-rules (no premises): lambda, unfold, type abstraction
     assertEquals(valueRules, ["E-Lam", "E-TAbs", "E-Unfold"])
 
-    // Step-rules (with premises): application, let, fold, obs, cofold, typeApp
-    assertEquals(stepRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-TApp"])
+    // Step-rules (with premises): application, let, fold, obs, cofold, typeApp, op
+    assertEquals(stepRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-Op", "E-TApp"])
 })
 
 // ── Progress ──────────────────────────────────────────────────────────────────
@@ -120,13 +121,13 @@ Deno.test("metatheory: Preservation holds — step-rules preserve types (static)
     }
 })
 
-Deno.test("metatheory: Preservation — all 6 step-rules checked", () => {
+Deno.test("metatheory: Preservation — all 7 step-rules checked", () => {
     const rules = collectRules(LCEval)
     const staticRules = collectRules(LCTypeCheck)
     const result = checkPreservation(rules, staticRules)
 
     const checkedRules = result.checks.map((c) => c.rule).sort()
-    assertEquals(checkedRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-TApp"])
+    assertEquals(checkedRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-Op", "E-TApp"])
 })
 
 // ── Combined verification ─────────────────────────────────────────────────────
@@ -198,6 +199,7 @@ Deno.test("metatheory: LCTypeCheck rules are still collected correctly", () => {
         "T-Fold",
         "T-Let",
         "T-Obs",
+        "T-Op",
         "T-TAbs",
         "T-TApp",
         "T-Unfold",

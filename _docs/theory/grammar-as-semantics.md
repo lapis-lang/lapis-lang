@@ -104,8 +104,9 @@ Without `chain`, the `seq` combinator builds all children eagerly at grammar _co
 This means a parsed value (e.g., a type annotation `τ`) cannot flow into a sibling's parser (e.g.,
 the lambda body) — both are constructed before either is parsed.
 
-The `chain` combinator (monadic bind) breaks this: it parses the first parser, then — _after_ it
-completes — calls a function with the result to construct the second parser. This lets a left
+The `chain` combinator (an L-attributed bind that emits the pair `[v, w]` — see lang-forma's `chain`
+JSDoc; only the second value is used here) breaks this: it parses the first parser, then — _after_
+it completes — calls a function with the result to construct the second parser. This lets a left
 sibling's _synthesized_ value determine the right sibling's _inherited_ context, which is exactly
 the **L-attributed grammar** pattern.
 
@@ -460,7 +461,7 @@ The grammar-as-semantics model is an **executable attribute grammar**:
 | Synthesized attribute                 | Method return value (the `Parser<T>` result)  |
 | Copy rule (pass attribute unchanged)  | Default `super` call (no override)            |
 | Semantic rule (compute new attribute) | Override + `@requires`/`@ensures`             |
-| L-attributed (left-to-right flow)     | `chain` (monadic bind)                        |
+| L-attributed (left-to-right flow)     | `chain` (L-attributed bind, pair `[v, w]`)    |
 | S-attributed (bottom-up only)         | `seq` + `.map` (no `chain` needed)            |
 
 The `semantics.md` document (§5) specifies the attribute-grammar equations for static analysis. This

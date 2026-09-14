@@ -26,6 +26,13 @@ export abstract class Value {
  * term). Used by the grammar-based evaluator (`LCEval`): the body is
  * re-evaluated on demand by re-parsing its source substring under the
  * extended environment via `_forward` — the higher-order attribute mechanism.
+ *
+ * `input` is the source text the span indexes into. For closures captured
+ * during the main parse it is the parse input; for closures captured while
+ * evaluating an operation definition (E-Op — the definition lives in the
+ * `OpRegistry`, not the parse input) it is the definition source. Carrying
+ * it on the closure keeps an escaping closure (e.g. an op returning a
+ * function) applicable after the definition-evaluation window closes.
  */
 export class SpanClosure extends Value {
     readonly kind = "closure"
@@ -34,6 +41,8 @@ export class SpanClosure extends Value {
         readonly paramType: Type,
         readonly bodySpan: Span,
         readonly env: ValueEnv,
+        /** The source text that `bodySpan` indexes into. */
+        readonly input: string = "",
     ) {
         super()
     }

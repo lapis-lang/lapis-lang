@@ -33,8 +33,11 @@ export { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
 // Subtyping (lc.md §4)
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
+// Operation symbols (lc.md §2.2, §2.4 — Ω environment + named application)
+export { OpDeclarationError, OpRegistry, OpSig } from "./ops.ts"
+
 // Grammar — concrete syntax for LC (parse, don't validate)
-export { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
+export { AbstractLC, LC_RESERVED_WORDS, type LCShape, TypeRegistry } from "./grammar.ts"
 
 // Derivation trees + semantic passes
 export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/lang-forma"
