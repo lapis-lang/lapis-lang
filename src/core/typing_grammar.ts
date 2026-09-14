@@ -1,9 +1,9 @@
 /**
  * LC Type Checker — a grammar subclass that type-checks LC terms during parsing.
  *
- * Following the stlc.ts pattern from zipper-grammar: the typing judgment
+ * Following the stlc.ts pattern from lang-forma: the typing judgment
  * `Γ ⊢ t : σ` becomes a parameterised production `exprProd(Γ): Parser<Type>`.
- * `chain` threads the extended Γ through sub-productions.
+ * `bind` threads the extended Γ through sub-productions.
  * `@requires` encodes premises (graceful failure = ill-typed).
  * `@ensures` encodes conclusions (throws on violation = compiler bug).
  * Rejection (empty parse forest) = type error.
@@ -240,7 +240,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     /**
      * Application typing rule. The premise (fn must be a function type whose
      * domain matches arg's type) is checked via @requires.
-     * On failed premise, @requires returns undefined → the calling chain
+     * On failed premise, @requires returns undefined → the calling bind
      * produces empty() → the ill-typed branch is rejected.
      */
     @requires(
@@ -456,15 +456,15 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof DataType, "fold type must be a DataType")
             const dataType = ty as DataType
             return this.exprProd(ctx)
-                .chain((scrutineeType) =>
+                .bind((scrutineeType) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.spanFoldHandlers(dataType, ctx as TypeCheckCtx)
-                                .chain((spanHandlers) =>
+                                .bind((spanHandlers) =>
                                     seq(this.ws, char("}"))
                                         .map(() =>
                                             this.evalFoldFixpoint(
@@ -474,12 +474,9 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                                             )
                                         )
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     /** Parse fold handlers, capturing body spans for fixpoint iteration. */
@@ -512,7 +509,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([vName, , , , bindings]) => {
+        ).bind(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
                 return empty<
@@ -541,7 +538,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                     bodySpan: { start: span.start, end: span.end },
                     ctx: handlerCtx,
                 }))
-        }).map(([, result]) => result)
+        })
     }
 
     /**
@@ -856,35 +853,26 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * `@requires`/`@ensures` contracts feed `collectRules`); the premises are
      * enforced here because `@requires` is declarative metadata, not a
      * runtime check.
-     *
-     * Note on the `.chain(([, result]) => ...)` / `.map(([, result]) => result)`
-     * calls: `chain` is a **pair-emitting** bind — it always flows
-     * `[firstVal, secondVal]` upward (see `ChainSecondCxt` in lang-forma),
-     * even when the second parser is `epsilon<Type>(...)`. So the value
-     * flowing after the first `.chain` is `[Type[], Type | undefined]`, and
-     * the destructures extract the second component — the premise result —
-     * not the `Type` itself.
      */
-    // op(t₁, ..., tₙ)  — T-Op via chain (type-checks signature premises)
+    // op(t₁, ..., tₙ)  — T-Op via bind (type-checks signature premises)
     @rule
     protected override opProd(ctx: unknown): Parser<Type> {
         return seq(
             this.opIdent,
             char("("),
             this.ws,
-        ).chain(([opName]) => {
+        ).bind(([opName]) => {
             const opSig = this.opRegistry.lookup(opName)
             if (!opSig) {
                 return empty<Type>()
             }
             return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
-                .chain((args) =>
+                .bind((args) =>
                     seq(this.ws, char(")"))
                         .map(() => this.checkOpPremises(opSig, args))
                 )
-                .chain(([, result]) => result === undefined ? empty<Type>() : epsilon<Type>(result))
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+                .bind((result) => result === undefined ? empty<Type>() : epsilon<Type>(result))
+        })
     }
 
     /**
@@ -911,32 +899,30 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         return this.opApp(opSig.name, args)
     }
 
-    // ── Override appProd for type checking via chain ──────────────────────────
+    // ── Override appProd for type checking via bind ──────────────────────────
 
     /**
-     * Override application to type-check via chain:
+     * Override application to type-check via bind:
      * parse fn → get fnType; parse arg → get argType;
      * if fnType is FunType and argType <: fnType.param,
      * return ε(fnType.result), else ∅ (empty — ill-typed).
      */
-    // t u  — T-App via chain (type-checks domain match)
+    // t u  — T-App via bind (type-checks domain match)
     @rule
     protected override appProd(ctx: unknown): Parser<Type> {
         return or(
             this.appProd(ctx)
                 .map((fnTy) => ({ fnTy }))
-                .chain(({ fnTy }) =>
+                .bind(({ fnTy }) =>
                     seq(this.ws1, this.typeAppProd(ctx))
                         .map(([, argTy]) => ({ fnTy, argTy }))
-                        .chain(({ fnTy, argTy }) => {
+                        .bind(({ fnTy, argTy }) => {
                             if (!(fnTy instanceof FunType) || !isSubtype(argTy, fnTy.param)) {
                                 return empty<Type>()
                             }
                             return epsilon<Type>(fnTy.result)
                         })
-                        .map(([, result]) => result)
-                )
-                .map(([, result]) => result),
+                ),
             this.typeAppProd(ctx),
         )
     }
@@ -955,24 +941,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * The `@requires` premise is declarative metadata (for the rule model),
      * not a runtime check, so the premise is enforced here instead.
      *
-     * The chain formulation is left-recursive (`typeAppProd` calls itself
+     * The bind formulation is left-recursive (`typeAppProd` calls itself
      * via `this`), which the zipper engine resolves — the same shape as the
      * `appProd` override above. Each application in `t[τ₁][τ₂]` is checked
      * individually.
-     *
-     * Note on the `.map(([, result]) => result)` calls: `chain` is a
-     * pair-emitting bind — it always flows `[firstVal, secondVal]` upward
-     * (see `ChainSecondCxt` in lang-forma), even when the second parser is
-     * `epsilon<Type>(...)`. The maps unwrap that pair; they are not
-     * destructuring the `Type` itself.
      */
-    // t [τ]  — T-TApp via chain (type-checks polymorphic body + bound)
+    // t [τ]  — T-TApp via bind (type-checks polymorphic body + bound)
     @rule
     protected override typeAppProd(ctx: unknown): Parser<Type> {
         return or(
             this.typeAppProd(ctx)
                 .map((bodyTy) => ({ bodyTy }))
-                .chain(({ bodyTy }) =>
+                .bind(({ bodyTy }) =>
                     seq(
                         this.ws,
                         char("["),
@@ -982,7 +962,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         char("]"),
                     )
                         .map(([, , , argTy]) => ({ bodyTy, argTy }))
-                        .chain(({ bodyTy, argTy }) => {
+                        .bind(({ bodyTy, argTy }) => {
                             if (
                                 !(bodyTy instanceof PolymorphicType) ||
                                 !isSubtype(argTy, bodyTy.bound)
@@ -991,9 +971,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                             }
                             return epsilon<Type>(this.typeApp(bodyTy, argTy))
                         })
-                        .map(([, result]) => result)
-                )
-                .map(([, result]) => result),
+                ),
             this.atomProd(ctx),
         )
     }
@@ -1018,7 +996,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * T-Sub production; each consumer site checks `isSubtype` in its own
      * premise.
      */
-    // let x:τ = t in u  — T-Let via chain (type-checks def <: declared)
+    // let x:τ = t in u  — T-Let via bind (type-checks def <: declared)
     @rule
     protected override letProd(ctx: unknown): Parser<Type> {
         return seq(
@@ -1032,20 +1010,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.ws,
             char("="),
             this.ws,
-        ).chain(([, , name, , , , ty]) => {
+        ).bind(([, , name, , , , ty]) => {
             return this.exprProd(ctx)
                 .map((def) => ({ name, ty, def }))
-                .chain(({ name, ty, def }) => {
+                .bind(({ name, ty, def }) => {
                     // T-Let premise 1: def type σ must be <: declared type τ
                     if (!isSubtype(def, ty)) return empty<Type>()
                     return seq(this.ws1, this.kw("in"), this.ws1)
-                        .chain(() =>
+                        .bind(() =>
                             this.exprProd(this.extendCtx(ctx, name, ty))
                                 .map((body) => this.let_(name, ty, def, body))
                         )
-                        .map(([, result]) => result)
                 })
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 }

@@ -1,9 +1,9 @@
 /**
  * LC Evaluation — a grammar subclass that evaluates LC terms during parsing.
  *
- * Following the grammar-as-semantics pattern (like STLCEval in zipper-grammar):
+ * Following the grammar-as-semantics pattern (like STLCEval in lang-forma):
  * the evaluation judgment `ρ ⊢ t ⇓ v` becomes a parameterised production
- * `exprProd(ρ): Parser<Value>`. `chain` threads the environment through
+ * `exprProd(ρ): Parser<Value>`. `bind` threads the environment through
  * sub-productions. `_forward` re-evaluates closure bodies under extended
  * environments — the higher-order attribute mechanism.
  *
@@ -25,7 +25,7 @@
  *   E-Obs:    re-parses generator body under ρ[self := seed]
  *   E-Cofold: re-parses all generators, then handler body under ρ[xⱼ := gⱼ(s)]
  *
- * E-Let is same-pass (no _forward): def's value is available from chain,
+ * E-Let is same-pass (no _forward): def's value is available from bind,
  * so body is parsed under ρ[x := def] directly.
  *
  * E-Op opens a definition window: the op's defining term (from Ω) is
@@ -254,7 +254,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("."),
             this.ws,
-        ).chain(([, param, , , , ty]) => {
+        ).bind(([, param, , , , ty]) => {
             assert(typeof param === "string", "lambda param must be a string")
             assert(ty !== undefined, "lambda type must be defined")
             const placeholderCtx = this.extendCtx(ctx, param, ty)
@@ -271,27 +271,27 @@ export class LCEval extends AbstractLC<EvalShape> {
                         this._input,
                     )
                 )
-        }).map(([, result]) => result)
+        })
     }
 
-    // ── E-App: override appProd for evaluation via chain + _forward ───────────
+    // ── E-App: override appProd for evaluation via bind + _forward ───────────
 
     /**
-     * Override application to evaluate via chain:
+     * Override application to evaluate via bind:
      * parse fn → get fnVal; parse arg → get argVal;
      * if fnVal is a SpanClosure, re-evaluate body via `_forward` under
      * extended env; else empty (eval error).
      */
-    // t u  — E-App via chain + _forward
+    // t u  — E-App via bind + _forward
     @rule({ rule: "E-App", production: "appProd" })
     protected override appProd(ctx: unknown): Parser<Value> {
         return or(
             this.appProd(ctx)
                 .map((fnVal) => ({ fnVal }))
-                .chain(({ fnVal }) =>
+                .bind(({ fnVal }) =>
                     seq(this.ws1, this.typeAppProd(ctx))
                         .map(([, argVal]) => ({ fnVal, argVal }))
-                        .chain(({ fnVal, argVal }) => {
+                        .bind(({ fnVal, argVal }) => {
                             if (!(fnVal instanceof SpanClosure)) {
                                 return empty<Value>()
                             }
@@ -315,9 +315,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 this._inputOffset = savedOffset
                             }
                         })
-                        .map(([, result]) => result)
-                )
-                .map(([, result]) => result),
+                ),
             this.typeAppProd(ctx),
         )
     }
@@ -327,7 +325,7 @@ export class LCEval extends AbstractLC<EvalShape> {
     /**
      * Override `letProd` to parse the body under the real env (extended with
      * def's value). Unlike `lambdaProd`, the body is evaluated in the same
-     * pass — `def`'s value is available from the `chain`, so the body parser
+     * pass — `def`'s value is available from the `bind`, so the body parser
      * runs under `ρ[name:=def]` directly. No span capture or `_forward` needed.
      */
     // let x:σ = t in u  — E-Let (same-pass evaluation)
@@ -344,20 +342,18 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("="),
             this.ws,
-        ).chain(([, , name]) =>
+        ).bind(([, , name]) =>
             this.exprProd(ctx)
                 .map((def) => ({ name, def }))
-                .chain(({ name, def }) =>
+                .bind(({ name, def }) =>
                     seq(this.ws1, this.kw("in"), this.ws1)
-                        .chain(() => {
+                        .bind(() => {
                             const bodyCtx = (ctx as ValueEnv).extend(name, def)
                             return this.exprProd(bodyCtx)
                                 .map((body) => body)
                         })
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        ).map(([, result]) => result)
+        )
     }
 
     // ── E-Fold: override foldProd for span capture + _forward ─────────────────
@@ -380,15 +376,15 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof DataType, "fold type must be a DataType")
             const dataType = ty as DataType
             return this.exprProd(ctx)
-                .chain((scrutinee) =>
+                .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.spanFoldHandlers(dataType, ctx)
-                                .chain((handlers) =>
+                                .bind((handlers) =>
                                     seq(this.ws, char("}"))
                                         .map(() =>
                                             this.evalFold(
@@ -399,12 +395,9 @@ export class LCEval extends AbstractLC<EvalShape> {
                                             )
                                         )
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     /** Parse fold handlers, capturing body spans instead of evaluating. */
@@ -437,7 +430,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([vName, , , , bindings]) => {
+        ).bind(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
                 return empty<SpanHandler>()
@@ -459,7 +452,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         end: span.end + this._inputOffset,
                     } as Span,
                 }))
-        }).map(([, result]) => result)
+        })
     }
 
     /** Evaluate a fold: find matching handler, bind fields, _forward body. */
@@ -544,15 +537,15 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof CodataType, "unfold type must be a CodataType")
             const codataType = ty as CodataType
             return this.exprProd(ctx)
-                .chain((seed) =>
+                .bind((seed) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.spanUnfoldGenerators(codataType, ctx)
-                                .chain((generators) =>
+                                .bind((generators) =>
                                     seq(this.ws, char("}"))
                                         .map(() =>
                                             new SpanCodataVal(
@@ -564,12 +557,9 @@ export class LCEval extends AbstractLC<EvalShape> {
                                             )
                                         )
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     /** Parse unfold generators, capturing body spans. */
@@ -596,7 +586,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([obsName]) => {
+        ).bind(([obsName]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
                 return empty<SpanGenerator>()
@@ -610,7 +600,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         end: span.end + this._inputOffset,
                     } as Span,
                 }))
-        }).map(([, result]) => result)
+        })
     }
 
     // ── E-Cofold: override cofoldProd for span capture + _forward ────────────
@@ -636,15 +626,15 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof CodataType, "cofold type must be a CodataType")
             const codataType = ty as CodataType
             return this.exprProd(ctx)
-                .chain((scrutinee) =>
+                .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.spanCofoldHandler(codataType, ctx)
-                                .chain((handler) =>
+                                .bind((handler) =>
                                     seq(this.ws, char("}"))
                                         .map(() =>
                                             this.evalCofold(
@@ -655,12 +645,9 @@ export class LCEval extends AbstractLC<EvalShape> {
                                             )
                                         )
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     /** Parse cofold handler, capturing body span. */
@@ -681,7 +668,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([obsName, , , , bindings]) => {
+        ).bind(([obsName, , , , bindings]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
                 return empty<
@@ -702,7 +689,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         end: span.end + this._inputOffset,
                     } as Span,
                 }))
-        }).map(([, result]) => result)
+        })
     }
 
     /**
@@ -819,18 +806,17 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.opIdent,
             char("("),
             this.ws,
-        ).chain(([opName]) => {
+        ).bind(([opName]) => {
             const opSig = this.opRegistry.lookup(opName)
             if (!opSig) {
                 return empty<Value>()
             }
             return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
-                .chain((args) =>
+                .bind((args) =>
                     seq(this.ws, char(")"))
                         .map(() => this.evalOp(opSig, args))
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     /**
@@ -919,23 +905,23 @@ export class LCEval extends AbstractLC<EvalShape> {
         }
     }
 
-    // ── E-Obs: override obsProd for evaluation via chain + _forward ───────────
+    // ── E-Obs: override obsProd for evaluation via bind + _forward ───────────
 
     /**
      * Override `obsProd` to evaluate observations. When the scrutinee is a
      * `SpanCodataVal`, find the matching generator, bind `self` to the seed,
      * and re-evaluate the generator body via `_forward`.
      */
-    // e.o  — E-Obs via chain + _forward
+    // e.o  — E-Obs via bind + _forward
     @rule({ rule: "E-Obs", production: "obsProd" })
     protected override obsProd(ctx: unknown): Parser<Value> {
         return or(
             this.obsProd(ctx)
                 .map((scrutVal) => ({ scrutVal }))
-                .chain(({ scrutVal }) =>
+                .bind(({ scrutVal }) =>
                     seq(this.ws, char("."), this.ws, this.ident)
                         .map(([, , , obsName]) => ({ scrutVal, obsName }))
-                        .chain(({ scrutVal, obsName }) => {
+                        .bind(({ scrutVal, obsName }) => {
                             // Capture-phase leniency: inside a lambda body
                             // being parsed for span capture, a parameter is
                             // bound to PLACEHOLDER — its observation cannot
@@ -983,9 +969,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                 this._inputOffset = savedOffset
                             }
                         })
-                        .map(([, result]) => result)
-                )
-                .map(([, result]) => result),
+                ),
             this.appProd(ctx),
         )
     }

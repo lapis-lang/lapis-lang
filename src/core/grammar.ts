@@ -373,12 +373,12 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("."),
             this.ws,
-        ).chain(([, param, , , , ty]) => {
+        ).bind(([, param, , , , ty]) => {
             assert(typeof param === "string", "lambda param must be a string")
             assert(ty !== undefined, "lambda type must be defined")
             return this.exprProd(this.extendCtx(ctx, param, ty))
                 .map((body) => this.lam(param, ty, body))
-        }).map(([, result]) => result)
+        })
     }
 
     protected get lambdaHead(): Parser<string> {
@@ -412,7 +412,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("."),
             this.ws,
-        ).chain(([, tyVar, , , , bound]) => {
+        ).bind(([, tyVar, , , , bound]) => {
             assert(typeof tyVar === "string", "type var must be a string")
             assert(bound !== undefined, "type bound must be defined")
             if (this.isReservedTypeName(tyVar)) {
@@ -421,7 +421,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             const bodyDelta = delta.extend(tyVar, bound)
             return this.exprProd(this.extendTypeVarCtx(ctx, bodyDelta))
                 .map((body) => this.typeAbs(tyVar, bound, body))
-        }).map(([, result]) => result)
+        })
     }
 
     /**
@@ -447,24 +447,21 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof CodataType, "cofold type must be a CodataType")
             const codataType = ty as CodataType
             return this.exprProd(ctx)
-                .chain((scrutinee) =>
+                .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.cofoldHandler(codataType, ctx)
-                                .chain((handler) =>
+                                .bind((handler) =>
                                     seq(this.ws, char("}"))
                                         .map(() => this.cofold(codataType, scrutinee, handler, Any))
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     // oⱼ(xⱼ) → t  (cofold handler)
@@ -484,7 +481,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([obsName, , , , bindings]) => {
+        ).bind(([obsName, , , , bindings]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
                 return empty<
@@ -498,7 +495,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             }
             return this.exprProd(extendedCtx)
                 .map((body) => ({ observerName: obsName, bindings: bindingList, body }))
-        }).map(([, result]) => result)
+        })
     }
 
     // let x:σ = t in t
@@ -515,19 +512,17 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("="),
             this.ws,
-        ).chain(([, , name, , , , ty]) => {
+        ).bind(([, , name, , , , ty]) => {
             return this.exprProd(ctx)
                 .map((def) => ({ name, ty, def }))
-                .chain(({ name, ty, def }) =>
+                .bind(({ name, ty, def }) =>
                     seq(this.ws1, this.kw("in"), this.ws1)
-                        .chain(() =>
+                        .bind(() =>
                             this.exprProd(this.extendCtx(ctx, name, ty))
                                 .map((body) => this.let_(name, ty, def, body))
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     // fold [T] e { C(x₁ x₂) → t, ... }
@@ -542,24 +537,21 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof DataType, "fold type must be a DataType")
             const dataType = ty as DataType
             return this.exprProd(ctx)
-                .chain((scrutinee) =>
+                .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.foldHandlers(dataType, ctx)
-                                .chain((handlers) =>
+                                .bind((handlers) =>
                                     seq(this.ws, char("}"))
                                         .map(() => this.fold(dataType, scrutinee, handlers, Any))
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     // Fold handlers: C(x₁ x₂) → t, ...
@@ -591,7 +583,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([vName, , , , bindings]) => {
+        ).bind(([vName, , , , bindings]) => {
             const variant = dataType.findVariant(vName)
             if (!variant) {
                 return empty<
@@ -613,7 +605,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             }
             return this.exprProd(extendedCtx)
                 .map((body) => ({ variantName: vName, bindings: bindingList, body }))
-        }).map(([, result]) => result)
+        })
     }
 
     // unfold [T] s { o → t, ... }
@@ -628,24 +620,21 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             char("]"),
             this.ws,
-        ).chain(([, , , , ty]) => {
+        ).bind(([, , , , ty]) => {
             assert(ty instanceof CodataType, "unfold type must be a CodataType")
             const codataType = ty as CodataType
             return this.exprProd(ctx)
-                .chain((seed) =>
+                .bind((seed) =>
                     seq(this.ws, char("{"), this.ws)
-                        .chain(() =>
+                        .bind(() =>
                             this.unfoldGenerators(codataType, ctx)
-                                .chain((generators) =>
+                                .bind((generators) =>
                                     seq(this.ws, char("}"))
                                         .map(() => this.unfold(codataType, seed, generators, Any))
                                 )
-                                .map(([, result]) => result)
                         )
-                        .map(([, result]) => result)
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     // o → t, ...  (unfold generators)
@@ -671,7 +660,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
             this.arrow,
             this.ws,
-        ).chain(([obsName]) => {
+        ).bind(([obsName]) => {
             const observer = codataType.findObserver(obsName)
             if (!observer) {
                 return empty<{ observerName: string; body: S["expr"] }>()
@@ -680,7 +669,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             const extendedCtx = this.extendCtx(ctx, "self", Any)
             return this.exprProd(extendedCtx)
                 .map((body) => ({ observerName: obsName, body }))
-        }).map(([, result]) => result)
+        })
     }
 
     // e.o (observation — postfix dot, zero or more)
@@ -793,17 +782,16 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.opIdent,
             char("("),
             this.ws,
-        ).chain(([opName]) => {
+        ).bind(([opName]) => {
             if (this.opRegistry.lookup(opName) === undefined) {
                 return empty<S["atom"]>()
             }
             return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
-                .chain((args) =>
+                .bind((args) =>
                     seq(this.ws, char(")"))
                         .map(() => this.opApp(opName, args))
                 )
-                .map(([, result]) => result)
-        }).map(([, result]) => result)
+        })
     }
 
     // ── Lexemes ───────────────────────────────────────────────────────────────
@@ -827,13 +815,12 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected get ident(): Parser<string> {
         return seq(this.identFirst, this.identRest)
             .map(([h, t]) => h + t)
-            .chain((name) => {
+            .bind((name) => {
                 if (LC_RESERVED_WORDS.includes(name)) {
                     return empty<string>()
                 }
                 return epsilon(name)
             })
-            .map(([, r]) => r)
     }
 
     /**

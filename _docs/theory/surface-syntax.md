@@ -52,7 +52,7 @@ The lexer is driven by `data` declarations: each pattern constructor is a lexica
 
 **Excluded:** alternation `|` (use multiple variants), groups `()`, anchors, backreferences. Flat
 patterns compile to a DFA; type references (`<TypeName>`) make the pattern language context-free
-(handled by the zipper-grammar engine's lazy `DelayedExp` recursion).
+(handled by the lang-forma engine's lazy `DelayedExp` recursion).
 
 **Whitespace and patterns:** patterns match contiguous characters. A pattern may consume whitespace
 if its structure includes it (via `.`, `[^...]`, classes containing space, or delimited regions like

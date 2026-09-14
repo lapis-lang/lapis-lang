@@ -240,7 +240,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   escape `\`, type reference `<TypeName>` (pattern interpolation — match the pattern of another data
   type here). NO alternation `|` (use multiple variants), NO groups `()`, NO anchors, NO
   backreferences. Compiles to a DFA for flat patterns; type references make it context-free (handled
-  by the zipper-grammar engine's lazy recursion). Longest match wins; declaration order breaks ties.
+  by the lang-forma engine's lazy recursion). Longest match wins; declaration order breaks ties.
 - **Pattern constraints**: patterns match contiguous characters. A pattern may consume whitespace if
   its structure includes it (via `.`, `[^...]`, character classes containing space, or delimited
   regions). Whitespace that no pattern consumes is a token boundary (fallback). Patterns must be
@@ -293,32 +293,27 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   literally. E.g., `[0-9]+\+[0-9]+j` for complex numbers — the `\+` is a literal `+` inside the
   token, while the unescaped `+` after `[0-9]` is the quantifier.
 
-## Attribute grammars + zipper-grammar (renamed from derivative-parser)
+## Attribute grammars + lang-forma
 
-- Parser library now published to JSR as `@lapis-lang/zipper-grammar@4.1.0`.
-- v2.1.0 adds: `chain` (monadic bind) for L-attributed one-pass parsing, grammar-native contracts
-  (`@requires`, `@ensures`, `@invariant`, `@rescue`), `diagnostic()` for failure reporting.
-- v2.2.0 adds: `_forward` (higher-order attributes — one-pass evaluation via re-parsing substrings
-  under extended context), `TreeExp`/`flattenTree`/`parseTree` (tree-consuming grammars for passes
-  over already-built ASTs), standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`,
-  `keyword`), lexeme helpers (`ws`, `ws1`, `digit`, `digits`, `ident`). The 2.2.0 API is a breaking
-  change from 2.1.0 (combinators are standalone functions, not Grammar methods).
-- v3.0.0 adds: typed contract predicates — `@requires`/`@ensures`/`@rescue` now infer
-  `Parameters<F>` and `ReturnType<F>` from the decorated method, and `old` is typed as
-  `OldSnapshot<This>` (data-only snapshot, excluding function-valued keys). Full type safety on
-  arguments and results in contract predicates.
+- Parser library published to JSR as `@lapis-lang/lang-forma`.
+- `bind`/`chain` (L-attributed binds) for one-pass parsing, grammar-native contracts (`@requires`,
+  `@ensures`, `@invariant`, `@rescue`) with typed predicates, `diagnostic()` for failure reporting.
+- `_forward` (higher-order attributes — one-pass evaluation via re-parsing substrings under extended
+  context), `parseToTree`/`SemanticPass` (retained derivation trees and tree-consuming passes),
+  standalone combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`, `keyword`), lexeme helpers
+  (`ws`, `ws1`, `digit`, `digits`, `ident`).
 - Two patterns for semantics: (1) multi-pass via `super` (subclass calls super.expr.map(evalFn)),
-  (2) one-pass judgments-as-productions via `@rule expr(Γ): Parser<Type>` with `chain` for
-  left-sibling synthesized → right-sibling inherited flow. With 2.2.0's `_forward`, evaluation is
-  also one-pass (closures re-parse body via `_forward`); tree-consuming grammars handle passes over
-  ASTs.
+  (2) one-pass judgments-as-productions via `@rule expr(Γ): Parser<Type>` with `bind` for
+  left-sibling synthesized → right-sibling inherited flow. With `_forward`, evaluation is also
+  one-pass (closures re-parse body via `_forward`); `SemanticPass` handles passes over already-built
+  trees.
 - Grammar-class subtyping = natural layering for semantic passes: base grammar (syntax) → subclass
   (name resolution) → subclass (type check) → subclass (law check) → subclass (evaluation). Each
   pass inherits productions it doesn't override.
 - Lapis's enforced structure means hard type-theory cases DON'T ARISE: no polymorphic recursion (no
   general recursion, declared result types), no let-generalization (subtyping not generics), `super`
   gives complete AST node (no bidirectional flow needed).
-- See zipper-grammar `examples/stlc.ts` for headline example: STLC with 4 interpretations (AST, type
+- See lang-forma `examples/stlc.ts` for headline example: STLC with 4 interpretations (AST, type
   checker, evaluator, proof-bearing) over one abstract grammar.
 
 ## Deno migration (completed 2026-07-25)
@@ -326,12 +321,12 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 - Project converted from Node/TypeScript (.mts + package.json + tsconfig.json) to Deno (.ts +
   deno.json).
 - All imports: `.mjs` → `.ts` (relative), `@lapis-lang/derivative-parser` →
-  `jsr:@lapis-lang/zipper-grammar`.
+  `jsr:@lapis-lang/lang-forma`.
 - `deno check src/index.ts` passes clean.
 - Devcontainer: `.devcontainer/devcontainer.json` (Ubuntu 24.04 + Deno feature + VS Code Deno
   extension).
 - `deno.json` has tasks: check, test, build (deno compile → exe), fmt, lint.
-- `minimumDependencyAge: "0"` in deno.json (zipper-grammar was freshly published).
+- `minimumDependencyAge: "0"` in deno.json (lang-forma was freshly published).
 
 ## Implementation staging (see language-design.md §5)
 
