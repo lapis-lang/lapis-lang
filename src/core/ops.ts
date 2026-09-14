@@ -53,14 +53,63 @@
 import { FunType, type Type } from "./types.ts"
 
 /**
- * Language-level call forms excluded from the dependency scan — call-shaped
- * (`name(...)`), camelCase, and part of the language rather than members of
- * `Ω`. A closed vocabulary, like the law catalog: entries exist only when
- * the grammar itself defines a call form that would otherwise be mistaken
- * for an op application.
+ * The signature/definition well-formedness condition that a sealed operation
+ * carries (lc.md §2.4): the definition types as `paramTypes → resultType`.
  *
- * - `match` — the pattern-matched construction `match(pₖ)` (lc.md §2.2,
- *   T-Pattern), introduced by the lexer, not an operation.
+ * The registry cannot check this itself — checking requires the type checker,
+ * and `ops.ts` cannot import it (cycle: `typing_grammar` → `grammar` →
+ * `ops`). The check is therefore injected at declaration time (`declare`),
+ * and the grammars accept **only sealed operations** (`CheckedOpSig`), making
+ * the condition a type-level guarantee rather than a runtime convention.
+ */
+export interface OpWellFormedness {
+    /**
+     * Check that `definition` types as `paramTypes → resultType`. Return a
+     * reason string when it does not; `undefined` when it does.
+     */
+    checkDefinition(op: OpSig): string | undefined
+}
+
+/**
+ * An operation whose definition has been validated against its signature —
+ * the definition types as `paramTypes → resultType` (lc.md §2.4).
+ *
+ * Produced exclusively by `OpRegistry.declare` (which runs the injected
+ * well-formedness check); every entry the grammars read from `Ω` has this
+ * type, so a signature/definition mismatch cannot enter Ω through the
+ * public API. Unvalidated `OpSig`s remain constructible (for building
+ * declarations to submit to `declare`) but cannot be installed.
+ */
+export interface CheckedOpSig extends OpSig {
+    /** Marker: the well-formedness check has passed. */
+    readonly checked: true
+}
+
+/** Brand a validated `OpSig` as checked (registry-internal). */
+const brandChecked = (op: OpSig): CheckedOpSig => Object.assign(op, { checked: true as const })
+
+/**
+ * Language-level call forms — call-shaped (`name(...)`), camelCase, and part
+ * of the language rather than members of `Ω`. A closed vocabulary, like the
+ * law catalog: entries exist only when the grammar itself defines a call
+ * form.
+ *
+ * Serves two coupled purposes, and the coupling is what makes each sound:
+ *
+ * - **Reserved from operation names** (`declare` rejects an op named with
+ *   one). An op named `match` would be indistinguishable from the
+ *   pattern-matched construction `match(pₖ)` (lc.md §2.2, T-Pattern) — worse,
+ *   once in Ω the `opProd` registry gate would shadow the language form for
+ *   every subsequent parse. The same parseability rationale as the camelCase
+ *   name-shape check: a name that cannot be a distinct op application cannot
+ *   be an op name.
+ * - **Excluded from the dependency scan** (`referencedOps`). Because the
+ *   names are reserved from operations, an occurrence of `match(` in a
+ *   definition is always the language form, never an op application — the
+ *   exclusion can never suppress a genuine op reference.
+ *
+ * - `match` — the pattern-matched construction `match(pₖ)`, introduced by
+ *   the lexer, not an operation.
  */
 const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
 
@@ -105,9 +154,11 @@ export class OpSig {
 // ── Declaration errors ─────────────────────────────────────────────────────────
 
 /**
- * Thrown by `OpRegistry.declare` when an operation declaration is invalid:
- * a malformed name, a duplicate, or an acyclicity violation (self-reference,
- * forward reference, or a cycle).
+ * A declaration failure: the operation name and the failed check's reason.
+ * `declare` throws this on any failed check (name shape, built-in call
+ * form, duplicate, acyclicity, well-formedness) — a rejected declaration is
+ * an exceptional outcome for the caller, who stated the declaration as a
+ * fact; the reason identifies the failed check.
  */
 export class OpDeclarationError extends Error {
     constructor(
@@ -128,14 +179,27 @@ export class OpDeclarationError extends Error {
  * The registry is append-only: `declare` adds an operation at the end of the
  * declaration order, and the acyclicity check runs against the operations
  * already present. This makes `Ω` acyclic by construction.
+ *
+ * **The trust boundary:** every entry in `Ω` is a `CheckedOpSig` — its
+ * definition has been validated against its signature (the definition types
+ * as `paramTypes → resultType`). The validation is injected
+ * (`OpWellFormedness`) because the registry cannot type-check itself
+ * (`ops.ts` cannot import the type checker — that would be a cycle through
+ * `grammar.ts`). The grammars read only checked entries, so T-Op's trust in
+ * `resultType` and E-Op's execution of `definition` can never diverge —
+ * without this check, a mismatched declaration would type-check as one
+ * thing and evaluate as another, a Preservation violation through Ω.
  */
 export class OpRegistry {
-    private readonly ops = new Map<string, OpSig>()
+    private readonly ops = new Map<string, CheckedOpSig>()
     /** Declaration order — the stratification order for the acyclicity check. */
     private readonly order: string[] = []
 
     /**
-     * Declare an operation. Runs the declaration-time checks:
+     * Declare an operation: run every declaration-time check and install the
+     * sealed operation. Returns the `CheckedOpSig` (branded, validated).
+     *
+     * Checks:
      *
      * 1. **Name shape** — camelCase (lowercase-first), matching the `opIdent`
      *    lexeme that `opProd` parses. A PascalCase name would collide with the
@@ -143,20 +207,50 @@ export class OpRegistry {
      *    words are allowed: the op form's tight paren is positionally
      *    disjoint from every keyword position, so an operation named `fold`
      *    is appliable (`fold(a, b)`).
+     * 1b. **Built-in call forms** — `match` (and any future call form) are
+     *    reserved from operation names: an op so named would be
+     *    indistinguishable from the language form and, once installed, would
+     *    shadow it at the `opProd` gate. This reservation is also what makes
+     *    the acyclicity scan's exclusion of these names sound (see
+     *    `BUILTIN_CALL_FORMS`).
      * 2. **Duplicate** — redeclaring an operation name is rejected; the
      *    signature and definition would silently diverge.
      * 3. **Acyclicity** — the definition may only reference operations already
      *    declared in `Ω` (declaration-order stratification). Self-reference,
      *    forward reference, and cycles are all rejected here.
+     * 4. **Well-formedness** — the definition types as
+     *    `paramTypes → resultType`. Mandatory, not optional: an entry in `Ω`
+     *    carries the guarantee. The checker is injected (see the class doc);
+     *    a test or embedding that does not care about typing can inject a
+     *    permissive checker explicitly.
      *
-     * @throws OpDeclarationError on any invalid declaration.
+     * The definition is type-checked under the operations **already
+     * declared** (acyclicity ran first), so a definition referencing an
+     * earlier operation checks against it — declare in dependency order.
+     *
+     * @throws OpDeclarationError on any failed check.
      */
-    declare(op: OpSig): void {
+    declare(op: OpSig, wellFormedness: OpWellFormedness): CheckedOpSig {
         // 1. Name shape: must match the `opIdent` lexeme (camelCase).
         if (!/^[a-z_][a-zA-Z0-9_]*$/.test(op.name)) {
             throw new OpDeclarationError(
                 op.name,
                 "operation names must be camelCase (lowercase-first) — the `opIdent` lexeme",
+            )
+        }
+
+        // 1b. Built-in call forms are reserved from operation names: an op
+        //     named `match` would be indistinguishable from the language's
+        //     `match(pₖ)` form, and once installed would shadow it at the
+        //     `opProd` gate for every subsequent parse. Reserving the name
+        //     is also what makes `referencedOps`'s scan exclusion sound: a
+        //     reserved name can never be an operation, so excluding it never
+        //     suppresses a genuine op reference (no acyclicity hole).
+        if (BUILTIN_CALL_FORMS.includes(op.name)) {
+            throw new OpDeclarationError(
+                op.name,
+                "reserved for the built-in call form — an operation of this name would be " +
+                    "indistinguishable from the language form",
             )
         }
 
@@ -182,17 +276,28 @@ export class OpRegistry {
             }
         }
 
-        this.ops.set(op.name, op)
+        // 4. Well-formedness: the definition types as the declared signature.
+        //    T-Op trusts `resultType`; E-Op executes the raw `definition`;
+        //    without this check a mismatched declaration type-checks as one
+        //    thing and evaluates as another.
+        const reason = wellFormedness.checkDefinition(op)
+        if (reason !== undefined) {
+            throw new OpDeclarationError(op.name, `definition is not well-formed: ${reason}`)
+        }
+
+        const sealed = brandChecked(op)
+        this.ops.set(op.name, sealed)
         this.order.push(op.name)
+        return sealed
     }
 
-    /** Look up an operation by name. */
-    lookup(name: string): OpSig | undefined {
+    /** Look up an operation by name (always a checked entry). */
+    lookup(name: string): CheckedOpSig | undefined {
         return this.ops.get(name)
     }
 
-    /** All declared operations, in declaration order. */
-    all(): OpSig[] {
+    /** All declared operations, in declaration order (all checked). */
+    all(): CheckedOpSig[] {
         return this.order.map((name) => this.ops.get(name)!)
     }
 
@@ -210,16 +315,18 @@ export class OpRegistry {
      * character boundary.
      *
      * **Scope of the scan (exactness claim):** this is a lexical scan over the
-     * definition source, not a token-level one — `declare` runs before
-     * parsing infrastructure exists (`Ω` is populated before grammars are
+     * definition source, not a token-level one — `declare` runs before parsing
+     * infrastructure exists (`Ω` is populated before grammars are
      * constructed), so the check must be grammar-independent. It is exact for
      * the current LC concrete syntax, which has no string literals and no
      * comments; the language-level call forms (`BUILTIN_CALL_FORMS`, e.g.
      * `match(pₖ)`) are excluded because they are language constructs, not
-     * operations. A future syntax revision adding string literals, comments,
-     * or other call-shaped constructs must extend the exclusion list (or
-     * replace the scan) — until then, every reported name is a genuine op
-     * reference.
+     * operations — sound because `declare` reserves those names from
+     * operations (check 1b), so an occurrence of a reserved name in a
+     * definition is always the language form, never an op application. A
+     * future syntax revision adding string literals, comments, or other
+     * call-shaped constructs must extend the exclusion list (or replace the
+     * scan) — until then, every reported name is a genuine op reference.
      *
      * **Over-approximation risk:** none today. If an exclusion is missed or a
      * new construct appears, the failure mode is a rejected declaration

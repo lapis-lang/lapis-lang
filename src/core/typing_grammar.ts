@@ -66,7 +66,7 @@ import {
 
 import { AbstractLC, type LCShape } from "./grammar.ts"
 
-import { type OpSig } from "./ops.ts"
+import { type OpSig, OpWellFormedness } from "./ops.ts"
 
 import { isSubtype, join } from "./subtyping.ts"
 
@@ -744,6 +744,56 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     }
 
     // ── T-Op: Ω(op) = σ₁→...→σₙ→τ  ∧  Γ ⊢ tᵢ : σᵢ  ⟹  Γ ⊢ op(t₁,...,tₙ) : τ ────
+
+    /**
+     * The signature/definition well-formedness checker for `OpRegistry.declare`
+     * (lc.md §2.4): an operation's definition must type as
+     * `paramTypes → resultType` before it enters Ω.
+     *
+     * Injected by the caller because the registry cannot check this itself
+     * (`ops.ts` importing this module would be a cycle through `grammar.ts`).
+     * This is what makes T-Op's trust in `resultType` sound: E-Op executes the
+     * raw `definition`, so an unvalidated mismatch would type-check as one
+     * type and evaluate as another — a Preservation violation through Ω.
+     * Every entry the grammar reads is a `CheckedOpSig`; this check is the
+     * only producer of those.
+     */
+    readonly opWellFormedness: OpWellFormedness = {
+        checkDefinition: (op: OpSig): string | undefined => {
+            // The definition must be a curried function over the declared
+            // parameters, returning the declared result type: peel one
+            // FunType layer per parameter, then check the body against
+            // resultType (up to subsumption — T-Sub at the result).
+            const defType = this.typeCheckSource(op.definition)
+            if (defType === undefined) {
+                return `definition does not type-check: "${op.definition}"`
+            }
+            let def = defType
+            for (const _ of op.paramTypes) {
+                if (!(def instanceof FunType)) {
+                    return "definition is not a function of the declared arity"
+                }
+                def = def.result
+            }
+            if (!isSubtype(def, op.resultType)) {
+                return `definition returns ${def}, which is not <: ${op.resultType}`
+            }
+            return undefined
+        },
+    }
+
+    /**
+     * Type-check a standalone LC source fragment (used by
+     * `opWellFormedness` to check an operation's definition). Returns the
+     * type, or `undefined` when the source does not type-check.
+     */
+    private typeCheckSource(source: string): Type | undefined {
+        const results = [...this.parseWith(source, new TypeEnv())]
+        if (results.length !== 1) {
+            return undefined
+        }
+        return results[0]
+    }
 
     /**
      * Named operation application (lc.md §5.8 T-Op). The premises — the

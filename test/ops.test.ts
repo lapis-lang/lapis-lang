@@ -14,7 +14,7 @@ import {
     OpRegistry,
     OpSig,
 } from "../src/index.ts"
-import { Nothing, TypeEnv } from "../src/core/types.ts"
+import { FunType, Nothing, TypeEnv } from "../src/core/types.ts"
 import { type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
 import { createOpFixtures, createTestFixtures } from "./fixtures.ts"
 
@@ -23,6 +23,26 @@ import { assert, assertEquals, assertThrows } from "@std/assert"
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 const { registry, opRegistry, nat, stream, bool } = createOpFixtures()
+
+/**
+ * A permissive well-formedness checker for tests that exercise the STATIC
+ * declaration checks (name shape, duplicate, acyclicity): those checks run
+ * before validation, so the definitions here never reach the type checker.
+ * Tests that exercise the well-formedness check itself use the real
+ * checker (`checkedOps` below).
+ */
+const permissive = { checkDefinition: () => undefined }
+
+/**
+ * A fresh registry + a real well-formedness checker bound to it: definitions
+ * are validated by the actual type checker (against the fixtures' types),
+ * and later declarations see earlier ones (dependency-ordered declaring).
+ */
+function checkedOps() {
+    const ops = new OpRegistry()
+    const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(ops)
+    return { ops, tc }
+}
 
 /** Type-check `src` under Γ with the op fixtures, returning the forest. */
 function typeForestOf(src: string, gamma: TypeEnv = new TypeEnv()): Set<unknown> {
@@ -64,21 +84,21 @@ Deno.test("Ω: declare accepts an acyclic chain (mul references earlier add)", (
 Deno.test("Ω: declare rejects self-reference", () => {
     const ops = new OpRegistry()
     const bad = new OpSig("loop", [nat, nat], nat, "loop(a, b)")
-    assertThrows(() => ops.declare(bad), OpDeclarationError)
+    assertThrows(() => ops.declare(bad, permissive), OpDeclarationError)
 })
 
 Deno.test("Ω: declare rejects forward reference", () => {
     const ops = new OpRegistry()
     const bad = new OpSig("early", [nat, nat], nat, "late(a, b)")
-    assertThrows(() => ops.declare(bad), OpDeclarationError)
+    assertThrows(() => ops.declare(bad, permissive), OpDeclarationError)
 })
 
 Deno.test("Ω: declare rejects the cyclic A↔B pair", () => {
     const ops = new OpRegistry()
     const a = new OpSig("opA", [nat, nat], nat, "opB(x, y)")
     const b = new OpSig("opB", [nat, nat], nat, "opA(x, y)")
-    assertThrows(() => ops.declare(a), OpDeclarationError)
-    assertThrows(() => ops.declare(b), OpDeclarationError)
+    assertThrows(() => ops.declare(a, permissive), OpDeclarationError)
+    assertThrows(() => ops.declare(b, permissive), OpDeclarationError)
 })
 
 // ── Acyclicity scan: lexical scope and exclusions ─────────────────────────────
@@ -94,6 +114,7 @@ Deno.test("Ω: the scan's exclusions — built-in call forms are not op referenc
     const ops = new OpRegistry()
     ops.declare(
         new OpSig("usesMatch", [nat], nat, 'match("[0-9]+")'),
+        permissive,
     )
     assertEquals(ops.lookup("usesMatch") !== undefined, true)
 })
@@ -107,15 +128,17 @@ Deno.test("Ω: the scan's lexical boundaries — what is not an op application",
     // the whitespace breaks the ident-then-tight-paren shape.
     ops.declare(
         new OpSig("wsApp", [nat], nat, "\\x:Nat. \\f:Nat -> Nat. f (x)"),
+        permissive,
     )
     // Variant construction is PascalCase — Zero() is not an op call, and the
     // lookbehind prevents the mid-identifier phantom (`ero(`) that a naive
     // lowercase-tail match would produce.
-    ops.declare(new OpSig("variantUse", [nat], nat, "Zero()"))
+    ops.declare(new OpSig("variantUse", [nat], nat, "Zero()"), permissive)
     // A bare variable mention (no paren) is not an application: `myOp` alone
     // does not report a dependency on an op of that name.
     ops.declare(
         new OpSig("bareVar", [nat], nat, "\\x:Nat. \\myOp:Nat. myOp"),
+        permissive,
     )
     assertEquals(ops.all().length, 3, "all three must declare cleanly")
 })
@@ -125,21 +148,21 @@ Deno.test("Ω: the scan still catches genuine op references inside definitions",
     // definition still requires the referenced op to be declared earlier.
     const ops = new OpRegistry()
     assertThrows(
-        () => ops.declare(new OpSig("refsUnknown", [nat], nat, "unknownOp(x)")),
+        () => ops.declare(new OpSig("refsUnknown", [nat], nat, "unknownOp(x)"), permissive),
         OpDeclarationError,
         "not declared earlier",
     )
     // And once declared, the reference is accepted (acyclic chain).
-    ops.declare(new OpSig("known", [nat], nat, "\\x:Nat. x"))
-    ops.declare(new OpSig("refsKnown", [nat], nat, "known(x)"))
+    ops.declare(new OpSig("known", [nat], nat, "\\x:Nat. x"), permissive)
+    ops.declare(new OpSig("refsKnown", [nat], nat, "known(x)"), permissive)
     assertEquals(ops.lookup("refsKnown") !== undefined, true)
 })
 
 Deno.test("Ω: declare rejects a duplicate operation name", () => {
     const ops = new OpRegistry()
-    ops.declare(new OpSig("dup", [nat], nat, "Zero()"))
+    ops.declare(new OpSig("dup", [nat], nat, "Zero()"), permissive)
     assertThrows(
-        () => ops.declare(new OpSig("dup", [nat], nat, "Zero()")),
+        () => ops.declare(new OpSig("dup", [nat], nat, "Zero()"), permissive),
         OpDeclarationError,
     )
 })
@@ -147,9 +170,24 @@ Deno.test("Ω: declare rejects a duplicate operation name", () => {
 Deno.test("Ω: declare rejects a PascalCase operation name", () => {
     const ops = new OpRegistry()
     assertThrows(
-        () => ops.declare(new OpSig("Add", [nat, nat], nat, "Zero()")),
+        () => ops.declare(new OpSig("Add", [nat, nat], nat, "Zero()"), permissive),
         OpDeclarationError,
     )
+})
+
+Deno.test("Ω: declare rejects an operation named with a built-in call form", () => {
+    // An op named `match` would be indistinguishable from the language's
+    // `match(pₖ)` form and, once installed, would shadow it at the opProd
+    // gate. Reserving the name is also what makes the acyclicity scan's
+    // exclusion of it sound: before the reservation, a match-named op's
+    // self/forward references bypassed the scan (an acyclicity hole).
+    const ops = new OpRegistry()
+    assertThrows(
+        () => ops.declare(new OpSig("match", [nat], nat, "match(x)"), permissive),
+        OpDeclarationError,
+        "reserved for the built-in call form",
+    )
+    assertEquals(ops.all().length, 0, "the failed declaration must not install")
 })
 
 Deno.test("Ω: an operation may be named with a reserved word", () => {
@@ -157,15 +195,90 @@ Deno.test("Ω: an operation may be named with a reserved word", () => {
     // position (all whitespace-delimited), so keyword-named operations are
     // declaraable and appliable — `fold(a, b)` is an op application.
     const ops = new OpRegistry()
-    ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"))
+    ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), permissive)
     assertEquals(ops.lookup("fold") !== undefined, true)
+})
+
+// ── Ω: well-formedness — the definition types as the declared signature ──────
+//
+// T-Op trusts `resultType`; E-Op executes the raw `definition`. Without the
+// declare-time check, a mismatched signature would type-check as one thing
+// and evaluate as another — a Preservation violation through Ω. The check is
+// injected (`OpWellFormedness`) because the registry cannot import the type
+// checker (cycle); every entry the grammars read is a `CheckedOpSig`.
+
+Deno.test("Ω: declare rejects a definition whose result type contradicts the signature", () => {
+    // Declared [Nat] → Bool, definition returns Zero : Nat. Before the
+    // well-formedness check this typed as Bool and evaluated as Nat — the
+    // Preservation hole, now rejected at declaration.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () =>
+            ops.declare(
+                new OpSig("bad", [nat], bool, "\\x:Nat. Zero()"),
+                tc.opWellFormedness,
+            ),
+        OpDeclarationError,
+        "not well-formed",
+    )
+})
+
+Deno.test("Ω: declare rejects a definition that does not type-check", () => {
+    // Not valid LC at all — the definition's parse is empty.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () => ops.declare(new OpSig("broken", [nat], nat, "%%% not a term"), tc.opWellFormedness),
+        OpDeclarationError,
+        "does not type-check",
+    )
+})
+
+Deno.test("Ω: declare rejects a definition with the wrong function arity", () => {
+    // Declared [Nat, Nat] → Nat (2 params), definition takes 1 — peeling the
+    // second FunType layer fails.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () =>
+            ops.declare(
+                new OpSig("notFn", [nat, nat], nat, "\\x:Nat. Zero()"),
+                tc.opWellFormedness,
+            ),
+        OpDeclarationError,
+        "not a function of the declared arity",
+    )
+})
+
+Deno.test("Ω: declare accepts a definition that is well-formed", () => {
+    // The positive case: the fixture ops (`add`, `mul`) declared with the
+    // real checker in `createOpFixtures` — mul's definition references the
+    // earlier-declared add, so the checker sees the dependency too.
+    const { ops, tc } = checkedOps()
+    const sealed = ops.declare(
+        new OpSig("identity", [nat], nat, "\\x:Nat. x"),
+        tc.opWellFormedness,
+    )
+    assertEquals(sealed.checked, true)
+    assertEquals(ops.lookup("identity") !== undefined, true)
+})
+
+Deno.test("Ω: well-formedness checks against the earlier-declared operations", () => {
+    // A definition referencing an earlier op type-checks with it in Ω:
+    // double(x) = add(x, x) requires `add`'s signature for T-Op inside the
+    // definition. Declare in dependency order — the check sees it.
+    const { ops, tc } = checkedOps()
+    ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
+    const sealed = ops.declare(
+        new OpSig("double", [nat], nat, "\\x:Nat. add(x, x)"),
+        tc.opWellFormedness,
+    )
+    assertEquals(sealed.checked, true)
 })
 
 Deno.test("namespaces: a keyword-named op is positionally disjoint from the keyword forms", () => {
     // `fold(a, b)` — tight paren — is the op application (the registry
     // gate resolves the reading; the keyword form needs `fold [T]`).
     const ops = new OpRegistry()
-    ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"))
+    ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), permissive)
 
     // Typing: the op form type-checks.
     const typed = new LCTypeCheck()
@@ -220,8 +333,8 @@ Deno.test("T-Op: arity mismatch is rejected (add takes 2 args)", () => {
 
 Deno.test("T-Op: argument type mismatch is rejected", () => {
     // Bool is not <: Nat — the second argument violates the signature.
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"))
+    const { ops, tc } = checkedOps()
+    ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
     const result = new LCTypeCheck()
         .setRegistry(registry)
         .setOpRegistry(ops)
@@ -305,10 +418,13 @@ Deno.test("E-Op: nested op application — add inside add's argument", () => {
 
 Deno.test("E-Op: escaping closure — op returning a function, applied later", () => {
     // add is declared first; mkAdder (referencing add) second — acyclic.
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"))
+    // The declared signature is honest: mkAdder takes a Nat and returns a
+    // Nat → Nat function (the escaping closure).
+    const { ops, tc } = checkedOps()
+    ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
     ops.declare(
-        new OpSig("mkAdder", [nat], nat, "\\x:Nat. \\y:Nat. add(x, y)"),
+        new OpSig("mkAdder", [nat], new FunType(nat, nat), "\\x:Nat. \\y:Nat. add(x, y)"),
+        tc.opWellFormedness,
     )
 
     // Application requires whitespace in LC (`f x`, never `f(x)`): the
@@ -343,14 +459,15 @@ Deno.test("E-OpArg: arguments evaluate leftmost (strictness)", () => {
 Deno.test("E-Op: an op returning an unfold stays observable after the window", () => {
     // The codata value escapes the definition window; the observation happens
     // later, in the main input. (The let-bound equivalent works; so must this.)
-    const ops = new OpRegistry()
+    const { ops, tc } = checkedOps()
     ops.declare(
         new OpSig(
             "mkStream",
             [nat],
             stream,
-            "\\x:Nat. unfold [Stream] x { head -> Zero(), tail -> self }",
+            "\\x:Nat. unfold [NatStream] x { head -> Zero(), tail -> self }",
         ),
+        tc.opWellFormedness,
     )
     const result = new LCEval()
         .setRegistry(registry)
@@ -366,13 +483,13 @@ Deno.test("E-Op: a codata argument stays observable inside the definition window
     // The codata value is built in the main input and passed INTO the op;
     // its generator spans are main-absolute. The observation re-parses against
     // the value's input, not the definition text currently in `_input`.
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("headOf", [stream], nat, "\\s:Stream. s.head"))
+    const { ops, tc } = checkedOps()
+    ops.declare(new OpSig("headOf", [stream], nat, "\\s:NatStream. s.head"), tc.opWellFormedness)
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
         .parseWith(
-            "headOf((unfold [Stream] Succ(Zero()) { head -> Succ(Zero()), tail -> self }))",
+            "headOf((unfold [NatStream] Succ(Zero()) { head -> Succ(Zero()), tail -> self }))",
             new ValueEnv(),
         )
     assert(result.size === 1, "should have exactly one result")
@@ -385,16 +502,17 @@ Deno.test("E-Op: codata crosses two definition windows (chained ops)", () => {
     // mkStream builds the value in its definition window; headOf observes it
     // in a different definition window — the spans never index either
     // definition, only the codata value's own input.
-    const ops = new OpRegistry()
+    const { ops, tc } = checkedOps()
     ops.declare(
         new OpSig(
             "mkStream",
             [nat],
             stream,
-            "\\x:Nat. unfold [Stream] x { head -> Zero(), tail -> self }",
+            "\\x:Nat. unfold [NatStream] x { head -> Zero(), tail -> self }",
         ),
+        tc.opWellFormedness,
     )
-    ops.declare(new OpSig("headOf", [stream], nat, "\\s:Stream. s.head"))
+    ops.declare(new OpSig("headOf", [stream], nat, "\\s:NatStream. s.head"), tc.opWellFormedness)
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
@@ -411,7 +529,7 @@ Deno.test("E-Cofold: handler body resolves enclosing-scope variables", () => {
     const result = new LCEval()
         .setRegistry(registry)
         .parseWith(
-            "(\\y:Nat. cofold [Stream] (unfold [Stream] Zero() { head -> Zero(), tail -> self }) { head(h) -> y }) (Zero())",
+            "(\\y:Nat. cofold [NatStream] (unfold [NatStream] Zero() { head -> Zero(), tail -> self }) { head(h) -> y }) (Zero())",
             new ValueEnv(),
         )
     assert(result.size === 1, "should have exactly one result")
@@ -508,48 +626,14 @@ Deno.test("generative: an empty OpRegistry keeps opProd inert", () => {
 // The window's parses are internal — the caller never sees its forest — so
 // evalOp requires exactly one parse result at each step. An empty or
 // ambiguous parse is an EvalErrorValue naming the op, never a silent pick.
-
-Deno.test("E-Op: an unparseable definition is a diagnosable error, not silence", () => {
-    // The definition isn't valid LC — the window's parse is empty, and the
-    // error names the op (the caller sees one eval-error value, not an
-    // unexplained empty top-level forest).
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("broken", [nat], nat, "%%% not a term"))
-    const result = new LCEval()
-        .setRegistry(registry)
-        .setOpRegistry(ops)
-        .parseWith("broken(Zero())", new ValueEnv())
-    assert(result.size === 1, "exactly one error value, not a mysterious empty forest")
-    const [val] = result
-    assert(val instanceof EvalErrorValue)
-    assert(
-        val.message.includes("broken") && val.message.includes("no results"),
-        `the error must name the op and the failure: got "${val.message}"`,
-    )
-})
-
-Deno.test("E-Op: a non-function definition is a diagnosable error", () => {
-    // The definition parses but evaluates to a non-closure (arity 0 body):
-    // the first application step hits the not-a-function guard. The error
-    // names the op and the step.
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("notFn", [nat], nat, "Zero()"))
-    const result = new LCEval()
-        .setRegistry(registry)
-        .setOpRegistry(ops)
-        .parseWith("notFn(Zero())", new ValueEnv())
-    assert(result.size === 1, "exactly one error value")
-    const [val] = result
-    assert(val instanceof EvalErrorValue)
-    assert(
-        val.message.includes("notFn") && val.message.includes("not a function"),
-        `the error must name the op and the step: got "${val.message}"`,
-    )
-})
+//
+// The remaining *reachable* eval-time failures are those the well-formedness
+// check cannot preempt: an arity mismatch at the application site (the
+// signature is trusted, but the site can still apply it wrong).
 
 Deno.test("E-Op: arity mismatch against the signature is a diagnosable error", () => {
-    const ops = new OpRegistry()
-    ops.declare(new OpSig("add2", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"))
+    const { ops, tc } = checkedOps()
+    ops.declare(new OpSig("add2", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)

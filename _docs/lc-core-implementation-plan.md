@@ -65,7 +65,7 @@
 | Metatheory verification                | ✅ Complete        | `verifyMetatheory(LCEval, LCTypeCheck)` — Progress + Preservation (static + unification) all hold; 12 tests in `metatheory.test.ts`                | #31          |
 | Generative counterexample search       | ✅ Complete        | `findCounterexamples(LCEval, LCTypeCheck)` — 500 generated terms, 0 counterexamples; 5 tests in `counterexamples.test.ts`                          | #32          |
 | Law/properties machinery               | ❌ Not started     | Algebraic laws are one of the three irreducible essentials of Lapis; no operational exploitation yet                                               | #22          |
-| Core op symbols (Ω + `op` application) | ✅ Complete        | `OpRegistry` (Ω, acyclic by construction), `opProd` term form, T-Op/E-Op — operation identity survives elaboration; 38 tests in `test/ops.test.ts` | #49          |
+| Core op symbols (Ω + `op` application) | ✅ Complete        | `OpRegistry` (Ω, acyclic by construction), `opProd` term form, T-Op/E-Op — operation identity survives elaboration; 42 tests in `test/ops.test.ts` | #49          |
 | T-FoldMatch + E-FoldMatch              | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                        | #23          |
 | T-Pattern                              | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                          | #24          |
 | Surface language elaboration           | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                                   | #25          |
@@ -307,7 +307,7 @@ with the current status, milestone, and dependencies.
 
 #### PBI #49: Core op symbols — Ω environment + named operation application (T-Op/E-Op)
 
-- **Status:** Complete — 163 tests green (`deno check` / `test` / `lint` / `fmt` clean)
+- **Status:** Complete — 167 tests green (`deno check` / `test` / `lint` / `fmt` clean)
 - **Assignee:** @mlhaufe
 - **Goal:** Implement the named-operation layer of LC (`lc.md` §2.2, §2.4, §3 E-Op/E-OpArg, §5
   T-Op): the operation signature environment `Ω` (`OpRegistry`), the `op(t₁, ..., tₙ)` term form
@@ -426,19 +426,39 @@ with the current status, milestone, and dependencies.
      defense-in-depth: the current grammar yields single-parse forests everywhere, per the
      derivation-path dedup work.) Tested: unparseable definition, non-function definition, arity
      mismatch, and the positive case.
-  8. **Acyclicity scan scope documented + built-in call forms excluded** — the dependency check is a
-     lexical scan, not a token-level one: `declare` runs before parsing infrastructure exists (`Ω`
-     is populated before grammars are constructed — the grammar holds the registry), so the check
-     must be grammar-independent. It is exact for the current LC concrete syntax (no string
-     literals, no comments); the language-level `match(pₖ)` call form (T-Pattern) is excluded via a
-     closed `BUILTIN_CALL_FORMS` vocabulary — it is a language construct, not an operation. The
-     exactness claim, its limits (future syntax revisions must extend the exclusion list or replace
-     the scan), and the loud-not-silent failure mode are documented on `referencedOps`. Tested:
-     `match` exclusion, whitespace-application / PascalCase / bare-variable non-matches, and
-     genuine-reference catching.
+  8. **Acyclicity scan scope documented + built-in call forms excluded — and reserved** — the
+     dependency check is a lexical scan, not a token-level one: `declare` runs before parsing
+     infrastructure exists (`Ω` is populated before grammars are constructed — the grammar holds the
+     registry), so the check must be grammar-independent. It is exact for the current LC concrete
+     syntax (no string literals, no comments); the language-level `match(pₖ)` call form (T-Pattern)
+     is excluded from the scan via a closed `BUILTIN_CALL_FORMS` vocabulary — and, in a later review
+     fix, **reserved from operation names** (`declare` check 1b). The reservation closes an
+     acyclicity hole the exclusion opened (a match-named op's self/forward references bypassed the
+     scan) **and** a shadowing hazard (an op named `match` in Ω would make the `opProd` gate treat
+     every `match(...)` as an op application, shadowing T-Pattern when #24 lands). The coupling is
+     the point: because reserved names can never be operations, the scan's exclusion of them can
+     never suppress a genuine op reference. The exactness claim, its limits (future syntax revisions
+     must extend the reservation/exclusion list or replace the scan), and the loud-not-silent
+     failure mode are documented on `referencedOps`. Tested: `match` reservation + exclusion,
+     whitespace-application / PascalCase / bare-variable non-matches, and genuine-reference
+     catching.
+  9. **Ω well-formedness — the definition types as the declared signature** (code review:
+     `new OpSig("bad", [Nat], Bool, "\\x:Nat. Zero()")` previously type-checked as `Bool` and
+     evaluated as `Nat` — a Preservation violation through Ω, the public API being the trust
+     boundary). `declare(op, wellFormedness)` now validates that `definition` types as
+     `paramTypes → resultType` before installation; entries are `CheckedOpSig` (a branded `OpSig` —
+     unvalidated `OpSig`s remain constructible but cannot enter Ω). The checker is **injected**
+     (`OpWellFormedness`) because `ops.ts` cannot import the type checker (cycle through
+     `grammar.ts`); `LCTypeCheck.opWellFormedness` is the real implementation, and tests exercising
+     only the static checks inject a permissive one explicitly. The definition is checked against
+     the operations already declared (acyclicity runs first), so `double(x) = add(x, x)` validates
+     against `add`'s signature. The check found two real inconsistencies in the existing test
+     fixtures (a false `mkAdder` signature; a `Stream`-over- `Any` head that made `headOf`
+     over-promise) — both fixed by honest signatures/fixtures (`NatStream`). Specified in `lc.md`
+     §2.4 (the condition is an Ω-construction side condition, not a §5 typing rule — T-Op trusts the
+     entry; E-Op executes it).
 - **Out of scope:** the `E` equational-theory environment and law declarations (#22); surface
-  operator syntax `a + b` → `add(a, b)` (#25 elaboration); declare-time definition-signature
-  validation (elaboration-time).
+  operator syntax `a + b` → `add(a, b)` (#25 elaboration).
 
 #### PBI #22: Law/properties machinery — make algebraic laws operationally exploitable
 

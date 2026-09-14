@@ -102,7 +102,17 @@ E ::= ∅ | E, op:ℓ            equational theory (operation ↦ declared laws)
 [`elaboration.md`](./elaboration.md) §6): the fold's implementation elaborates to an LC term; its
 signature enters `Ω`; its declared `properties` enter `E` after best-effort screening. Judgments are
 optionally parameterized by them: typing `Ω; Γ ⊢ t : σ` and algebraic equivalence `Ω; E ⊢ t ≡ u`
-(§7). **Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
+(§7).
+
+**Ω's well-formedness condition.** An entry `op: σ₁→...→σₙ→τ ∈ Ω` carries its defining term
+`def(op)`, and the two must agree: `∅ ⊢ def(op) : σ₁ → ... → σₙ → τ`. The condition is part of
+declaring an operation (the entry is installed only after the check), not a typing rule — T-Op
+_trusts_ the entry's `τ` and E-Op executes its `def(op)`, so without the condition a mismatched
+declaration would type-check as one type and evaluate as another: a Preservation violation through Ω
+rather than through a step. Checking a definition requires the typing machinery, which is why the
+condition is a side condition on `Ω`'s construction rather than a rule in §5.
+
+**Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
 `primitive` (pinned by the language definition — builtin operations with fixed law sets, authority
 by fiat), `discharged` (established by the compiler — finite-domain exhaustion for finite types,
 bounded-domain exhaustion for machine-finite types like binary64 Float, or derivation from primitive
