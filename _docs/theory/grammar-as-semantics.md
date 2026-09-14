@@ -1,7 +1,7 @@
 # Grammar as Semantics
 
 > **Status:** Draft v0.1. This document specifies the implementation architecture for Lapis's
-> semantic analysis passes: how grammar subclassing, the `chain` combinator, and grammar-native
+> semantic analysis passes: how grammar subclassing, the `bind` combinator, and grammar-native
 > contracts together turn the parser into the compiler pipeline. The formal typing rules live in
 > [`lc.md`](./lc.md); the denotational/operational semantics live in
 > [`semantics.md`](./semantics.md). This document is about _how those rules are implemented_.
@@ -13,9 +13,9 @@ resolution, type checking, evaluation) walks that AST. Each pass is a distinct d
 distinct traversal.
 
 Lapis uses a different model, inherited from Bracha's executable-grammar work and realized in
-[`zipper-grammar`](https://jsr.io/@lapis-lang/zipper-grammar): **the grammar class hierarchy _is_
-the compiler pipeline.** Each semantic pass is a subclass of the grammar that overrides the
-productions needing semantic action and inherits the rest unchanged via `super`. The result is that:
+[`lang-forma`](https://jsr.io/@lapis-lang/lang-forma): **the grammar class hierarchy _is_ the
+compiler pipeline.** Each semantic pass is a subclass of the grammar that overrides the productions
+needing semantic action and inherits the rest unchanged via `super`. The result is that:
 
 - A typing judgment `Γ ⊢ e : τ` becomes a parameterised production `expr(Γ): Parser<Type>`.
 - An evaluation judgment `ρ ⊢ e ⇓ v` becomes `expr(ρ): Parser<Value>`.
@@ -63,7 +63,7 @@ without manual thunks:
 }
 ```
 
-**Subclass override semantics** (from the zipper-grammar library): a subclass
+**Subclass override semantics** (from the lang-forma library): a subclass
 `@rule override get expr() { ... }` defines a _new_ getter function, so it occupies a different
 cache slot from the parent's. Calling `super.expr` from inside the override accesses the parent's
 (decorated) getter and hits the parent's cache slot. This is what makes the multi-pass model work —
@@ -94,62 +94,60 @@ subclasses. This is a deliberate simplification for the first implementation (do
 > productions in a subclass.
 
 The refactor to the grammar-subclass pattern is the next implementation step (see §6 below). The
-`stlc.ts` example in zipper-grammar demonstrates the target architecture for a simpler calculus.
+`stlc.ts` example in lang-forma demonstrates the target architecture for a simpler calculus.
 
-## 3. One-Pass Context Threading via `chain`
+## 3. One-Pass Context Threading via `bind`
 
-### 3.1 The Problem `chain` Solves
+### 3.1 The Problem `bind` Solves
 
-Without `chain`, the `seq` combinator builds all children eagerly at grammar _construction_ time.
+Without `bind`, the `seq` combinator builds all children eagerly at grammar _construction_ time.
 This means a parsed value (e.g., a type annotation `τ`) cannot flow into a sibling's parser (e.g.,
 the lambda body) — both are constructed before either is parsed.
 
-The `chain` combinator (an L-attributed bind that emits the pair `[v, w]` — see lang-forma's `chain`
-JSDoc; only the second value is used here) breaks this: it parses the first parser, then — _after_
-it completes — calls a function with the result to construct the second parser. This lets a left
-sibling's _synthesized_ value determine the right sibling's _inherited_ context, which is exactly
-the **L-attributed grammar** pattern.
+The `bind` combinator (an L-attributed, result-only bind — see lang-forma's `bind` JSDoc) breaks
+this: it parses the first parser, then — _after_ it completes — calls a function with the result to
+construct the second parser. This lets a left sibling's _synthesized_ value determine the right
+sibling's _inherited_ context, which is exactly the **L-attributed grammar** pattern.
 
 ```typescript
-// From zipper-grammar's stlc.ts — the lambda production:
+// Adapted from lang-forma's stlc.ts — the lambda production:
 @rule
 protected lambdaProd(ctx: unknown): Parser<S['expr']> {
     return this.seq(
         this.lambdaHead, this.ident, this.ws, this.char(':'),
         this.ws, this.type, this.ws, this.char('.'), this.ws,
-    ).chain(([, param, , , , ty]) => {
+    ).bind(([, param, , , , ty]) => {
         // τ is now available; extend ctx and parse body.
         return this.exprProd(this.extendCtx(ctx, param, ty))
             .map((body) => this.lam(param, ty, body));
-    }).map(([, result]) => result);
+    });
 }
 ```
 
-The `chain` fires _after_ `τ` is parsed, so the extended context `Γ + {x:τ}` is available when
-`body` is parsed. No two-pass AST-then-evaluate needed; the typing judgment is computed _during
-parsing_.
+The `bind` fires _after_ `τ` is parsed, so the extended context `Γ + {x:τ}` is available when `body`
+is parsed. No two-pass AST-then-evaluate needed; the typing judgment is computed _during parsing_.
 
 ### 3.2 The L-Attributed Property
 
 This works because Lapis's grammar is **L-attributed**: all inherited attributes flow left-to-right
 (from parent to child, or from left sibling to right sibling), and all synthesized attributes flow
-bottom-up (child to parent). The `chain` combinator is the mechanism for the left-to-right flow:
+bottom-up (child to parent). The `bind` combinator is the mechanism for the left-to-right flow:
 
 ```
-parse annotation τ  ──chain──►  parse body under Γ + {x:τ}
-     (synthesized)                (inherited, extended)
+parse annotation τ  ──bind──►  parse body under Γ + {x:τ}
+     (synthesized)               (inherited, extended)
 ```
 
 This is sufficient for Lapis's type system because the context (Γ or ρ) only grows as we descend —
 we never need to look _ahead_ or _up_ to type-check a sub-expression. The grammar's left-to-right
 structure matches the type system's information flow.
 
-### 3.3 When `seq` Suffices vs. When `chain` Is Needed
+### 3.3 When `seq` Suffices vs. When `bind` Is Needed
 
 - **`seq` suffices** when the context is read-only (never extended during parsing). The pure AST
   builder (`STLCAST` in the example) uses `seq` only — it ignores context entirely.
-- **`chain` is needed** when a parsed value must extend the context for a subsequent sibling. Type
-  checking and evaluation both need `chain` because lambda/let bind names that extend Γ or ρ for
+- **`bind` is needed** when a parsed value must extend the context for a subsequent sibling. Type
+  checking and evaluation both need `bind` because lambda/let bind names that extend Γ or ρ for
   their bodies.
 
 ## 4. Why the Hard Type-Theory Cases Don't Arise
@@ -216,21 +214,29 @@ at the implementation level.
 
 ### 5.1 The Mapping
 
-zipper-grammar v2.1.0 provides four contract decorators that map directly onto the structure of
-inference rules:
+lang-forma provides four contract decorators that map directly onto the structure of inference
+rules:
 
-| Inference rule component | Contract decorator | Failure behavior                                               |
-| ------------------------ | ------------------ | -------------------------------------------------------------- |
-| Premise (antecedent)     | `@requires(pred)`  | Graceful: returns `undefined`, parse branch produces `empty()` |
-| Conclusion (consequent)  | `@ensures(pred)`   | Throws `ContractError` (a violated postcondition is a bug)     |
-| Well-formedness          | `@invariant(pred)` | Throws `ContractError` (checked before/after each action)      |
-| Parse-failure recovery   | `@rescue(handler)` | Returns diagnostic or alternative parser                       |
+| Inference rule component | Contract decorator | Failure behavior                                                |
+| ------------------------ | ------------------ | --------------------------------------------------------------- |
+| Premise (antecedent)     | `@requires(pred)`  | Graceful: the action returns `undefined` (declarative metadata) |
+| Conclusion (consequent)  | `@ensures(pred)`   | Throws `ContractError` (a violated postcondition is a bug)      |
+| Well-formedness          | `@invariant(pred)` | Throws `ContractError` (checked before/after each action)       |
+| Parse-failure recovery   | `@rescue(handler)` | Returns diagnostic or alternative parser                        |
 
-The key insight: **`@requires` fails gracefully** (returns `undefined`, causing the calling
-`chain`/`.map` to produce `empty()`), while `@ensures` and `@invariant` throw. This is the domain
-adaptation: a failed _premise_ means the inference rule doesn't apply, so the parse branch is
-rejected (empty forest). A failed _conclusion_ means the semantic action has a bug (it produced a
-result that violates the rule's conclusion), which is a programming error, not a parse failure.
+The key insight: **`@requires` fails gracefully** (the contracted action returns `undefined` instead
+of a result), while `@ensures` and `@invariant` throw. This is the domain adaptation: a failed
+_premise_ means the inference rule doesn't apply. A failed _conclusion_ means the semantic action
+has a bug (it produced a result that violates the rule's conclusion), which is a programming error,
+not a parse failure.
+
+`@requires` is **declarative metadata** for the rule model (`Grammar.rules`, metatheory
+verification) — it does not by itself reject a parse branch. The runtime enforcement lives in the
+production path: the production override checks the premise and returns `empty()` (an empty parse
+forest), which is what makes rejection _is_ the type error. The Lapis type checker follows this
+pattern — its `appProd`/`typeAppProd`/`letProd`/`opProd` overrides enforce the premises inline and
+return `empty()` on failure, while the contracted actions (`app`, `typeApp`, `let_`, `opApp`) feed
+the rule model.
 
 ### 5.2 Subcontracting via the Inheritance Chain
 
@@ -267,7 +273,7 @@ existing `@rule` machinery without engine changes.
 
 ### 5.4 Concrete Example: T-App as a Contracted Semantic Action
 
-From zipper-grammar's `stlc.ts`, the application typing rule encoded as a contracted method:
+From lang-forma's `stlc.ts`, the application typing rule encoded as a contracted method:
 
 ```typescript
 // The App inference rule:
@@ -286,14 +292,23 @@ From zipper-grammar's `stlc.ts`, the application typing rule encoded as a contra
 ) => result instanceof TVar || result instanceof TFun   // conclusion: result is a valid Type
 )
 protected app(fn: Type, _arg: Type): Type {
-    // The premise is enforced by @requires; the body is the rule's conclusion.
+    // The premise is encoded by @requires (rule-model metadata); the body is
+    // the rule's conclusion.
     return (fn as TFun).cod;
 }
 ```
 
-If the premise fails (e.g., `fn` is not a function type, or the domain doesn't match), `@requires`
-returns `undefined`, the calling `chain` produces `empty()`, and the ill-typed branch is rejected.
-The parse forest is empty — **rejection _is_ the type error**.
+The `@requires`/`@ensures` contracts here are **declarative metadata** — they feed the rule model
+(`Grammar.rules`, metatheory verification) and are checked when the action is invoked through the
+contract Proxy. The runtime premise enforcement lives in the production path: `STLCTypeCheck`
+overrides `appProd` to check the domain match inline and return `empty()` on failure, bypassing this
+action entirely (the override computes the conclusion directly).
+
+If the premise fails (e.g., `fn` is not a function type, or the domain doesn't match), the
+production path must reject the branch: the `appProd` override checks the premise inline and returns
+`empty()`, so the ill-typed branch never completes. The parse forest is empty — **rejection _is_ the
+type error**. The `@requires` decorator itself is declarative metadata for the rule model; the
+production override is what enforces the premise at runtime.
 
 ### 5.5 Concrete Example: T-Var as a Contracted Semantic Action
 
@@ -311,8 +326,11 @@ protected varRef(name: string, ctx: unknown): Type {
 }
 ```
 
-An unbound variable fails the premise, produces `undefined`, and the parse branch yields an empty
-forest — the variable is rejected, not thrown.
+An unbound variable fails the premise. Unlike the application case, the variable production has no
+premise-checking override — the contracted action returns `undefined`, which surfaces in the parse
+forest rather than rejecting the branch. Strict rejection requires the production path to check the
+premise and return `empty()` (the `appProd` pattern above); the `@requires` decorator alone does not
+provide it.
 
 ## 6. Application to Lapis: T-Fold as a Contracted Production
 
@@ -344,9 +362,9 @@ protected fold(eType: LapisType, handlers: HandlerTypes): LapisType {
 }
 ```
 
-The `chain` combinator threads Γ through the handler bodies: each handler is checked under Γ
-extended with the variant's field names, and the result type σ is declared in the fold's spec (not
-inferred), so no fixpoint iteration is needed.
+The `bind` combinator threads Γ through the handler bodies: each handler is checked under Γ extended
+with the variant's field names, and the result type σ is declared in the fold's spec (not inferred),
+so no fixpoint iteration is needed.
 
 ### 6.1 Why T-Fold Is One-Pass
 
@@ -362,28 +380,23 @@ This is the structural reason §4.1 gives: because fold result types are declare
 polymorphic recursion to resolve, and the entire fold can be type-checked in a single left-to-right
 pass.
 
-## 7. Higher-Order Attributes and Tree-Consuming Grammars
+## 7. Higher-Order Attributes and Tree-Consuming Passes
 
-> **Note:** The features in this section are from zipper-grammar 2.2.0+, which is now the current
-> version (3.0.0). The 3.0.0 API adds typed contract predicates (`@requires`/`@ensures` infer
-> `Parameters<F>` and `ReturnType<F>` from the decorated method; `old` is typed as
-> `OldSnapshot<This>`).
-
-zipper-grammar 2.2.0 introduces two capabilities that further unify the architecture: **higher-order
-attributes** (one-pass evaluation via `_forward`) and **tree-consuming grammars** (via `TreeExp` /
-`flattenTree`). Together, they eliminate most cases where a separate recursive function was
+lang-forma provides two capabilities that further unify the architecture: **higher-order
+attributes** (one-pass evaluation via `_forward`) and **tree-consuming passes** (via `parseToTree` /
+`SemanticPass`). Together, they eliminate most cases where a separate recursive function was
 previously needed.
 
 ### 7.1 Higher-Order Attributes (`_forward`)
 
-In 2.1.0, evaluation of closures required multi-pass (Pattern 1): parse to AST, then walk the AST
-with a separate recursive `evalTerm` function. The body text was consumed once during parsing;
-re-evaluating it under a different environment meant re-walking the AST node, not re-parsing the
-source.
+Without higher-order attributes, evaluation of closures requires multi-pass (Pattern 1): parse to
+AST, then walk the AST with a separate recursive `evalTerm` function. The body text is consumed once
+during parsing; re-evaluating it under a different environment means re-walking the AST node, not
+re-parsing the source.
 
-2.2.0's `_forward(input, span, start)` changes this. It re-parses a substring of the original input
-under a different inherited context, _within the same grammar instance_. For evaluation, `app`
-captures the closure body's source span and re-parses that substring under the extended environment:
+`_forward(input, span, start)` changes this. It re-parses a substring of the original input under a
+different inherited context, _within the same grammar instance_. For evaluation, `app` captures the
+closure body's source span and re-parses that substring under the extended environment:
 
 ```typescript
 class STLCEval extends AbstractSTLC<{ expr: Value; atom: Value; type: Type }> {
@@ -404,48 +417,39 @@ This unifies the architecture: _every_ pass — name resolution, type checking, 
 grammar subclass. The "multi-pass fallback with a separate recursive function" is no longer needed
 for evaluation.
 
-### 7.2 Tree-Consuming Grammars (`TreeExp`, `flattenTree`)
+### 7.2 Tree-Consuming Passes (`parseToTree`, `SemanticPass`)
 
-For passes whose input is an already-built tree (an AST or derivation tree) rather than source text,
-the engine supports tree-consuming grammars. `flattenTree` converts a tree into a preorder token
-stream; `TreeExp` matches a tree node by class name and dispatches to child sub-parsers by position;
-`parseTree` drives the parse over the flattened token stream.
+For passes whose input is an already-built tree rather than source text, the engine supports
+retained derivation trees. `parseToTree` parses the input once and captures which `@rule` production
+matched where, with child relationships and source spans, as a first-class `DerivationTree`;
+`SemanticPass` walks that tree bottom-up, dispatching each node to an overridable method named after
+its production label — the same subclass-and-override pattern as the grammar itself.
 
 ```typescript
-class TreeEval extends Grammar<{ expr: number }> {
-    @rule
-    get expr(): Parser<number> {
-        return or(this.numNode, this.addNode)
-    }
-    protected get addNode(): Parser<number> {
-        return parserOf(
-            new TreeExp(
-                "Add",
-                [this.expr._exp, this.expr._exp],
-                (_n, [l, r]) => (l as number) + (r as number),
-            ),
-        )
+class DepthPass extends SemanticPass<{ expr: number }> {
+    expr(node: DerivationNode, children: number[]): number {
+        return children.length === 0 ? 0 : 1 + Math.max(...children)
     }
 }
 
-const toks = flattenTree(tree, childrenOf)
-const [v] = [...new TreeEval().parseTree(toks)]
+const { trees } = grammar.parseToTree(input)
+const depth = new DepthPass().evaluate(trees[0]!)
 ```
 
 **Applicability to Lapis:** Passes that consume a prior pass's output tree — e.g., a law checker
-walking the typed AST, or an evaluator walking a desugared tree — can now _also_ be grammar
-subclasses, not separate recursive functions. Whether the input is source text or a tree, the
-architecture is the same: grammar-class methods with `@requires`/`@ensures` contracts.
+walking the typed AST, or an evaluator walking a desugared tree — can now _also_ be subclasses, not
+separate recursive functions. Whether the input is source text or a tree, the architecture is the
+same: subclass methods with `@requires`/`@ensures` contracts.
 
 ### 7.3 What This Means for Lapis's Passes
 
 | Pass                   | Input             | Pattern        | Mechanism                                              |
 | ---------------------- | ----------------- | -------------- | ------------------------------------------------------ |
-| Name resolution        | Source text       | One-pass       | `chain` (context grows)                                |
-| Type checking          | Source text       | One-pass       | `chain` (context grows; fold result types declared)    |
+| Name resolution        | Source text       | One-pass       | `bind` (context grows)                                 |
+| Type checking          | Source text       | One-pass       | `bind` (context grows; fold result types declared)     |
 | Evaluation             | Source text       | One-pass       | `_forward` (closures re-parse body under extended env) |
-| Law checking           | Typed AST (tree)  | Tree-consuming | `TreeExp` / `flattenTree`                              |
-| Desugaring (if needed) | Source AST (tree) | Tree-consuming | `TreeExp` / `flattenTree`                              |
+| Law checking           | Typed AST (tree)  | Tree-consuming | `parseToTree` + `SemanticPass`                         |
+| Desugaring (if needed) | Source AST (tree) | Tree-consuming | `parseToTree` + `SemanticPass`                         |
 
 The multi-pass fallback (Pattern 1 — a separate recursive function) is now reserved for cases where
 neither `_forward` nor tree-consuming grammars apply. For Lapis's current design, that may be none
@@ -455,17 +459,17 @@ of them.
 
 The grammar-as-semantics model is an **executable attribute grammar**:
 
-| Attribute grammar concept             | zipper-grammar realization                    |
-| ------------------------------------- | --------------------------------------------- |
-| Inherited attribute                   | Method parameter (`ctx`) threaded via `chain` |
-| Synthesized attribute                 | Method return value (the `Parser<T>` result)  |
-| Copy rule (pass attribute unchanged)  | Default `super` call (no override)            |
-| Semantic rule (compute new attribute) | Override + `@requires`/`@ensures`             |
-| L-attributed (left-to-right flow)     | `chain` (L-attributed bind, pair `[v, w]`)    |
-| S-attributed (bottom-up only)         | `seq` + `.map` (no `chain` needed)            |
+| Attribute grammar concept             | lang-forma realization                       |
+| ------------------------------------- | -------------------------------------------- |
+| Inherited attribute                   | Method parameter (`ctx`) threaded via `bind` |
+| Synthesized attribute                 | Method return value (the `Parser<T>` result) |
+| Copy rule (pass attribute unchanged)  | Default `super` call (no override)           |
+| Semantic rule (compute new attribute) | Override + `@requires`/`@ensures`            |
+| L-attributed (left-to-right flow)     | `bind` (L-attributed bind, result-only)      |
+| S-attributed (bottom-up only)         | `seq` + `.map` (no `bind` needed)            |
 
 The `semantics.md` document (§5) specifies the attribute-grammar equations for static analysis. This
-document specifies _how those equations are executed_: as grammar subclass methods with `chain` for
+document specifies _how those equations are executed_: as grammar subclass methods with `bind` for
 inherited-attribute threading and contracts for inference-rule encoding.
 
 ## 9. Refactoring the Current Implementation
@@ -478,7 +482,7 @@ the grammar-subclass pattern follows the `stlc.ts` example:
 1. Subclass `LapisGrammar` (or `LapisParser`) as `LapisNameResolver`.
 2. Override productions that bind or reference names (`dataDecl`, `behaviorDecl`, `foldDecl`,
    `variantRef`, etc.).
-3. Thread `NameEnv` as the `ctx` parameter via `chain`.
+3. Thread `NameEnv` as the `ctx` parameter via `bind`.
 4. Override `extendCtx` to add declarations to `NameEnv`.
 5. For productions that don't touch names, inherit via `super` (no override).
 
@@ -493,7 +497,7 @@ a pre-pass (the `@invariant` or a class-level initialization) before parsing ref
 1. Subclass `LapisNameResolver` as `LapisTypeChecker`.
 2. Override productions that have typing rules (`foldDecl`, `unfoldDecl`, `variantRef`, `blockLit`,
    `keywordSend`, etc.).
-3. Thread `TypeEnv` (Γ) as the `ctx` parameter via `chain`.
+3. Thread `TypeEnv` (Γ) as the `ctx` parameter via `bind`.
 4. Encode each typing rule's premises as `@requires` and conclusions as `@ensures` (per §5.4, §5.5,
    §6).
 5. Override `extendCtx` to add type bindings to Γ.
@@ -502,10 +506,10 @@ a pre-pass (the `@invariant` or a class-level initialization) before parsing ref
 ### 9.3 What the Refactor Buys
 
 - **One-pass type checking** where the current implementation is two-pass (parse to AST, then walk).
-- **One-pass evaluation** via `_forward` (2.2.0): closures re-parse their body under an extended
+- **One-pass evaluation** via `_forward`: closures re-parse their body under an extended
   environment, no separate recursive function needed.
-- **Tree-consuming law checking** via `TreeExp` / `flattenTree` (2.2.0): the law checker walks the
-  typed AST as a grammar subclass, not a separate function.
+- **Tree-consuming law checking** via `parseToTree` / `SemanticPass`: the law checker walks the
+  typed AST as a semantic-pass subclass, not a separate function.
 - **Inference-rule encoding** as contracts, making the typing rules executable and checkable (a
   violated `@ensures` is a compiler bug caught at check time).
 - **Subcontracting** across the pass chain: the type checker's preconditions compose with the name
@@ -513,24 +517,23 @@ a pre-pass (the `@invariant` or a class-level initialization) before parsing ref
   compose automatically.
 - **Uniform architecture**: the parser, name resolver, type checker, law checker, and evaluator are
   all the same kind of thing (grammar subclasses), not five different data structures and traversal
-  patterns. With 2.2.0's `_forward` and tree-consuming grammars, even evaluation and tree-walking
-  passes are grammar subclasses — no separate recursive functions.
+  patterns. With `_forward` and tree-consuming passes, even evaluation and tree-walking passes are
+  subclasses — no separate recursive functions.
 
 ## 10. References
 
-- **zipper-grammar** —
-  [`jsr:@lapis-lang/zipper-grammar@3.0.0`](https://jsr.io/@lapis-lang/zipper-grammar): `Grammar`
-  base class, `@rule` decorator, `chain` combinator, `@requires` / `@ensures` / `@invariant` /
-  `@rescue` contracts (with typed predicates — `Parameters<F>`/`ReturnType<F>` inferred,
+- **lang-forma** — [`jsr:@lapis-lang/lang-forma`](https://jsr.io/@lapis-lang/lang-forma): `Grammar`
+  base class, `@rule` decorator, `bind`/`chain` combinators, `@requires` / `@ensures` / `@invariant`
+  / `@rescue` contracts (with typed predicates — `Parameters<F>`/`ReturnType<F>` inferred,
   `OldSnapshot<This>` for `old`), `_forward` (higher-order attributes for one-pass evaluation),
-  `TreeExp` / `flattenTree` (tree-consuming grammars), standalone combinators (`sseq`, `plus`,
-  `sepBy`, `between`, `trim`, `keyword`), and lexeme helpers. See `examples/stlc.ts` for the
-  headline example (STLC with 4 interpretations over one grammar, including one-pass evaluation via
-  `_forward`).
+  `parseToTree` / `SemanticPass` (retained derivation trees and tree-consuming passes), standalone
+  combinators (`sseq`, `plus`, `sepBy`, `between`, `trim`, `keyword`), and lexeme helpers. See
+  `examples/stlc.ts` for the headline example (STLC with 4 interpretations over one grammar,
+  including one-pass evaluation via `_forward`).
 - **Bracha, G.** — Executable grammars / pluggable type systems: the grammar-subclassing model that
-  zipper-grammar realizes.
+  lang-forma realizes.
 - **Attribute grammars** — Knuth's original concept; the L-attributed / S-attributed distinction
-  maps to `chain` vs. `seq`. Higher-order attributes (re-entering the engine over a fragment) extend
+  maps to `bind` vs. `seq`. Higher-order attributes (re-entering the engine over a fragment) extend
   the attribute-grammar model to handle closures and runtime tree growth.
 - **Liskov subcontracting** — `@requires` OR-ed (weakened), `@ensures` AND-ed (strengthened) across
   the inheritance chain.
