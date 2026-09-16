@@ -234,9 +234,33 @@ not a parse failure.
 verification) — it does not by itself reject a parse branch. The runtime enforcement lives in the
 production path: the production override checks the premise and returns `empty()` (an empty parse
 forest), which is what makes rejection _is_ the type error. The Lapis type checker follows this
-pattern — its `appProd`/`typeAppProd`/`letProd`/`opProd` overrides enforce the premises inline and
-return `empty()` on failure, while the contracted actions (`app`, `typeApp`, `let_`, `opApp`) feed
-the rule model.
+pattern — its `appProd`/`typeAppProd`/`letProd`/`opProd`/`varProd`/`variantProd`/`obsProd`/
+`foldProd`/`unfoldProd`/`cofoldProd` overrides enforce the premises inline and return `empty()` on
+failure, while the contracted actions (`app`, `typeApp`, `let_`, `opApp`, `varRef`, `variantCon`,
+`obs`, `fold`, `unfold`, `cofold`) feed the rule model.
+
+Two further hardening rules complete the two-layer model, both consequences of the same fact: a
+failed `@requires` makes the contracted action return `undefined`, and the contract wrapper returns
+_before_ `@ensures` runs — so the action must never be reached on a failed premise, and the sentinel
+must never be treated as a type downstream:
+
+1. **No `undefined` in the parse forest.** A production override commits its conclusion with
+   `epsilon(...)` only after verifying the premises itself. A leaked `undefined` would otherwise
+   flow into the forest unpruned, and ill-typed terms would be accepted with a non-empty forest.
+2. **`isSubtype`/`join`/`meet` are total over their declared domain but treat `undefined` as
+   failure.** The decision procedure rejects `undefined` on either side (join falls back to the
+   lattice top, meet to the bottom). This is defense in depth: a sentinel that leaks past a
+   production gate fails the next premise loudly instead of satisfying it —
+   `isSubtype(undefined,
+   Any)` would otherwise hold via S-Top, silently absorbing the failure
+   wherever `Any` is a legal type (e.g. a `let x:Any = ...` annotation).
+
+The permissive-`Any` sentinel family (`variantCon`, `obs`, `fold`, `unfold`, `cofold`, `opApp`
+returning `Any` on a failed premise) is therefore unreachable on the production path: each rule's
+premises are checked by its production override first, and the contracted action computes only the
+conclusion. The sentinels remain in the actions as rule-model documentation of each rule's failure
+mode — they are correct where `Any` is not a legal type, and the production gate closes the last
+hole (an `Any` annotation absorbing the sentinel, e.g. `let x:Any = UnknownVariant() in x`).
 
 ### 5.2 Subcontracting via the Inheritance Chain
 
@@ -326,11 +350,11 @@ protected varRef(name: string, ctx: unknown): Type {
 }
 ```
 
-An unbound variable fails the premise. Unlike the application case, the variable production has no
-premise-checking override — the contracted action returns `undefined`, which surfaces in the parse
-forest rather than rejecting the branch. Strict rejection requires the production path to check the
-premise and return `empty()` (the `appProd` pattern above); the `@requires` decorator alone does not
-provide it.
+An unbound variable fails the premise. The variable production is factored out of `atomProd` as
+`varProd` so the type checker can enforce the premise on the production path: the override checks
+`Γ(x) ≠ undefined` inline and returns `empty()` on failure, then commits the conclusion via
+`epsilon(varRef(...))` — the same shape as the `appProd` pattern above. The `@requires` decorator
+alone does not provide the rejection; the production override does.
 
 ## 6. Application to Lapis: T-Fold as a Contracted Production
 
