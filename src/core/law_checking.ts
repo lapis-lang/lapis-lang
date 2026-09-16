@@ -623,6 +623,14 @@ export function screeningRegime(
     law: Omit<LawDecl, "provenance">,
     op: CheckedOpSig,
 ): ScreeningRegime {
+    // The module's scope is laws over data-typed parameters: a function-typed
+    // parameter has no inhabitant vocabulary at all. Even a position with
+    // exponent 0 must disqualify — an argument-taking schema (identity:
+    // e / absorbing: z) is well-posed only against a data carrier, and the
+    // check below would otherwise route to exhaustion while the argument's
+    // validity for the skipped slot was never established.
+    if (!screenableDomain(op)) return "residual"
+
     // Per-position exponents: schema variable i maps to position i (mod the
     // parameter count) — the same mapping `assignments` enumerates, so the
     // estimate here IS the sweep the check will run.
@@ -729,8 +737,17 @@ function evalArgument(
     eval_: EvalTerm,
 ): Value {
     const value = eval_(law.argument!, new ValueEnv())[0]
-    if (value === undefined) {
-        throw new LawError(op.name, law, ["argument = (did not evaluate)"], "—", "—")
+    // BOTH failure shapes reject: an empty result (the argument did not
+    // parse/evaluate) AND an `EvalErrorValue` sentinel (the argument parsed
+    // but evaluation failed — an unknown variant, a failed subterm). Binding
+    // a sentinel as `e`/`z` would poison the sweep: over an empty finite
+    // domain it could even install a `discharged` law with zero checked
+    // instances, and residual checks would silently skip every instance.
+    if (value === undefined || value instanceof EvalErrorValue) {
+        const reason = value instanceof EvalErrorValue
+            ? "evaluated to an error sentinel"
+            : "did not evaluate"
+        throw new LawError(op.name, law, [`argument = ${reason}`], "—", "—")
     }
     return value
 }
@@ -861,6 +878,20 @@ function* inhabitantsOf(
     spaces: Map<DataType, readonly VariantVal[]>,
 ): Generator<VariantVal> {
     for (const variant of type.allVariants()) {
+        // Zero-inhabitant fields kill the variant: a single field with an
+        // empty space (an empty variant set, an `Empty`-typed field) makes
+        // the variant contribute NO values. Detected via the pure classifier
+        // BEFORE any field's space is materialized — a valid finite type
+        // such as `Dead(Big, Empty) | Live()` must not enumerate `Big` (or
+        // throw on an unregistered `Big`) just because `Dead` is dead. (A
+        // recursive/unbounded field type reaching here is unreachable under
+        // the finite regime; treat it conservatively as non-dead and let
+        // the completeness check below surface the truth.)
+        const hasEmptyField = variant.fields.some((field) => {
+            const fieldType = field.type
+            return fieldType instanceof DataType && finiteInhabitants(fieldType) === 0
+        })
+        if (hasEmptyField) continue
         // The field-value spaces, in field order: each field's full space,
         // enumerated ONCE through the shared memo (repeated field types —
         // two Bool fields, a Bool-Field record — enumerate once).

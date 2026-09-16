@@ -588,7 +588,11 @@ Deno.test("discharge: a position no schema variable lands on is never enumerated
     assertEquals(regime, "finite")
     assertEquals(law.provenance, "discharged")
     assertEquals(instances, 4, "2² assignments over the one swept position")
-    assertEquals(n2Constructions, 4, "position 0's space only — position 1 (exponent 0) never enumerated")
+    assertEquals(
+        n2Constructions,
+        4,
+        "position 0's space only — position 1 (exponent 0) never enumerated",
+    )
 })
 
 // ── Vacuous discharge (an empty operand type) ────────────────────────────────
@@ -620,4 +624,125 @@ Deno.test("discharge: an empty operand type discharges vacuously (0 instances)",
     assertEquals(law.provenance, "discharged")
     assertEquals(instances, 0, "every assignment over ∅ is vacuous")
     assert(h.laws.has("emptyId", "involutory"))
+})
+
+// ── Review fixes: regime scope, argument sentinels, dead-variant enumeration ─
+
+Deno.test("screeningRegime: a function-typed parameter routes residual even with exponent 0", () => {
+    // The module's scope is data-typed parameters: a binary op whose SECOND
+    // parameter is function-typed has exponent 0 there for identity/absorbing/
+    // idempotent schemas (1 variable → position 0) — but the skipped slot
+    // means an argument-taking schema is never established against it. The
+    // screenableDomain guard routes such signatures residual regardless of
+    // exponents, so declareCheckedLaw can never mark them `discharged`.
+    const h = boolHarness()
+    const nat = createNatType()
+    h.registry.register(nat)
+    h.opRegistry.declare(
+        new OpSig(
+            "hoSecond",
+            [nat, new FunType(nat, nat)],
+            nat,
+            "\\x:Nat. \\f:Nat → Nat. fold [Nat] x { Zero() -> x, Succ(p) -> p }",
+        ),
+        h.tc.opWellFormedness,
+    )
+    const hoSecond = h.opRegistry.lookup("hoSecond")!
+    assertEquals(
+        screeningRegime({ kind: "identity", target: "hoSecond", argument: "Zero()" }, hoSecond),
+        "residual",
+        "function-typed parameter (even at exponent 0) is outside the module's scope",
+    )
+})
+
+Deno.test("discharge: an argument that evaluates to an error sentinel rejects the declaration", () => {
+    // The argument's failure has TWO shapes: an empty result AND an
+    // `EvalErrorValue` sentinel (parsed and well-typed, but evaluation
+    // failed). The argument here — `ghostOp(True(), True())` — type-checks
+    // as Bool (the op is declared with a permissive well-formedness check),
+    // but its body evaluates `Ghost()`, an unregistered variant, so every
+    // evaluation lands on the sentinel path. Binding that as `e` would
+    // poison the sweep; over an empty domain it could even install a
+    // `discharged` law with zero checked instances.
+    const h = boolHarness()
+    h.opRegistry.declare(
+        new OpSig(
+            "ghostOp",
+            [h.bool, h.bool],
+            h.bool,
+            "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> Ghost(), False() -> b }",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    declareBoolOp(
+        h,
+        "andOp",
+        "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "identity", target: "andOp", argument: "ghostOp(True(), True())" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawError,
+        "error sentinel",
+    )
+    assertEquals(h.laws.lookup("andOp").length, 0)
+})
+
+Deno.test("discharge: a variant with a zero-inhabitant field contributes nothing — without enumerating its siblings", () => {
+    // `Dead(Big, Empty) | Live()`: the Dead variant has an Empty-typed field
+    // (zero inhabitants), so Dead contributes NO values — and the engine must
+    // NOT enumerate Big (its sibling field's space) to learn that. A counting
+    // evaluator proves Big was never built: only the 2 Live() inhabitants are
+    // constructed, and the identity claim over the type discharges over its
+    // true (2-value) space.
+    const h = boolHarness()
+    const empty = new DataType("Empty", [])
+    const big = new DataType("Big", [])
+    big.variants.push(
+        new Variant("Big", Array.from({ length: 17 }, (_, i) => new Field(`f${i}`, h.bool))),
+    )
+    const mixed = new DataType("Mixed", [])
+    mixed.variants.push(
+        new Variant("Dead", [new Field("payload", big), new Field("hole", empty)]),
+        new Variant("Live", []),
+    )
+    h.registry.register(empty)
+    h.registry.register(big)
+    h.registry.register(mixed)
+    const b17 = Array.from({ length: 17 }, (_, i) => `v${i}`).join(" ")
+    h.opRegistry.declare(
+        new OpSig(
+            "mixedId",
+            [mixed],
+            mixed,
+            // The Dead arm is unreachable (its Empty field has no values) but
+            // must still parse: handler bindings are space-separated —
+            // `Dead(v0 v1 ... v16 h) -> x`.
+            `\\x:Mixed. fold [Mixed] x { Dead(${b17} h) -> x, Live() -> x }`,
+        ),
+        { checkDefinition: () => undefined },
+    )
+    let bigConstructions = 0
+    const realEval = evalOfHarness(h.registry, h.opRegistry)
+    const countingEval = (source: string, rho: ValueEnv): readonly Value[] => {
+        if (source.startsWith("Big(")) bigConstructions++
+        return realEval(source, rho)
+    }
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "involutory", target: "mixedId" },
+        h.opRegistry,
+        h.laws,
+        countingEval,
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "finite")
+    assertEquals(law.provenance, "discharged")
+    assertEquals(instances, 1, "the true space is {Live()} — Dead contributes zero values")
+    assertEquals(bigConstructions, 0, "Big's space is never enumerated for a dead variant")
 })
