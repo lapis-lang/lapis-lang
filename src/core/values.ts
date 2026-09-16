@@ -104,3 +104,41 @@ export class ValueEnv {
         return new Map(this.bindings)
     }
 }
+
+// ── Structural value equality ─────────────────────────────────────────────────
+
+/**
+ * Structural equality on data values — the runtime `=` primitive's equality
+ * on data (semantics.md §7): two values are equal when they have the same
+ * constructor and equal fields, recursively.
+ *
+ * Scope (first cut): finite data values — `VariantVal` trees. Function
+ * values (closures) and codata values have no structural equality:
+ * closures are code, codata equality is bisimulation, and both are outside
+ * the first cut — comparing a value containing one returns `false` unless
+ * it is literally the same reference (identical closures ARE equal, which
+ * keeps `idempotent` on a closure-valued argument well-defined at the
+ * reference level). Law screening (law_checking.ts) restricts itself to
+ * operations whose parameter types are data types, so its comparisons
+ * observe only the `VariantVal` part.
+ */
+export function valueEquals(a: Value, b: Value): boolean {
+    if (a === b) return true
+
+    if (a instanceof VariantVal && b instanceof VariantVal) {
+        return a.variantName === b.variantName &&
+            a.dataType.name === b.dataType.name &&
+            fieldsEqual(a.fields, b.fields)
+    }
+    return false
+}
+
+/** Field-wise structural equality on a variant's fields (same key sets). */
+function fieldsEqual(a: Map<string, Value>, b: Map<string, Value>): boolean {
+    if (a.size !== b.size) return false
+    for (const [name, value] of a) {
+        const other = b.get(name)
+        if (other === undefined || !valueEquals(value, other)) return false
+    }
+    return true
+}
