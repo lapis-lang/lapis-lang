@@ -26,10 +26,17 @@ import {
     valueEquals,
     VariantVal,
 } from "../src/index.ts"
-
 import { FunType, TypeEnv } from "../src/core/types.ts"
 
-import { createBoolType, createOpFixtures } from "./fixtures.ts"
+import {
+    createBoolType,
+    createLawHarness,
+    createOpFixtures,
+    evalOne,
+    slowTestsEnabled,
+} from "./fixtures.ts"
+
+import { PropertyFailure } from "@lapis-lang/lang-forma"
 
 import { assert, assertEquals, assertThrows } from "@std/assert"
 
@@ -829,6 +836,140 @@ Deno.test("screen inputs: op applications evaluate under bound sample envs", () 
         cur = cur.fields.get("pred")
     }
     assertEquals(depth, 2)
+})
+
+// ── Property-based law screening (forAll over a grammar) ──────────────────────
+
+/**
+ * The generative complement to the Cartesian sweep above: `forAll` over a
+ * `ValueGenerator` rooted at a grammar. A law is a universally-quantified
+ * property over the operand space; the grammar IS the arbitrary.
+ *
+ * This harness targets REJECTION quality, not assurance: passing N runs is
+ * evidence, never proof — falsifying declarations are rejected with a shrunk
+ * minimal counterexample. See _docs/theory/law-testing.md.
+ */
+const { gen, evalOf: harnessEval } = createLawHarness()
+
+/**
+ * Evaluate a law-side source, demanding a value.
+ *
+ * Unlike the residual screen — whose sample space can contain instances that
+ * legitimately do not evaluate, and which skips them — this harness's domain
+ * is closed: the generator emits only well-formed `Nat` sources and the law
+ * embeddings are well-formed by construction. An `undefined` here therefore
+ * means evaluation itself is broken, which must fail the run loudly rather
+ * than pass vacuously. Throwing (not returning `false`) also keeps the
+ * failure mode distinct from a mathematical falsification: `forAll` wraps the
+ * throw in `PropertyFailure` with the thrown message as its reason.
+ */
+function mustEval(src: string): Value {
+    const value = evalOne(harnessEval, src)
+    if (value === undefined) {
+        throw new Error(`law instance did not evaluate: ${src}`)
+    }
+    return value
+}
+
+/** The LC source for the Nat of depth n: `Succ(...Zero()...)`. */
+function natSource(n: number): string {
+    return `${"Succ(".repeat(n)}Zero()${")".repeat(n)}`
+}
+
+/** The Nat depth of a law-side source: walk its Succ chain (Zero() = 0). */
+function natDepth(src: string): number {
+    let cur: Value = mustEval(src)
+    let depth = 0
+    while (cur instanceof VariantVal && cur.variantName === "Succ") {
+        depth++
+        cur = cur.fields.get("pred") as Value
+    }
+    assert(cur instanceof VariantVal && cur.variantName === "Zero", `not a Nat value: ${src}`)
+    return depth
+}
+
+/**
+ * The identity-fold law, property form (lc.md §7.2's `identity` schema
+ * generalized to the fold itself): folding a value with identity handlers
+ * returns the value unchanged —
+ * `fold [Nat] e { Zero() -> Zero(), Succ(p) -> Succ(p) } ≡ e`.
+ */
+function identityFoldHolds(src: string): boolean {
+    return valueEquals(
+        mustEval(`fold [Nat] ${src} { Zero() -> Zero(), Succ(p) -> Succ(p) }`),
+        mustEval(src),
+    )
+}
+
+/**
+ * The `idempotent` schema on `mul`, property form: `mul(a, a) ≡ a`. This is
+ * FALSE on Nat (`mul(2, 2) = 4`) — the property must throw, with a shrunk
+ * minimal counterexample.
+ */
+function idempotentMulHolds(src: string): boolean {
+    return valueEquals(mustEval(`mul(${src}, ${src})`), mustEval(src))
+}
+
+Deno.test("forAll: identity-fold law holds over 200 generated Nat values", () => {
+    // The property passes for every generated operand — 200 reproducible
+    // runs (fixed seed) of generated-and-evaluated law instances.
+    const result = gen.forAll(identityFoldHolds, { numRuns: 200, seed: 42 })
+    assert(result.passed)
+    assertEquals(result.runs, 200)
+})
+
+Deno.test("forAll: samples are reproducible — the same seed regenerates the same terms", () => {
+    // Fixed seed → fixed run-seed stream → fixed generated operands. The
+    // property sees the same inputs on every run of the test.
+    const first = gen.sample(7)
+    const again = gen.sample(7)
+    assertEquals(first, again)
+})
+
+Deno.test("forAll: idempotent on mul is FALSIFIED with a minimal counterexample", () => {
+    // Rejection quality: the property fails, and the failure is the library's
+    // PropertyFailure carrying the SHRUNK counterexample. The assertions pin
+    // the shrink CONTRACT, not its serialization: the counterexample is a Nat
+    // source that falsifies the axiom, and every strictly smaller Nat
+    // satisfies it — the minimal violator (2: `mul(2, 2) = 4 ≠ 2`; `0·0 = 0`
+    // and `1·1 = 1` hold). Pinning no exact syntax, a lang-forma bump that
+    // changes shrink ordering or serialization cannot break the test unless
+    // the shrinker stops finding the minimal falsifier. (The loop also forces
+    // depth ≤ 2: Nat 2 falsifies, so a counterexample deeper than 2 would
+    // fail the `Nat 2 satisfies` leg.)
+    const error = assertThrows(
+        () => gen.forAll(idempotentMulHolds, { numRuns: 100, seed: 42 }),
+        PropertyFailure,
+    )
+    const counterexample = error.counterexample
+    assert(typeof counterexample === "string", "counterexample must be a source string")
+    assertEquals(idempotentMulHolds(counterexample), false, "the counterexample falsifies")
+    const depth = natDepth(counterexample)
+    for (let n = 0; n < depth; n++) {
+        assertEquals(idempotentMulHolds(natSource(n)), true, `Nat ${n} satisfies the axiom`)
+    }
+})
+
+Deno.test("forAll: the same seed reproduces the same counterexample", () => {
+    // Reproducibility of a failure: fixed seed → same generated operands →
+    // same first falsifier → same shrunk minimal counterexample.
+    const e1 = assertThrows(
+        () => gen.forAll(idempotentMulHolds, { numRuns: 100, seed: 42 }),
+        PropertyFailure,
+    )
+    const e2 = assertThrows(
+        () => gen.forAll(idempotentMulHolds, { numRuns: 100, seed: 42 }),
+        PropertyFailure,
+    )
+    assertEquals(e1.counterexample, e2.counterexample)
+})
+
+Deno.test({
+    name: "forAll: identity-fold holds over 1000 generated Nat values (slow)",
+    ignore: !slowTestsEnabled,
+}, () => {
+    const result = gen.forAll(identityFoldHolds, { numRuns: 1000, seed: 0 })
+    assert(result.passed)
 })
 
 // ── Fixtures (keep the fixture surface exercised) ─────────────────────────────
