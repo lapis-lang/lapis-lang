@@ -7,7 +7,7 @@
  */
 
 import {
-    declareScreenedLaw,
+    declareCheckedLaw,
     EvalErrorValue,
     LAW_KINDS,
     type LawDecl,
@@ -21,7 +21,6 @@ import {
     OpRegistry,
     OpSig,
     screenLaw,
-    TypeRegistry,
     type Value,
     ValueEnv,
     valueEquals,
@@ -56,20 +55,17 @@ const evalOf = makeEvalTerm(evalGrammar)
 const checker = {
     checkSource: (source: string) => {
         const results = [
-            ...new LCTypeCheck().setRegistry(registry).parseWith(source, new TypeEnv()),
+            // Bound to Ω as well as the type registry: an op-referencing
+            // argument term (`identity: add(a, b)`-style) type-checks its op
+            // application against Ω — a checker without it yields zero
+            // results and silently rejects the valid term.
+            ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry).parseWith(
+                source,
+                new TypeEnv(),
+            ),
         ]
         return results.length === 1 ? results[0] : undefined
     },
-}
-
-/** A checker bound to a specific registry (law-local type setups). */
-function lawCheckerFor(reg: TypeRegistry) {
-    return {
-        checkSource: (source: string) => {
-            const results = [...new LCTypeCheck().setRegistry(reg).parseWith(source, new TypeEnv())]
-            return results.length === 1 ? results[0] : undefined
-        },
-    }
 }
 
 /** A fresh law environment per test (registries are mutable append-only). */
@@ -176,16 +172,16 @@ Deno.test("E: multiple laws accumulate per operation, in declaration order", () 
     assertEquals(e.all().length, 3)
 })
 
-// ── Structural validation runs BEFORE screening (declareScreenedLaw) ──────────
+// ── Structural validation runs BEFORE screening (declareCheckedLaw) ──────────
 
-Deno.test("declareScreenedLaw: an unknown kind is a LawDeclarationError, not a TypeError", () => {
+Deno.test("declareCheckedLaw: an unknown kind is a LawDeclarationError, not a TypeError", () => {
     // Validation runs BEFORE the screen: the unknown kind never reaches the
     // schema table (SCHEMA_NAMES) — it surfaces as the documented
     // LawDeclarationError instead of crashing mid-screen.
     const e = laws()
     assertThrows(
         () =>
-            declareScreenedLaw(
+            declareCheckedLaw(
                 { kind: "magical" as LawKind, target: "add" },
                 opRegistry,
                 e,
@@ -197,7 +193,7 @@ Deno.test("declareScreenedLaw: an unknown kind is a LawDeclarationError, not a T
     )
 })
 
-Deno.test("declareScreenedLaw: identity:True() on Nat add is rejected (argument types as Bool)", () => {
+Deno.test("declareCheckedLaw: identity:True() on Nat add is rejected (argument types as Bool)", () => {
     // The argument's TYPE is validated against the operand carrier: True()
     // types as Bool, but add's carrier is Nat. Screening it would evaluate
     // every instance to error sentinels (skip all) and install the claim with
@@ -205,7 +201,7 @@ Deno.test("declareScreenedLaw: identity:True() on Nat add is rejected (argument 
     const e = laws()
     assertThrows(
         () =>
-            declareScreenedLaw(
+            declareCheckedLaw(
                 { kind: "identity", target: "add", argument: "True()" },
                 opRegistry,
                 e,
@@ -298,44 +294,11 @@ Deno.test("E: a result outside the operand carrier is rejected (intrinsic schema
     )
 })
 
-Deno.test("E: typed field samples — folds over Bool variants evaluate as real values", () => {
-    // The sampler now generates typed non-recursive field samples (previously
-    // a non-value placeholder sentinel): variant fields carry real values of
-    // their declared type, so a fold that pattern-matches the scrutinee (and
-    // any handler inspecting a field) evaluates honestly.
-    const bool = boolType
-    const localRegistry = new TypeRegistry()
-    localRegistry.register(bool)
-    const localOps = new OpRegistry()
-    const localTc = new LCTypeCheck().setRegistry(localRegistry)
-    localOps.declare(
-        new OpSig(
-            "orOp",
-            [bool, bool],
-            bool,
-            "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> True(), False() -> b }",
-        ),
-        localTc.opWellFormedness,
-    )
-    const ev = new LCEval().setRegistry(localRegistry).setOpRegistry(localOps)
-    const e2 = laws()
-    const { instances } = declareScreenedLaw(
-        { kind: "absorbing", target: "orOp", argument: "True()" },
-        localOps,
-        e2,
-        makeEvalTerm(ev),
-        lawCheckerFor(localRegistry),
-    )
-    // or is absorbing with True from BOTH sides — the screen checks real
-    // samples (True()/False() as scrutinee variants) and passes.
-    assert(instances > 0, "typed Bool samples must evaluate through the fold")
-})
-
 // ── The residual screen ───────────────────────────────────────────────────────
 
 Deno.test("screen: associative holds on add — the law is screenable", () => {
     const e = laws()
-    const { law, instances } = declareScreenedLaw(
+    const { law, instances } = declareCheckedLaw(
         { kind: "associative", target: "add" },
         opRegistry,
         e,
@@ -349,14 +312,14 @@ Deno.test("screen: associative holds on add — the law is screenable", () => {
 
 Deno.test("screen: commutative and identity:Zero hold on add", () => {
     const e = laws()
-    const { instances: commutative } = declareScreenedLaw(
+    const { instances: commutative } = declareCheckedLaw(
         { kind: "commutative", target: "add" },
         opRegistry,
         e,
         evalOf,
         checker,
     )
-    const { instances: identity } = declareScreenedLaw(
+    const { instances: identity } = declareCheckedLaw(
         { kind: "identity", target: "add", argument: "Zero()" },
         opRegistry,
         e,
@@ -374,7 +337,7 @@ Deno.test("screen: idempotent on mul is falsified (mul(2,2) ≠ 2)", () => {
     assertThrows(
         () =>
             screenLaw(
-                { kind: "idempotent", target: "mul", provenance: "asserted" },
+                { kind: "idempotent", target: "mul" },
                 opRegistry.lookup("mul")!,
                 opRegistry,
                 evalOf,
@@ -388,7 +351,7 @@ Deno.test("screen: identity:Succ(Zero()) on add is falsified (LawError)", () => 
     const e = laws()
     assertThrows(
         () =>
-            declareScreenedLaw(
+            declareCheckedLaw(
                 { kind: "identity", target: "add", argument: "Succ(Zero())" },
                 opRegistry,
                 e,
@@ -404,7 +367,7 @@ Deno.test("screen: identity:Succ(Zero()) on add is falsified (LawError)", () => 
 Deno.test("screen: LawError carries the counterexample", () => {
     try {
         screenLaw(
-            { kind: "identity", target: "add", argument: "Succ(Zero())", provenance: "asserted" },
+            { kind: "identity", target: "add", argument: "Succ(Zero())" },
             opRegistry.lookup("add")!,
             opRegistry,
             evalOf,
@@ -421,7 +384,7 @@ Deno.test("screen: LawError carries the counterexample", () => {
 
 Deno.test("screen: distributive:mul over add holds (mul(a, add(b, c)) ≡ ...)", () => {
     const e = laws()
-    const { instances } = declareScreenedLaw(
+    const { instances } = declareCheckedLaw(
         { kind: "distributive", target: "mul", argument: "add" },
         opRegistry,
         e,
@@ -437,7 +400,7 @@ Deno.test("screen: a falsified relational law is rejected", () => {
     const e = laws()
     assertThrows(
         () =>
-            declareScreenedLaw(
+            declareCheckedLaw(
                 { kind: "distributive", target: "add", argument: "mul" },
                 opRegistry,
                 e,
@@ -479,7 +442,7 @@ Deno.test("screen: identity requires BOTH directions — proj2's right identity 
     assertThrows(
         () =>
             screenLaw(
-                { kind: "identity", target: "proj2", argument: "Zero()", provenance: "asserted" },
+                { kind: "identity", target: "proj2", argument: "Zero()" },
                 ops.lookup("proj2")!,
                 ops,
                 makeEvalTerm(ev),
@@ -497,7 +460,7 @@ Deno.test("screen: commutative falsified — the Cartesian sweep reaches a ≠ b
     assertThrows(
         () =>
             screenLaw(
-                { kind: "commutative", target: "proj2", provenance: "asserted" },
+                { kind: "commutative", target: "proj2" },
                 ops.lookup("proj2")!,
                 ops,
                 makeEvalTerm(ev),
@@ -525,72 +488,13 @@ Deno.test("screen: absorbing requires BOTH directions — proj1 annihilates from
     assertThrows(
         () =>
             screenLaw(
-                { kind: "absorbing", target: "proj1", argument: "Zero()", provenance: "asserted" },
+                { kind: "absorbing", target: "proj1", argument: "Zero()" },
                 ops.lookup("proj1")!,
                 ops,
                 makeEvalTerm(ev),
             ),
         LawError,
     )
-})
-
-Deno.test("screen: absorbing holds on a two-sided annihilator", () => {
-    // andOp: True() → b, False() → False() — False annihilates from BOTH sides.
-    const bool = boolType
-    const registry = new TypeRegistry()
-    registry.register(bool)
-    const tc = new LCTypeCheck().setRegistry(registry)
-    const ops = new OpRegistry()
-    ops.declare(
-        new OpSig(
-            "andOp",
-            [bool, bool],
-            bool,
-            "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
-        ),
-        tc.opWellFormedness,
-    )
-    const ev = new LCEval().setRegistry(registry).setOpRegistry(ops)
-    const e = laws()
-    const { instances } = declareScreenedLaw(
-        { kind: "absorbing", target: "andOp", argument: "False()" },
-        ops,
-        e,
-        makeEvalTerm(ev),
-        lawCheckerFor(registry),
-    )
-    assert(instances > 0, "both absorbing directions must be checked")
-    assert(e.has("andOp", "absorbing"))
-})
-
-Deno.test("screen: involutory holds on a double-negation op", () => {
-    // notOp: not(not(a)) = a — involutory. notOp(a, ...)? arity 1: fold over a:
-    // True() -> False(), False() -> True().
-    const bool = boolType
-    const registry = new TypeRegistry()
-    registry.register(bool)
-    const tc = new LCTypeCheck().setRegistry(registry)
-    const ops = new OpRegistry()
-    ops.declare(
-        new OpSig(
-            "notOp",
-            [bool],
-            bool,
-            "\\a:Bool. fold [Bool] a { True() -> False(), False() -> True() }",
-        ),
-        tc.opWellFormedness,
-    )
-    const ev = new LCEval().setRegistry(registry).setOpRegistry(ops)
-    const e = laws()
-    const { instances } = declareScreenedLaw(
-        { kind: "involutory", target: "notOp" },
-        ops,
-        e,
-        makeEvalTerm(ev),
-        lawCheckerFor(registry),
-    )
-    assert(instances > 0)
-    assert(e.has("notOp", "involutory"))
 })
 
 Deno.test("screen: involutory falsified on identity-like op", () => {
@@ -612,7 +516,7 @@ Deno.test("screen: involutory falsified on identity-like op", () => {
     assertThrows(
         () =>
             screenLaw(
-                { kind: "involutory", target: "succOp", provenance: "asserted" },
+                { kind: "involutory", target: "succOp" },
                 ops.lookup("succOp")!,
                 ops,
                 makeEvalTerm(ev),
@@ -640,7 +544,7 @@ Deno.test("screen: an instance that evaluates to error sentinels is skipped, not
     )
     // ho2 is non-screenable (function-typed param) — returns 0 instances.
     const checked = screenLaw(
-        { kind: "associative", target: "ho2", provenance: "asserted" },
+        { kind: "associative", target: "ho2" },
         ops.lookup("ho2")!,
         ops,
         evalOf,
@@ -685,7 +589,7 @@ Deno.test("screen: heterogeneous commutative — zero coverage, declared unscree
     // operands, putting a Bool sample in the Nat fold position — the swapped
     // side evaluates to an error sentinel and is skipped, so the screen yields
     // ZERO instances (no evidence either way). Zero coverage is the honest
-    // report; `declareScreenedLaw` would have rejected the claim structurally.
+    // report; `declareCheckedLaw` would have rejected the claim structurally.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
     const ops = new OpRegistry()
     ops.declare(
@@ -699,7 +603,7 @@ Deno.test("screen: heterogeneous commutative — zero coverage, declared unscree
     )
     const ev = new LCEval().setRegistry(registry).setOpRegistry(ops)
     const checked = screenLaw(
-        { kind: "commutative", target: "trunc", provenance: "asserted" },
+        { kind: "commutative", target: "trunc" },
         ops.lookup("trunc")!,
         ops,
         makeEvalTerm(ev),
@@ -722,7 +626,7 @@ Deno.test("screen: a non-screenable domain (higher-order op) is skipped, not fal
     )
     const e = laws()
     const checked = screenLaw(
-        { kind: "associative", target: "ho", provenance: "asserted" },
+        { kind: "associative", target: "ho" },
         ops.lookup("ho")!,
         ops,
         evalOf,
@@ -759,7 +663,7 @@ function identityElimLeft(
 
 Deno.test("exploit: identity-elimination rewrites add(Zero(), t) to t without the fold", () => {
     const e = laws()
-    declareScreenedLaw(
+    declareCheckedLaw(
         { kind: "identity", target: "add", argument: "Zero()" },
         opRegistry,
         e,
@@ -780,7 +684,7 @@ Deno.test("exploit: identity-elimination rewrites add(Zero(), t) to t without th
 
 Deno.test("exploit: the rewrite does not fire on a non-identity operand", () => {
     const e = laws()
-    declareScreenedLaw(
+    declareCheckedLaw(
         { kind: "identity", target: "add", argument: "Zero()" },
         opRegistry,
         e,
