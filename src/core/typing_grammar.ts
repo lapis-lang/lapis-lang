@@ -711,6 +711,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Use parseToFixpoint to refine σ
         // Start at the DataType itself (not Any) because recursive fields
         // have declared type = DataType. This gives a better initial estimate.
+        //
+        // A handler body that fails to re-parse under the refined σ is a
+        // genuine ill-typedness: the recursion was valid under the previous
+        // estimate but not under the refined one. A failed body poisons the
+        // iteration (the failure flag below), and the fold is rejected after
+        // the fixpoint converges — a failure must never be laundered into an
+        // `Any` body type that silently satisfies the join.
+        let reparseFailed = false
         const sigma = this.parseToFixpoint(
             dataType as Type, // σ₀ = DataType (recursive fields' declared type)
             (currentSigma: Type) => {
@@ -742,6 +750,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         this.exprProd(handlerCtx),
                     )]
                     if (results.length === 0) {
+                        reparseFailed = true
+                        // Keep the join well-defined for the remaining
+                        // iterations (Any is absorbent, so the sequence
+                        // still converges monotonically); the flag discards
+                        // the converged σ below.
                         bodyTypes.push(Any)
                     } else {
                         bodyTypes.push(results[0]!)
@@ -752,6 +765,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             (a: Type, b: Type) => join(a, b), // lattice join
             (a: Type, b: Type) => a.equals(b), // fixpoint detection
         )
+        if (reparseFailed) return undefined
 
         return sigma
     }
@@ -796,7 +810,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         return codataType
     }
 
-    // unfold [T] s { o → t, ... }  — T-Unfold via bind (type-checks exhaustiveness)
+    // unfold [T] s { o → t, ... }  — T-Unfold via bind (type-checks exhaustiveness
+    // and each generator body against its observer's result type)
     @rule
     protected override unfoldProd(ctx: unknown): Parser<Type> {
         return seq(
@@ -821,9 +836,15 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                 .bind((seed) =>
                     seq(this.ws, char("{"), this.ws)
                         .bind(() =>
-                            this.unfoldGenerators(codataType, ctx)
+                            // The generator contexts are the base-shaped
+                            // ones; the premise (body <: Gⱼ) is checked below
+                            // via generatorBodiesHold.
+                            this.typedUnfoldGenerators(codataType, ctx)
                                 .bind((generators) => {
                                     if (!this.generatorsAreExhaustive(codataType, generators)) {
+                                        return empty<Type>()
+                                    }
+                                    if (!this.generatorBodiesHold(codataType, generators)) {
                                         return empty<Type>()
                                     }
                                     return seq(this.ws, char("}"))
@@ -845,6 +866,72 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         return codataType.allObservers().every((observer) =>
             generators.some((g) => g.observerName === observer.name)
         )
+    }
+
+    /**
+     * Check T-Unfold's generator premise on already-parsed bodies:
+     * `Γ, self:T ⊢ gⱼ : Gⱼ(Σ)[α:=Σ]` — each generator body type must be a
+     * subtype of its observer's result type. For a continuation observer the
+     * result type is the codata type itself (the generator produces the next
+     * codata value); for a plain observer it is the observer's declared type.
+     */
+    private generatorBodiesHold(
+        codataType: CodataType,
+        generators: { observerName: string; body: Type }[],
+    ): boolean {
+        return codataType.allObservers().every((observer) => {
+            const generator = generators.find((g) => g.observerName === observer.name)
+            if (!generator) return false // exhaustiveness handles this too
+            return isSubtype(generator.body, observer.type)
+        })
+    }
+
+    /**
+     * Checker-local generator productions — mirror the base `unfoldGenerators`
+     * pair (same signatures, so `unfoldProd` can call them from inside its
+     * bind). They exist so the generator premise is enforceable: the result
+     * premise (`body <: Gⱼ`) is enforced in `unfoldProd` via
+     * `generatorBodiesHold`.
+     *
+     * `self` binds to the codata type being constructed — the corecursive
+     * reading: a generator body's `self` refers to the codata value being
+     * produced, so `tail -> self` (the canonical producer) types as the
+     * codata type and satisfies the continuation-observer premise, while a
+     * body producing a wrong-typed value (`tail -> Zero()`) fails the premise.
+     */
+    // o → t, ...  — T-Unfold generators (premise-checked in unfoldProd)
+    @rule
+    protected typedUnfoldGenerators(
+        codataType: CodataType,
+        ctx: unknown,
+    ): Parser<{ observerName: string; body: Type }[]> {
+        return sepBy(
+            this.typedUnfoldGenerator(codataType, ctx),
+            seq(this.ws, char(","), this.ws),
+        )
+    }
+
+    // o → t  — single T-Unfold generator (self: the codata type under construction)
+    @rule
+    protected typedUnfoldGenerator(
+        codataType: CodataType,
+        ctx: unknown,
+    ): Parser<{ observerName: string; body: Type }> {
+        return seq(
+            this.ident,
+            this.ws,
+            this.arrow,
+            this.ws,
+        ).bind(([obsName]) => {
+            const observer = codataType.findObserver(obsName)
+            if (!observer) {
+                return empty<{ observerName: string; body: Type }>()
+            }
+            // self:T — the codata value this unfold constructs (corecursion).
+            const extendedCtx = this.extendCtx(ctx, "self", codataType)
+            return this.exprProd(extendedCtx)
+                .map((body) => ({ observerName: obsName, body }))
+        })
     }
 
     // ── T-TAbs: Δ, α <: σ ⊢ t : τ ⟹ Δ ⊢ Λα<:σ.t : ∀α<:σ.τ ────────────────────

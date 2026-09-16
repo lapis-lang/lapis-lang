@@ -259,6 +259,60 @@ Deno.test("T-Unfold: a well-typed unfold is unaffected", () => {
     assertEquals([...result][0], stream)
 })
 
+Deno.test("T-Unfold: a generator body violating its observer result type is rejected", () => {
+    // tail must produce a Stream (continuation observer); Zero() : Nat.
+    assertEquals(
+        typeForestOf("unfold [Stream] Zero() { head -> Zero(), tail -> Zero() }").size,
+        0,
+        "a generator body must be a subtype of its observer's result type",
+    )
+})
+
+Deno.test("T-Unfold: a plain-observer generator violating the declared type is rejected", () => {
+    // NatStream declares head : Nat — a function body violates it.
+    const result = typeForestOf(
+        "unfold [NatStream] Zero() { head -> \\x:Any. x, tail -> self }",
+    )
+    assertEquals(
+        result.size,
+        0,
+        "a FunType body for a Nat-valued observer must be rejected",
+    )
+})
+
+Deno.test("T-Unfold: the canonical continuation producer still types", () => {
+    // `tail -> self` is the canonical codata producer: E-Obs binds the seed
+    // value to `self` when a generator runs, so the typing keeps `self` as
+    // the base binds it and the result premise passes (Any <: Stream).
+    const result = typeForestOf("unfold [Stream] Zero() { head -> self, tail -> self }")
+    assertEquals(result.size, 1)
+    assertEquals([...result][0], stream)
+})
+
+Deno.test("T-Fold: a handler body that fails after σ refinement is rejected", () => {
+    // The Empty handler is function-valued, so σ refines to a FunType via
+    // S-Fun's contravariant domain join. The Push handler then applies a
+    // Stack-typed lambda to the recursive binding, which under the refined σ
+    // (Stack → Stack) fails to re-parse. The failure must reject the fold —
+    // never be laundered into an `Any` body type that satisfies the join.
+    assertEquals(
+        typeForestOf(
+            "fold [Stack] Empty() { Empty() -> \\x:Stack. Empty(), Push(v rest) -> \\x:Any. (\\y:Stack. Empty()) rest }",
+        ).size,
+        0,
+        "a reparse failure at the refined σ must reject the fold",
+    )
+})
+
+Deno.test("T-Fold: a fold whose bodies agree under refinement is unaffected", () => {
+    // Regression pin: legitimate refinement (recursive slot usage) still converges.
+    const result = typeForestOf(
+        "fold [Stack] Empty() { Empty() -> Empty(), Push(v rest) -> Push(Zero(), rest) }",
+    )
+    assertEquals(result.size, 1)
+    assertEquals([...result][0], stack)
+})
+
 // ── T-Cofold: the scrutinee premise is enforced ──────────────────────────────
 
 Deno.test("T-Cofold: a scrutinee that is not a codata subtype is rejected", () => {
