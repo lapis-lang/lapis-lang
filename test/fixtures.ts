@@ -10,10 +10,23 @@
  * interference via shared mutable singletons.
  */
 
-import { TypeRegistry } from "../src/index.ts"
+import { TypeRegistry, type Value } from "../src/index.ts"
 import { Any, CodataType, DataType, Field, Observer, Variant } from "../src/core/types.ts"
 import { LCTypeCheck } from "../src/core/typing_grammar.ts"
+import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
+import { LCEval } from "../src/core/eval_grammar.ts"
 import { OpRegistry, OpSig } from "../src/core/ops.ts"
+import { ValueEnv } from "../src/core/values.ts"
+import {
+    char,
+    Grammar,
+    literal,
+    or,
+    type Parser,
+    rule,
+    seq,
+    type ValueGenerator,
+} from "@lapis-lang/lang-forma"
 
 // ── Type factories ────────────────────────────────────────────────────────────
 
@@ -209,3 +222,98 @@ export function createOpFixtures(): OpTestFixtures {
 
     return { registry, opRegistry, nat, stream, bool, add, mul }
 }
+
+// ── Property-based law harness (forAll over a grammar) ────────────────────────
+
+/**
+ * A grammar whose generated values are LC **source strings** for `Nat`
+ * values: `Zero()` | `Succ(nat)`.
+ *
+ * The law harness needs samples it can embed into law instances
+ * (`mul(${src}, ${src})`) and evaluate through `LCEval` — so the semantic
+ * action emits the concrete syntax itself. The `@rule` decoration on
+ * `natProd` is load-bearing: it routes the production through lang-forma's
+ * recursion-depth machinery, without which the generator's `Succ` branch
+ * would infinitely recurse instead of respecting `maxRecursion`.
+ *
+ * This is the generator root the full `LCEval` grammar cannot provide:
+ * random LC terms are overwhelmingly lambdas/applications (0 of 100
+ * depth-4 samples evaluated to a data value), while the law schemas
+ * quantify over operand values of a fixed type. The grammar IS the
+ * arbitrary — here specialized to the operand carrier `Nat`.
+ */
+class NatSourceGrammar extends Grammar<{ nat: string }> {
+    override start(): Parser<string> {
+        return this.natProd()
+    }
+
+    @rule
+    protected natProd(): Parser<string> {
+        return or(
+            seq(literal("Zero"), char("("), char(")")).map(() => "Zero()"),
+            seq(literal("Succ"), char("("), this.natProd(), char(")"))
+                .map(([, , inner]) => `Succ(${inner})`),
+        )
+    }
+}
+
+/** The two pieces a property-based law test needs, created together. */
+export interface LawHarness {
+    /** Generates `Nat` LC source strings (grammar-aware shrinking included). */
+    gen: ValueGenerator<string>
+    /** The op fixtures' evaluator — law instances evaluate through it. */
+    evalOf: EvalTerm
+}
+
+/**
+ * Creates the property-based law harness: a `Nat`-source generator bound to
+ * the op fixtures' evaluator.
+ *
+ * Budgets: `maxRecursion` bounds the `Succ`-nesting depth (probes: 2 caps
+ * at depth 1, 5 reaches depth 4); `branchStrategy: "random"` samples both
+ * productions. `forAll` calls `sample` OUTSIDE its own try/catch — a
+ * generation error would escape the property run, so the budgets must stay
+ * comfortably within the grammar's ability to terminate (they do: every
+ * path here is finite).
+ */
+export function createLawHarness(): LawHarness {
+    const { registry, opRegistry } = createOpFixtures()
+    const evalGrammar = new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+    return {
+        gen: new NatSourceGrammar().toGenerator({
+            maxDepth: 4,
+            maxRecursion: 5,
+            branchStrategy: "random",
+        }),
+        evalOf: makeEvalTerm(evalGrammar),
+    }
+}
+
+/**
+ * A shared empty environment — `ValueEnv` is persistent (`extend` returns a
+ * fresh instance; nothing mutates in place), so one instance is safely
+ * reusable across every evaluation that binds nothing of its own.
+ */
+const SHARED_EMPTY_ENV = new ValueEnv()
+
+/**
+ * Evaluate a source string under a shared empty environment, returning its
+ * first value — or `undefined` when nothing evaluates (an empty parse
+ * forest).
+ */
+export function evalOne(evalOf: EvalTerm, source: string): Value | undefined {
+    return evalOf(source, SHARED_EMPTY_ENV)[0]
+}
+
+/**
+ * Stress tests are gated behind `SLOW_TESTS=1` so they do not slow down
+ * regular CI builds. Run locally with `SLOW_TESTS=1 deno test --allow-env`.
+ */
+export const slowTestsEnabled = (() => {
+    try {
+        return Deno.env.get("SLOW_TESTS") === "1"
+    } catch {
+        // No env permission — skip the stress test.
+        return false
+    }
+})()

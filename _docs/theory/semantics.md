@@ -454,6 +454,10 @@ LawChecking.foldDecl(name, spec, arms):
 three combinations; recursive-field variants one shallow sample. Because evaluation is total, the
 screen never diverges — no timeouts.
 
+The property-based form of this screening — a law as a `forAll` over a grammar-rooted
+`ValueGenerator`, with grammar-aware shrinking of counterexamples — is specified in
+[`law-testing.md`](./law-testing.md).
+
 This is _probabilistic_ checking only in the **residual** regime. The "static where possible,
 dynamic when needed" philosophy is now precise: the `discharged` tiers are established (exhaustively
 or by derivation), and only `asserted` laws rely on the runtime re-check on actual inputs (§7.4,
