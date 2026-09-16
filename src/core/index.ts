@@ -44,8 +44,17 @@ export {
     screenableDomain,
 } from "./laws.ts"
 
-// Law screening (semantics.md §5.4 — the residual screen for asserted laws)
-export { declareScreenedLaw, type EvalTerm, makeEvalTerm, screenLaw } from "./law_checking.ts"
+// Law checking (semantics.md §5.4 — regime-based: finite → exhaustion →
+// discharged; residual → screen → asserted)
+export {
+    declareCheckedLaw,
+    type EvalTerm,
+    finiteInhabitants,
+    makeEvalTerm,
+    type ScreeningRegime,
+    screeningRegime,
+    screenLaw,
+} from "./law_checking.ts"
 
 // Subtyping (lc.md §4)
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"

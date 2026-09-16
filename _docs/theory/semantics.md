@@ -454,6 +454,31 @@ LawChecking.foldDecl(name, spec, arms):
 three combinations; recursive-field variants one shallow sample. Because evaluation is total, the
 screen never diverges — no timeouts.
 
+**Implementation status.** The `finite` regime is implemented (`law_checking.ts`): a classifier
+counts a μ-type's inhabitants (recursive/function-typed fields ⇒ unbounded), the regime routes
+`finite` claims to full enumeration (`declareCheckedLaw` → `discharged` provenance), and the
+residual keeps the bounded-depth screen (`asserted`). A schema's sweep must also stay within an
+instance budget — an arity-2 schema over an at-ceiling carrier sweeps n² assignments, so the regime
+is `finite` only when the actual sweep fits. A hole in an exhaustion sweep (an instance that does
+not evaluate) **rejects** the declaration: a `discharged` tag must mean full coverage, whereas the
+residual screen honestly skips such instances because it claims evidence, not proof.
+
+**machineFinite design note (not yet implemented).** The regime needs the encodings themselves
+declared in the type system — the exhaustion bound must be spec-able, not an implementation
+accident. Concretely, three declaration forms are missing:
+
+1. **Encoding declarations on data types** — a `data` type states its encoding family (`binary64`,
+   `char-unicode`, `int-two-complement`), fixing the inhabitant count as part of the language
+   definition (binary64 = exactly 2⁶⁴, `Inf`/`NaN` as in-domain values). The classifier reads the
+   declared count; it never infers an encoding from the runtime representation.
+2. **Sub-space specifications** — a law declaration may scope its claim ("all Floats in [-1, 1]"),
+   so bounded enumeration certifies the checked sub-space rather than silently under-covering the
+   full domain. The certification is the claim: `discharged` for the sub-space, `asserted` beyond
+   it.
+3. **Alphabet declarations for Char-like types** — a fixed, finite alphabet bound makes exhaustive
+   enumeration over strings of bounded length well-posed (the length bound itself rides on sized
+   types, already a design decision for termination).
+
 The property-based form of this screening — a law as a `forAll` over a grammar-rooted
 `ValueGenerator`, with grammar-aware shrinking of counterexamples — is specified in
 [`law-testing.md`](./law-testing.md).

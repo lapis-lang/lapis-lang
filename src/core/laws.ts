@@ -34,8 +34,8 @@
  *   not proof.
  *
  * This module implements the `asserted` tier: declarations enter `E` only
- * through the residual screen (law_checking.ts), and only screened or
- * established laws are installed.
+ * through a regime-based check (law_checking.ts — the residual screen or
+ * finite-regime exhaustion), and only checked laws are installed.
  */
 
 import { type OpRegistry, type OpSig } from "./ops.ts"
@@ -141,18 +141,22 @@ export class LawDeclarationError extends Error {
 }
 
 /**
- * A law falsified by the screen: the failed law, the sample bindings under
- * which the two sides diverged, and both sides' values.
+ * A law falsified by a check (the residual screen or exhaustion): the failed
+ * law, the sample bindings under which the two sides diverged, and both
+ * sides' values.
  *
- * The screen (law_checking.ts) throws this when a sample falsifies the
- * axiom; the declaration is rejected and nothing enters `E`. Rendered
- * counterexample values are carried as strings (LC-like term rendering) so
- * the error is self-describing without exposing value internals.
+ * The checkers (law_checking.ts) throw this when an instance falsifies the
+ * axiom; the declaration is rejected and nothing enters `E`. The claim is
+ * accepted pre-provenance (`Omit<LawDecl, "provenance">`) — provenance is
+ * the tag the caller INSTALLS after a passing check, never an input to it.
+ * Rendered counterexample values are carried as strings (LC-like term
+ * rendering) so the error is self-describing without exposing value
+ * internals.
  */
 export class LawError extends Error {
     constructor(
         readonly opName: string,
-        readonly law: LawDecl,
+        readonly law: Omit<LawDecl, "provenance">,
         /** The sample bindings, as rendered `name = term` pairs. */
         readonly bindings: string[],
         /** Rendering of the axiom's left-hand side value. */
@@ -179,14 +183,15 @@ export class LawError extends Error {
  *
  * Append-only like `Ω` (`OpRegistry`): `declareLaw` adds a law at the end of
  * the target's law list. Structural well-formedness (vocabulary membership,
- * argument shape, arity) is checked against `Ω` at declaration; semantic
- * screening (the residual sample screen) is the caller's separate step —
- * `law_checking.ts` — and only screened laws are installed here.
+ * argument shape, arity) is checked against `Ω` at declaration; regime-based
+ * checking (the residual screen or finite exhaustion) is the caller's
+ * separate step — `law_checking.ts` — and only checked laws are installed
+ * here.
  *
  * **The trust boundary mirrors `OpRegistry`'s**: every entry in `E` carries
  * its provenance tag, and `declareLaw` only accepts laws the caller has
- * screened (or established by a discharge mechanism — a later concern). A
- * caller that bypasses the screen and installs an unscreened `asserted` law
+ * checked (screened, or exhausted to discharge — the finite regime). A caller
+ * that bypasses the check and installs an unscreened `asserted` law
  * opts into the residual's honest risk (semantics.md §7.4); nothing here
  * prevents it, because provenance is evidence, not a gate.
  */
@@ -198,7 +203,7 @@ export class LawRegistry {
      * `declareLaw` runs, without mutating `E`. Returns the reason string on
      * the first failure, `undefined` when the claim is well-formed.
      *
-     * Public so `declareScreenedLaw` (law_checking.ts) can run the structural
+     * Public so `declareCheckedLaw` (law_checking.ts) can run the structural
      * validation BEFORE the sample screen: a vocabulary/argument/arity error
      * must surface as `LawDeclarationError`, not as a screen artifact (a
      * `TypeError` from an unknown kind reaching the schema table, or a
