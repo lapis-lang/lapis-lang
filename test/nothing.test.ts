@@ -10,8 +10,8 @@
  * Ordering guarantee: `Nothing` propagation applies only when the term is
  * otherwise well-typed. A genuine premise violation (unknown name,
  * non-exhaustive handlers) still yields that rule's own failure signal —
- * rejection (empty forest) or `Any`, depending on the site — never a
- * spurious `Nothing`.
+ * rejection (empty forest, enforced in the production path) or `Any`,
+ * depending on the site — never a spurious `Nothing`.
  *
  * Boundary: `app` in the fn position rejects a `Nothing` function (empty
  * forest) rather than propagating, and `app`/`let` in the arg/def positions
@@ -63,22 +63,22 @@ Deno.test("Nothing propagation: variant construction with well-typed arg is Stac
     assertEquals(type, stack)
 })
 
-Deno.test("Nothing propagation: variant arg type error is not masked by Nothing", () => {
+Deno.test("Nothing propagation: variant arg type error is rejected, not masked by Nothing", () => {
     // x : Nothing (arg 0), b : Bool (arg 1, in the recursive Stack position).
     // The Bool arg violates the premise, so the construction is ill-typed —
-    // the error signal (Any) must win over Nothing propagation.
+    // the error signal (rejection, enforced in the variantProd production
+    // path) must win over Nothing propagation.
     const gamma = nothingEnv().extend("b", bool)
     const result = typeForestOf("Push(x, b)", gamma)
-    assert(result.size === 1, "should have exactly one parse")
-    assertEquals([...result][0], Any)
+    assertEquals(result.size, 0, "the type error must win over Nothing propagation")
 })
 
-Deno.test("Nothing propagation: extra variant arg is ill-typed, not masked by Nothing", () => {
+Deno.test("Nothing propagation: extra variant arg is rejected, not masked by Nothing", () => {
     // Empty() takes no fields; a Nothing-typed extra arg must not make an
-    // arity-mismatched construction look inhabited.
+    // arity-mismatched construction look inhabited — the arity premise fails
+    // in the production path and the branch is rejected.
     const result = typeForestOf("Empty(x)", nothingEnv())
-    assert(result.size === 1, "should have exactly one parse")
-    assertEquals([...result][0], Any)
+    assertEquals(result.size, 0, "an arity mismatch must be rejected, not masked")
 })
 
 // ── T-Obs: Nothing scrutinee propagates ───────────────────────────────────────
@@ -127,15 +127,15 @@ Deno.test("Nothing propagation: fold with Stack scrutinee is Stack", () => {
     assertEquals(type, stack)
 })
 
-Deno.test("Nothing propagation: non-exhaustive fold with Nothing scrutinee is ill-typed", () => {
+Deno.test("Nothing propagation: non-exhaustive fold is rejected, not masked by Nothing", () => {
     // Missing the Push handler — a genuine premise violation. The error
-    // signal (Any) must win over Nothing propagation.
+    // signal (rejection, enforced via the foldProd fixpoint gate) must win
+    // over Nothing propagation.
     const result = typeForestOf(
         "fold [Stack] x { Empty() -> Empty() }",
         nothingEnv(),
     )
-    assert(result.size === 1, "should have exactly one parse")
-    assertEquals([...result][0], Any)
+    assertEquals(result.size, 0, "the exhaustiveness violation must win over Nothing")
 })
 
 // ── T-Unfold: Nothing seed propagates ─────────────────────────────────────────
@@ -159,15 +159,15 @@ Deno.test("Nothing propagation: unfold with Nat seed is Stream", () => {
     assertEquals(type, stream)
 })
 
-Deno.test("Nothing propagation: non-exhaustive unfold with Nothing seed is ill-typed", () => {
+Deno.test("Nothing propagation: non-exhaustive unfold is rejected, not masked by Nothing", () => {
     // Missing the tail generator — a genuine premise violation. The error
-    // signal (Any) must win over Nothing propagation.
+    // signal (rejection, enforced in the unfoldProd production path) must win
+    // over Nothing propagation.
     const result = typeForestOf(
         "unfold [Stream] x { head -> self }",
         nothingEnv(),
     )
-    assert(result.size === 1, "should have exactly one parse")
-    assertEquals([...result][0], Any)
+    assertEquals(result.size, 0, "the exhaustiveness violation must win over Nothing")
 })
 
 // ── T-Cofold: Nothing scrutinee propagates ───────────────────────────────────
@@ -182,11 +182,12 @@ Deno.test("Nothing propagation: cofold with Nothing scrutinee is Nothing", () =>
     assertEquals(type, Nothing)
 })
 
-Deno.test("Nothing propagation: cofold scrutinee type error is not masked by Nothing", () => {
+Deno.test("Nothing propagation: cofold scrutinee type error is rejected, not masked by Nothing", () => {
     // Zero() : Nat, not a subtype of Stream — a genuine premise violation.
+    // The error signal (rejection, enforced in the cofoldProd production
+    // path) must win over Nothing propagation.
     const result = typeForestOf("cofold [Stream] Zero() { head(h) -> Zero() }")
-    assert(result.size === 1, "should have exactly one parse")
-    assertEquals([...result][0], Any)
+    assertEquals(result.size, 0, "the scrutinee type error must win over Nothing")
 })
 
 // ── Composition: Nothing flows through nested productions ────────────────────

@@ -737,21 +737,42 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             // Named operation application: ident(args) — registry-gated, tight paren
             this.opProd(ctx),
             // Variant construction: Ident(args)
-            seq(
-                this.variantName,
-                this.ws,
-                char("("),
-                this.ws,
-                sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws)),
-                this.ws,
-                char(")"),
-            )
-                .map(([name, , , , args]) =>
-                    this.variantCon(name as string, (args as S["atom"][]) ?? [])
-                ),
+            this.variantProd(ctx),
             // Variable
-            this.ident.map((name) => this.varRef(name, ctx)),
+            this.varProd(ctx),
         )
+    }
+
+    // Ident(args)  — variant construction
+    //
+    // Factored out of atomProd so subclasses can enforce premises on the
+    // production path (T-Variant's field checks). The default action is the
+    // semantic action itself; subclasses override to reject failed premises.
+    @rule
+    protected variantProd(ctx: unknown): Parser<S["atom"]> {
+        return seq(
+            this.variantName,
+            this.ws,
+            char("("),
+            this.ws,
+            sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws)),
+            this.ws,
+            char(")"),
+        )
+            .map(([name, , , , args]) =>
+                this.variantCon(name as string, (args as S["atom"][]) ?? [])
+            )
+    }
+
+    // Ident  — variable reference
+    //
+    // Factored out of atomProd so subclasses can enforce the T-Var premise
+    // (`x : σ ∈ Γ`) on the production path — the contracted `varRef` action
+    // returns `undefined` on a failed `@requires`, which would surface in the
+    // parse forest instead of rejecting the branch.
+    @rule
+    protected varProd(ctx: unknown): Parser<S["atom"]> {
+        return this.ident.map((name) => this.varRef(name, ctx))
     }
 
     // ── Named operation application (lc.md §2.2) ─────────────────────────────

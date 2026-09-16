@@ -40,6 +40,14 @@ export function isSubtype(
     super_: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): boolean {
+    // Well-formedness guard: a leaked `undefined` (a premise failure flowing
+    // out of a contracted action) must never satisfy a subtype premise. The
+    // S-Bot/S-Top checks below would otherwise absorb it — `isSubtype(
+    // undefined, Any)` holds via S-Top, so an ill-typed let-def silently
+    // satisfies T-Let's premise. `undefined` is not a type; it is the failure
+    // sentinel, and failure is not a subtype of anything.
+    if (sub === undefined || super_ === undefined) return false
+
     // S-Bot: Nothing <: σ (for any σ)
     if (sub instanceof NothingType) return true
 
@@ -185,6 +193,8 @@ function isCodataTypeSubtype(
 
 /** Check if two types are structurally equal. */
 export function typeEquals(a: Type, b: Type): boolean {
+    // `undefined` is the failure sentinel, never a type — not even equal to itself.
+    if (a === undefined || b === undefined) return false
     return a.equals(b)
 }
 
@@ -211,6 +221,14 @@ export function join(
     t: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): Type {
+    // Well-formedness guard: `undefined` is the failure sentinel of a
+    // contracted action, never a type. Joining it with anything is a failure,
+    // so the lattice's top is the explicit failure signal — the same one
+    // `join` returns for "no common supertype". Defense in depth: even if a
+    // sentinel slips past a production gate, it never masquerades as a type
+    // operand here.
+    if (s === undefined || t === undefined) return Any
+
     if (isSubtype(s, t, delta)) return t
     if (isSubtype(t, s, delta)) return s
 
@@ -253,6 +271,11 @@ export function meet(
     t: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): Type {
+    // Well-formedness guard: `undefined` is not a type (see `join`). The
+    // lattice's bottom is the failure signal for "no common subtype" — the
+    // dual of join's top.
+    if (s === undefined || t === undefined) return Nothing
+
     if (isSubtype(s, t, delta)) return s
     if (isSubtype(t, s, delta)) return t
 

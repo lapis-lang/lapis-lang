@@ -5,8 +5,8 @@
  * (fullfsub) and the Nothing (Bot) propagation from TAPL §15.3 (rcdsubbot).
  */
 
-import { isSubtype, join, meet } from "../src/index.ts"
-import { Any, FunType, Nothing } from "../src/core/types.ts"
+import { isSubtype, join, meet, typeEquals } from "../src/index.ts"
+import { Any, FunType, Nothing, type Type } from "../src/core/types.ts"
 import { createQueueType, createStackType } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -117,4 +117,73 @@ Deno.test("Nothing propagation: applying Nothing returns Nothing", () => {
     assert(isSubtype(Nothing, new FunType(Any, Any)))
     assert(isSubtype(Nothing, StackType))
     assert(isSubtype(Nothing, Any))
+})
+
+// ── Well-formedness guards ────────────────────────────────────────────────────
+//
+// `undefined` is the failure sentinel of a contracted action (@requires fails
+// gracefully), never a type. Without the guards, `isSubtype(undefined, Any)`
+// held via S-Top and a leaked `undefined` silently satisfied consumer
+// premises (e.g. T-Let's `def : σ ∧ σ <: τ` under an `Any` annotation).
+
+Deno.test("guards: isSubtype rejects undefined on either side", () => {
+    // Casts simulate a leaked sentinel flowing into the decision procedure.
+    assertEquals(
+        isSubtype(undefined as unknown as Type, Any),
+        false,
+        "an undefined subtype must fail the check, not satisfy S-Top",
+    )
+    assertEquals(
+        isSubtype(Any, undefined as unknown as Type),
+        false,
+        "an undefined supertype must fail the check",
+    )
+    assertEquals(
+        isSubtype(undefined as unknown as Type, undefined as unknown as Type),
+        false,
+        "two undefineds must fail the check",
+    )
+    // The sentinel is not even a subtype of itself.
+    assertEquals(
+        isSubtype(Nothing, undefined as unknown as Type),
+        false,
+        "S-Bot must not fire against a non-type",
+    )
+})
+
+Deno.test("guards: join/meet treat undefined as failure", () => {
+    // Join's failure signal is the lattice top; meet's is the bottom.
+    assertEquals(
+        join(undefined as unknown as Type, Any),
+        Any,
+        "joining undefined must yield the failure signal, not the other operand",
+    )
+    assertEquals(
+        join(Any, undefined as unknown as Type),
+        Any,
+        "joining undefined must yield the failure signal, not the other operand",
+    )
+    assertEquals(
+        meet(undefined as unknown as Type, Nothing),
+        Nothing,
+        "meeting undefined must yield the failure signal, not the other operand",
+    )
+    assertEquals(
+        meet(Nothing, undefined as unknown as Type),
+        Nothing,
+        "meeting undefined must yield the failure signal, not the other operand",
+    )
+})
+
+Deno.test("guards: typeEquals rejects undefined", () => {
+    assertEquals(
+        typeEquals(undefined as unknown as Type, Any),
+        false,
+        "an undefined operand must fail structural equality",
+    )
+    assertEquals(
+        typeEquals(Any, undefined as unknown as Type),
+        false,
+        "an undefined operand must fail structural equality",
+    )
 })
