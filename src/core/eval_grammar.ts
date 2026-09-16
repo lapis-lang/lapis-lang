@@ -377,8 +377,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            assert(ty instanceof DataType, "fold type must be a DataType")
-            const dataType = ty as DataType
+            // The annotation must be a DataType. A wrong-kind annotation
+            // (e.g. `fold [Stream] ...`) rejects the branch (`empty<Value>()`)
+            // like any other failed step — a throw here would surface as a
+            // crash instead of a clean parse rejection.
+            if (!(ty instanceof DataType)) {
+                return empty<Value>()
+            }
+            const dataType = ty
             return this.exprProd(ctx)
                 .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)
@@ -538,8 +544,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            assert(ty instanceof CodataType, "unfold type must be a CodataType")
-            const codataType = ty as CodataType
+            // The annotation must be a CodataType. A wrong-kind annotation
+            // (e.g. `unfold [Nat] ...`) rejects the branch (`empty<Value>()`)
+            // like any other failed step — a throw here would surface as a
+            // crash instead of a clean parse rejection.
+            if (!(ty instanceof CodataType)) {
+                return empty<Value>()
+            }
+            const codataType = ty
             return this.exprProd(ctx)
                 .bind((seed) =>
                     seq(this.ws, char("{"), this.ws)
@@ -627,8 +639,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            assert(ty instanceof CodataType, "cofold type must be a CodataType")
-            const codataType = ty as CodataType
+            // The annotation must be a CodataType. A wrong-kind annotation
+            // (e.g. `cofold [Nat] ...`) rejects the branch (`empty<Value>()`)
+            // like any other failed step — a throw here would surface as a
+            // crash instead of a clean parse rejection.
+            if (!(ty instanceof CodataType)) {
+                return empty<Value>()
+            }
+            const codataType = ty
             return this.exprProd(ctx)
                 .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)

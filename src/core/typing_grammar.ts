@@ -32,7 +32,6 @@
  */
 
 import {
-    assert,
     char,
     empty,
     ensures,
@@ -297,11 +296,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
     /**
      * Variable typing rule. The premise (name must be bound in Γ) is
-     * declarative metadata for the rule model: `varRef` is called from the
-     * base `atomProd` production, which has no premise-checking override,
-     * so a failed premise surfaces `undefined` in the parse forest rather
-     * than an empty forest. Callers that need strict rejection must check
-     * the binding in the production path.
+     * declarative metadata for the rule model: `varRef` is called from
+     * `varProd`, and the production-path check lives in the `varProd`
+     * override below, which rejects the branch (`empty<Type>()`) before the
+     * contracted action is ever reached.
      *
      * @ensures Progress: a variable in a closed term is always substituted
      * before evaluation, so it can always step (or is already a value).
@@ -318,6 +316,27 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     )
     protected varRef(name: string, ctx: unknown): Type {
         return (ctx as TypeCheckCtx).gamma.lookup(name) as Type
+    }
+
+    /**
+     * Override the variable production to enforce T-Var's premise in the
+     * production path: `x : σ ∈ Γ`. A name not bound in Γ fails the premise —
+     * the branch is rejected (`empty<Type>()`, empty parse forest — ill-typed).
+     * On success the conclusion is computed directly from Γ and committed via
+     * `epsilon`, the same shape as the `appProd`/`typeAppProd` overrides: the
+     * contracted `varRef` action is only called on the verified path, so a
+     * failed `@requires` can never leak `undefined` into the parse forest (and
+     * the `@ensures` safety net still runs, because the action is reached).
+     */
+    // Ident  — T-Var via bind (type-checks Γ(x) ≠ undefined)
+    @rule
+    protected override varProd(ctx: unknown): Parser<Type> {
+        return this.ident.bind((name) => {
+            if (!TypeCheckCtx.is(ctx) || ctx.gamma.lookup(name) === undefined) {
+                return empty<Type>()
+            }
+            return epsilon<Type>(this.varRef(name, ctx))
+        })
     }
 
     protected paren(e: Type): Type {
@@ -366,6 +385,62 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     }
 
     /**
+     * Override the variant-construction production to enforce T-Variant's
+     * premises in the production path: the variant is declared in the
+     * registry, the arity matches, and every field argument type is a subtype
+     * of the declared field type. Any failed premise rejects the branch
+     * (`empty<Type>()` — empty parse forest, ill-typed) before the contracted
+     * `variantCon` action is reached, closing the `let x:Any =
+     * UnknownVariant() in x` absorption hole: the permissive-`Any` sentinel
+     * inside `variantCon` was sound only where `Any` is not a legal type, but
+     * under an `Any` annotation the sentinel *is* the declared type and the
+     * ill-typed def was accepted via S-Refl.
+     */
+    // Ident(args)  — T-Variant via bind (type-checks registry + field premises)
+    @rule
+    protected override variantProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.variantName,
+            this.ws,
+            char("("),
+            this.ws,
+            sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws)),
+            this.ws,
+            char(")"),
+        )
+            .bind(([name, , , , args]) => {
+                const argTypes = (args as Type[]) ?? []
+                if (!this.variantPremisesHold(name as string, argTypes)) {
+                    return empty<Type>()
+                }
+                return epsilon<Type>(this.variantCon(name as string, argTypes))
+            })
+    }
+
+    /**
+     * Check the T-Variant premises on already-parsed argument types. Returns
+     * `true` iff the variant is declared, the arity matches, and every
+     * argument is a subtype of its declared field type (recursive fields
+     * against the DataType itself).
+     */
+    private variantPremisesHold(name: string, args: Type[]): boolean {
+        const dataType = this.registry.lookupVariant(name)
+        if (!dataType) return false // unknown variant
+        const variant = dataType.findVariant(name)
+        if (!variant) return false
+        // Arity must match exactly — extra args are as ill-typed as missing ones.
+        if (args.length !== variant.fields.length) return false
+        for (let i = 0; i < variant.fields.length; i++) {
+            const field = variant.fields[i]!
+            const argType = args[i]
+            if (argType === undefined) return false
+            const expected = field.isRecursive ? dataType : field.type
+            if (!isSubtype(argType, expected)) return false
+        }
+        return true
+    }
+
+    /**
      * @ensures Progress: an observation on a codata value can step (E-Obs);
      * on a non-value, it can step (E-ObsArg). Progress holds.
      */
@@ -376,13 +451,13 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     protected obs(scrutinee: Type, observerName: string): Type {
         // T-Obs: Γ ⊢ e : T ⟹ Γ ⊢ e.oₖ : Gₖ(T)[α:=T]
         // Look up the observer in the registry to find its CodataType.
+        // Premises (observer declared, scrutinee <: codata type) are enforced
+        // in the `obsProd` override below — this action is only reached on the
+        // verified path, so it computes the conclusion directly.
         const codataType = this.registry.lookupObserver(observerName)
         if (!codataType) return Any // unknown observer → ill-typed
         const observer = codataType.findObserver(observerName)
         if (!observer) return Any
-
-        // Premise: scrutinee must be a subtype of the codata type.
-        if (!isSubtype(scrutinee, codataType)) return Any
 
         // Nothing propagation: observing an uninhabited scrutinee yields an
         // uninhabited result (principle of explosion). Checked after the
@@ -394,6 +469,42 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             return codataType
         }
         return observer.type
+    }
+
+    // e.o  — T-Obs via bind (type-checks observer + scrutinee premises per observation)
+    @rule
+    protected override obsProd(ctx: unknown): Parser<Type> {
+        return this.appProd(ctx)
+            .bind((scrutineeType) =>
+                seq(this.ws, char("."), this.ws, this.ident)
+                    .map(([, , , obsName]) => obsName)
+                    .many()
+                    .bind((obsNames) => {
+                        // Each observation in the chain e.o₁.o₂ is checked
+                        // individually: the scrutinee of the next observation
+                        // is the previous observation's result type.
+                        let current: Type = scrutineeType
+                        for (const obsName of obsNames) {
+                            if (!this.obsPremiseHolds(current, obsName)) {
+                                return empty<Type>()
+                            }
+                            current = this.obs(current, obsName)
+                        }
+                        return epsilon<Type>(current)
+                    })
+            )
+    }
+
+    /**
+     * Check the T-Obs premises for one observation: the observer is declared
+     * in the registry and the scrutinee type is a subtype of the observer's
+     * codata type.
+     */
+    private obsPremiseHolds(scrutinee: Type, observerName: string): boolean {
+        const codataType = this.registry.lookupObserver(observerName)
+        if (!codataType) return false // unknown observer
+        if (!codataType.findObserver(observerName)) return false
+        return isSubtype(scrutinee, codataType)
     }
 
     /**
@@ -463,8 +574,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            assert(ty instanceof DataType, "fold type must be a DataType")
-            const dataType = ty as DataType
+            // Premise: the annotation must be a DataType. A wrong-kind
+            // annotation (e.g. `fold [Stream] ...`) rejects the branch
+            // (`empty<Type>()`) like any other failed premise — an `assert`
+            // here would throw out of the parse instead of rejecting it.
+            if (!(ty instanceof DataType)) {
+                return empty<Type>()
+            }
+            const dataType = ty
             return this.exprProd(ctx)
                 .bind((scrutineeType) =>
                     seq(this.ws, char("{"), this.ws)
@@ -478,6 +595,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                                                 scrutineeType,
                                                 spanHandlers,
                                             )
+                                        )
+                                        // T-Fold premises are checked inside
+                                        // evalFoldFixpoint; a failure is
+                                        // `undefined` — reject the branch.
+                                        .bind((result) =>
+                                            result === undefined
+                                                ? empty<Type>()
+                                                : epsilon<Type>(result)
                                         )
                                 )
                         )
@@ -565,18 +690,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             bodySpan: Span
             ctx: TypeCheckCtx
         }[],
-    ): Type {
+    ): Type | undefined {
         // Premise 1: scrutinee : T
-        if (!isSubtype(scrutineeType, dataType)) return Any
+        if (!isSubtype(scrutineeType, dataType)) return undefined
 
         // Premise 2: handlers must be exhaustive
         const allVariants = dataType.allVariants()
         for (const variant of allVariants) {
             const handler = spanHandlers.find((h) => h.variantName === variant.name)
-            if (!handler) return Any
+            if (!handler) return undefined
         }
 
-        if (spanHandlers.length === 0) return Any
+        if (spanHandlers.length === 0) return undefined
 
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the fold uninhabited (principle of explosion). Checked after
@@ -653,7 +778,9 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         //   We don't enforce a specific seed type here — the generators
         //   are checked in the extended context with self: Σ.
         //
-        // Premise 2: generators must be exhaustive (cover all observers)
+        // Premise 2 (generator exhaustiveness) is enforced in the
+        // `unfoldProd` override below — this action is only reached on the
+        // verified path, so it computes the conclusion directly.
         const allObservers = codataType.allObservers()
         for (const observer of allObservers) {
             const generator = generators.find((g) => g.observerName === observer.name)
@@ -667,6 +794,57 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
         // The result type is T (the codata type from the annotation).
         return codataType
+    }
+
+    // unfold [T] s { o → t, ... }  — T-Unfold via bind (type-checks exhaustiveness)
+    @rule
+    protected override unfoldProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.kw("unfold"),
+            this.ws1,
+            char("["),
+            this.ws,
+            this.typeProd(this.typeVarCtx(ctx)),
+            this.ws,
+            char("]"),
+            this.ws,
+        ).bind(([, , , , ty]) => {
+            // Premise: the annotation must be a CodataType. A wrong-kind
+            // annotation (e.g. `unfold [Nat] ...`) rejects the branch
+            // (`empty<Type>()`) like any other failed premise — an `assert`
+            // here would throw out of the parse instead of rejecting it.
+            if (!(ty instanceof CodataType)) {
+                return empty<Type>()
+            }
+            const codataType = ty
+            return this.exprProd(ctx)
+                .bind((seed) =>
+                    seq(this.ws, char("{"), this.ws)
+                        .bind(() =>
+                            this.unfoldGenerators(codataType, ctx)
+                                .bind((generators) => {
+                                    if (!this.generatorsAreExhaustive(codataType, generators)) {
+                                        return empty<Type>()
+                                    }
+                                    return seq(this.ws, char("}"))
+                                        .map(() => this.unfold(codataType, seed, generators, Any))
+                                })
+                        )
+                )
+        })
+    }
+
+    /**
+     * Check T-Unfold's exhaustiveness premise: every observer of the codata
+     * type must have a generator.
+     */
+    private generatorsAreExhaustive(
+        codataType: CodataType,
+        generators: { observerName: string; body: Type }[],
+    ): boolean {
+        return codataType.allObservers().every((observer) =>
+            generators.some((g) => g.observerName === observer.name)
+        )
     }
 
     // ── T-TAbs: Δ, α <: σ ⊢ t : τ ⟹ Δ ⊢ Λα<:σ.t : ∀α<:σ.τ ────────────────────
@@ -697,13 +875,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         { rule: "T-Cofold", role: "conclusion", formula: "result : σ" },
     )
     protected cofold(
-        codataType: CodataType,
+        _codataType: CodataType,
         scrutinee: Type,
         handler: { observerName: string; bindings: string[]; body: Type },
         _resultType: Type,
     ): Type {
-        // Premise: scrutinee must be a subtype of the codata type.
-        if (!isSubtype(scrutinee, codataType)) return Any
+        // Premise (scrutinee <: codata type) is enforced in the `cofoldProd`
+        // override below — this action is only reached on the verified path,
+        // so it computes the conclusion directly.
 
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the cofold uninhabited (principle of explosion). Checked after
@@ -712,6 +891,44 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
         // The handler body type is σ.
         return handler.body
+    }
+
+    // cofold [T] e { o(x) → t }  — T-Cofold via bind (type-checks scrutinee premise)
+    @rule
+    protected override cofoldProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.kw("cofold"),
+            this.ws1,
+            char("["),
+            this.ws,
+            this.typeProd(this.typeVarCtx(ctx)),
+            this.ws,
+            char("]"),
+            this.ws,
+        ).bind(([, , , , ty]) => {
+            // Premise: the annotation must be a CodataType. A wrong-kind
+            // annotation (e.g. `cofold [Nat] ...`) rejects the branch
+            // (`empty<Type>()`) like any other failed premise — an `assert`
+            // here would throw out of the parse instead of rejecting it.
+            if (!(ty instanceof CodataType)) {
+                return empty<Type>()
+            }
+            const codataType = ty
+            return this.exprProd(ctx)
+                .bind((scrutinee) => {
+                    if (!isSubtype(scrutinee, codataType)) {
+                        return empty<Type>()
+                    }
+                    return seq(this.ws, char("{"), this.ws)
+                        .bind(() =>
+                            this.cofoldHandler(codataType, ctx)
+                                .bind((handler) =>
+                                    seq(this.ws, char("}"))
+                                        .map(() => this.cofold(codataType, scrutinee, handler, Any))
+                                )
+                        )
+                })
+        })
     }
 
     // ── T-TApp: Γ ⊢ t : ∀α<:σ.τ ∧ Δ ⊢ T₂<:σ ⟹ Γ ⊢ t[T₂] : τ[α:=T₂] ───────────
