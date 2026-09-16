@@ -37,6 +37,7 @@ import {
     LawError,
     type LawKind,
     LawRegistry,
+    type LawTypeChecker,
     RELATIONAL_KINDS,
     screenableDomain,
 } from "./laws.ts"
@@ -47,7 +48,7 @@ import { Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
 
 import { EvalErrorValue } from "./eval_grammar.ts"
 
-import type { DataType } from "./types.ts"
+import { DataType, type Type } from "./types.ts"
 
 // ── Sampling ──────────────────────────────────────────────────────────────────
 
@@ -67,8 +68,10 @@ const MAX_SAMPLE_DEPTH = 2
  *
  * Depth 0 produces the depth-0 samples (variants without recursive fields);
  * each higher depth adds one level of recursion — one sample per recursive
- * variant per shallower sample, capped by the depth bound. The result is the
- * bounded, deterministic sample space the screen sweeps.
+ * variant per shallower sample, capped by the depth bound. Variants whose
+ * non-recursive fields have no sample vocabulary (function types,
+ * `Any`-typed fields, empty variant sets) are dropped — the remaining space
+ * is what the screen can honestly sweep.
  */
 function samplesFor(type: DataType, depth: number, eval_: EvalTerm): VariantVal[] {
     if (depth < 0) return []
@@ -76,19 +79,23 @@ function samplesFor(type: DataType, depth: number, eval_: EvalTerm): VariantVal[
     if (depth === 0) {
         return all
             .filter((variant) => !variant.fields.some((field) => field.isRecursive))
-            .map((variant) => construct(variant, type, [], eval_))
+            .flatMap((variant) => {
+                const sample = construct(variant, [], eval_, depth)
+                return sample ? [sample] : []
+            })
     }
     const shallower = samplesFor(type, depth - 1, eval_)
     const result: VariantVal[] = [...shallower]
     for (const variant of all) {
         const recursiveCount = variant.fields.filter((field) => field.isRecursive).length
         if (recursiveCount === 0) continue
-        // One sample per recursive variant per shallower sample: non-recursive
-        // fields get placeholders; recursive fields draw from the shallower
-        // space (the last recursive position takes the advancing sample) —
-        // enough to reach the fold's recursion without the full product.
+        // One sample per recursive variant per shallower sample: recursive
+        // fields draw from the shallower space (the last recursive position
+        // takes the advancing sample) — enough to reach the fold's recursion
+        // without the full product. Variants with unsampleable fields drop.
         for (const sample of shallower) {
-            result.push(construct(variant, type, shallower, eval_, sample))
+            const built = construct(variant, shallower, eval_, depth, sample)
+            if (built) result.push(built)
         }
     }
     return result
@@ -103,20 +110,26 @@ function samplesFor(type: DataType, depth: number, eval_: EvalTerm): VariantVal[
  * `sample` is given it is pinned to the LAST recursive field (the one a
  * fold's recursion descends through in the common single-recursive-field
  * shape), earlier recursive fields take the first shallow sample.
- * Non-recursive fields get inert placeholder atoms — the schema terms only
- * apply operations to samples, never pattern-match below them.
+ * Non-recursive fields get their own typed samples (a nested recursive-field
+ * sample of the field's type, or a depth-0 sample of that type) — the field's
+ * declared type determines what the fold's handlers may pattern-match, so a
+ * non-value sentinel would make samples that folds inspect fail. A field
+ * type with NO generatable samples (function types, empty variant sets)
+ * makes the whole variant unsampleable — returns `undefined`.
  *
  * A variant whose constructor fails to evaluate (unknown variant, failed
- * field construction) yields an empty shell of the right type — the sweep's
- * error-sentinel guard skips instances built from it.
+ * field construction) also yields `undefined` — the sampler drops it.
  */
 function construct(
-    variant: { name: string; fields: readonly { isRecursive: boolean }[] },
-    type: DataType,
+    variant: {
+        name: string
+        fields: readonly { name: string; type: Type; isRecursive: boolean }[]
+    },
     shallow: readonly VariantVal[],
     eval_: EvalTerm,
+    depth: number,
     sample?: VariantVal,
-): VariantVal {
+): VariantVal | undefined {
     const argNames = variant.fields.map((_, i) => `f${i}`)
     const bindings = new Map<string, Value>()
     const recursiveTotal = variant.fields.filter((field) => field.isRecursive).length
@@ -125,32 +138,27 @@ function construct(
         const field = variant.fields[i]!
         if (field.isRecursive) {
             const isLast = ++recursiveSeen === recursiveTotal
-            bindings.set(
-                argNames[i]!,
-                isLast && sample ? sample : shallow[0] ?? new PlaceholderArg(),
-            )
+            const value = isLast && sample ? sample : shallow[0]
+            if (value === undefined) return undefined
+            bindings.set(argNames[i]!, value)
         } else {
-            bindings.set(argNames[i]!, new PlaceholderArg())
+            // Non-recursive fields: a typed sample of the field's own type —
+            // the shallowest sample of a data type; `undefined` (no sample
+            // vocabulary) when the field type is not sampleable. `Any`-typed
+            // fields have no declared sample vocabulary either — unsampleable.
+            const fieldSamples = field.type instanceof DataType
+                ? samplesFor(field.type, Math.min(depth, 1), eval_)
+                : []
+            const value = fieldSamples[0]
+            if (value === undefined) return undefined
+            bindings.set(argNames[i]!, value)
         }
     }
     const source = `${variant.name}(${argNames.join(", ")})`
     const results = eval_(source, new ValueEnv(bindings))
     const value = results[0]
-    // Unknown variant / failed construction: no usable sample from this
-    // variant, but the screen still needs a well-typed Value for the env —
-    // an empty variant of the right type (skipped by the sweep's instance
-    // evaluation if it fails there).
-    return value instanceof VariantVal ? value : new VariantVal(variant.name, type, new Map())
-}
-
-/**
- * A non-value atom bound into a scratch environment. Field values of
- * non-recursive positions are never pattern-matched by the schema terms
- * (law instances only apply the operation to samples), so a placeholder is
- * inert — but it must be a `Value` for `ValueEnv`.
- */
-class PlaceholderArg extends Value {
-    readonly kind = "__placeholder_arg__"
+    // Unknown variant / failed construction: no usable sample.
+    return value instanceof VariantVal ? value : undefined
 }
 
 /**
@@ -185,10 +193,9 @@ const SCHEMA_NAMES: Record<LawKind, readonly string[]> = {
 }
 
 /**
- * Instantiate a law's axiom schema with the first operand bound to `first`
- * and the remaining operands drawing cyclically from `samples`. The
- * argument variable (`e` for identity, `z` for absorbing) is pinned to the
- * declared argument's evaluated value.
+ * Instantiate a law's axiom schema over a binding assignment (`bindings`:
+ * schema variable name ↦ sample). The argument variable (`e` for identity,
+ * `z` for absorbing) is pinned to the declared argument's evaluated value.
  *
  * Argument-taking kinds contribute TWO axiom instances per assignment —
  * lc.md §7.2 defines `identity: e` as both `⊕(e, a) ≡ a` and `⊕(a, e) ≡ a`
@@ -199,25 +206,22 @@ const SCHEMA_NAMES: Record<LawKind, readonly string[]> = {
 function instantiate(
     law: LawDecl,
     op: CheckedOpSig,
-    first: VariantVal,
-    positionSamples: readonly VariantVal[][],
+    bindings: readonly (readonly [string, VariantVal])[],
     argumentValue: Value | undefined,
 ): LawInstance[] {
     const opName = op.name
-    const names = SCHEMA_NAMES[law.kind]!
     let rho = new ValueEnv()
-    const bindings: string[] = []
-    for (let i = 0; i < names.length; i++) {
-        const position = positionSamples[i % positionSamples.length]!
-        const value = i === 0 ? first : position[(i - 1) % position.length]!
-        rho = rho.extend(names[i]!, value)
-        bindings.push(`${names[i]} = ${renderValue(value)}`)
+    const rendered: string[] = []
+    for (const [name, value] of bindings) {
+        rho = rho.extend(name, value)
+        rendered.push(`${name} = ${renderValue(value)}`)
     }
     if (argumentValue !== undefined) {
         rho = rho.extend("e", argumentValue)
         rho = rho.extend("z", argumentValue)
-        bindings.push(`argument = ${renderValue(argumentValue)}`)
+        rendered.push(`argument = ${renderValue(argumentValue)}`)
     }
+    const bindingsRendered = rendered
 
     switch (law.kind) {
         case "associative":
@@ -225,25 +229,35 @@ function instantiate(
                 left: `${opName}(${opName}(a, b), c)`,
                 right: `${opName}(a, ${opName}(b, c))`,
                 rho,
-                bindings,
+                bindings: bindingsRendered,
             }]
         case "commutative":
-            return [{ left: `${opName}(a, b)`, right: `${opName}(b, a)`, rho, bindings }]
+            return [{
+                left: `${opName}(a, b)`,
+                right: `${opName}(b, a)`,
+                rho,
+                bindings: bindingsRendered,
+            }]
         case "identity":
             // Both directions: ⊕(e, a) ≡ a (left) AND ⊕(a, e) ≡ a (right).
             return [
-                { left: `${opName}(e, a)`, right: `a`, rho, bindings },
-                { left: `${opName}(a, e)`, right: `a`, rho, bindings },
+                { left: `${opName}(e, a)`, right: `a`, rho, bindings: bindingsRendered },
+                { left: `${opName}(a, e)`, right: `a`, rho, bindings: bindingsRendered },
             ]
         case "idempotent":
-            return [{ left: `${opName}(a, a)`, right: `a`, rho, bindings }]
+            return [{ left: `${opName}(a, a)`, right: `a`, rho, bindings: bindingsRendered }]
         case "involutory":
-            return [{ left: `${opName}(${opName}(a))`, right: `a`, rho, bindings }]
+            return [{
+                left: `${opName}(${opName}(a))`,
+                right: `a`,
+                rho,
+                bindings: bindingsRendered,
+            }]
         case "absorbing":
             // Both directions: ⊗(z, a) ≡ z (left) AND ⊗(a, z) ≡ z (right).
             return [
-                { left: `${opName}(z, a)`, right: `z`, rho, bindings },
-                { left: `${opName}(a, z)`, right: `z`, rho, bindings },
+                { left: `${opName}(z, a)`, right: `z`, rho, bindings: bindingsRendered },
+                { left: `${opName}(a, z)`, right: `z`, rho, bindings: bindingsRendered },
             ]
         case "distributive": {
             const g = law.argument!
@@ -251,7 +265,7 @@ function instantiate(
                 left: `${opName}(a, ${g}(b, c))`,
                 right: `${g}(${opName}(a, b), ${opName}(a, c))`,
                 rho,
-                bindings,
+                bindings: bindingsRendered,
             }]
         }
     }
@@ -282,8 +296,10 @@ function renderValue(value: Value): string {
  * on a passing screen — `LawRegistry.declareLaw`, or the all-in-one
  * `declareScreenedLaw`.
  *
- * @param law      the law declaration (vocabulary/arity shape trusted —
- *                 `LawRegistry.declareLaw` validates it structurally).
+ * @param law      the law declaration — structurally pre-validated by
+ *                 `LawRegistry.validateLaw` in the `declareScreenedLaw`
+ *                 entry; a raw call must supply a well-formed claim (an
+ *                 unknown kind reaching the schema table is a caller bug).
  * @param op       the target operation (from `Ω`).
  * @param omega    the operation registry — `distributive`'s argument
  *                 operation is looked up here.
@@ -306,6 +322,10 @@ export function screenLaw(
     // The argument value for argument-taking kinds: evaluate the declared
     // argument term once, in a fresh environment. A non-evaluating argument
     // rejects the declaration outright (the claim is not even well-posed).
+    // The argument's TYPE was validated against the carrier at declaration
+    // (`LawRegistry.validateLaw`); the screen re-checks evaluation so an
+    // argument that parses but evaluates to nothing cannot slip through a
+    // raw `screenLaw` call and silently produce zero coverage.
     let argumentValue: Value | undefined
     if (ARGUMENT_KINDS.includes(law.kind)) {
         argumentValue = eval_(law.argument!, new ValueEnv())[0]
@@ -332,12 +352,20 @@ export function screenLaw(
     if (positionSamples.some((s) => s.length === 0)) return 0
 
     let checked = 0
-    // Sweep every sample of the first parameter's type as the first operand
-    // (the discriminating position); the remaining operands draw cyclically
-    // from their own position's samples. A falsification at ANY assignment
-    // rejects — the first one wins.
-    for (const first of positionSamples[0]!) {
-        for (const instance of instantiate(law, op, first, positionSamples, argumentValue)) {
+    // Enumerate assignments over the schema variables: every combination of
+    // per-position samples the schema names (Cartesian across distinct
+    // variables). Cyclic reuse would make some schemas vacuous — commutative
+    // on a homogeneous op would degenerate to `op(a, a) ≡ op(a, a)`, passing
+    // a non-commutative operation. Bounded sample spaces keep the product
+    // small (depth ≤ 2 ⇒ a handful of samples per position).
+    for (
+        const bindings of assignments(
+            SCHEMA_NAMES[law.kind]!,
+            positionSamples,
+            op.paramTypes.length,
+        )
+    ) {
+        for (const instance of instantiate(law, op, bindings, argumentValue)) {
             const left = eval_(instance.left, instance.rho)[0]
             const right = eval_(instance.right, instance.rho)[0]
             if (
@@ -346,8 +374,7 @@ export function screenLaw(
             ) {
                 // An instance that does not evaluate (or evaluates to an
                 // error sentinel) is not a falsification — the schema may
-                // not apply to this sample mix (e.g. an op with
-                // heterogeneous parameter types). Skip it.
+                // not apply to this sample mix. Skip it.
                 continue
             }
             if (!valueEquals(left, right)) {
@@ -363,6 +390,33 @@ export function screenLaw(
         }
     }
     return checked
+}
+
+/**
+ * Enumerate the schema's variable assignments: variable i draws from the
+ * samples of the operand position it instantiates (position i, mod the
+ * operation's parameter count — schemas instantiate fewer variables than
+ * positions on some shapes). The sweep is the Cartesian product across
+ * variables, so every variable takes independent values — a falsifying
+ * pair like `op(a, b)` with `a ≠ b` is reachable for commutative.
+ */
+function assignments(
+    names: readonly string[],
+    positionSamples: readonly VariantVal[][],
+    paramCount: number,
+): (readonly [string, VariantVal])[][] {
+    let combos: (readonly [string, VariantVal])[][] = [[]]
+    for (let i = 0; i < names.length; i++) {
+        const samples = positionSamples[i % paramCount]!
+        const next: (readonly [string, VariantVal])[][] = []
+        for (const combo of combos) {
+            for (const sample of samples) {
+                next.push([...combo, [names[i]!, sample]])
+            }
+        }
+        combos = next
+    }
+    return combos
 }
 
 /** Dedupe samples structurally (the sweep sees each distinct value once). */
@@ -391,8 +445,15 @@ export function makeEvalTerm(
 }
 
 /**
- * The screen's all-in-one entry: declare-or-reject a law against `Ω` and,
- * on a passing screen, install it in `E` with provenance `asserted`.
+ * The screen's all-in-one entry: validate the claim structurally against
+ * `Ω` (`LawRegistry.validateLaw` — vocabulary, argument shape, relational
+ * arity, schema typing), screen it, and on a passing screen install it in
+ * `E` with provenance `asserted`.
+ *
+ * Validation runs BEFORE the screen: a vocabulary/argument/arity/typing
+ * error surfaces as `LawDeclarationError` — never as a screen artifact (a
+ * `TypeError` from an unknown kind, or zero-coverage silence). The screen
+ * runs second, so a falsified claim never enters `E`.
  *
  * Returns `{ law, instances }` — the installed declaration and the number
  * of instances the screen checked. This is the elaboration-time sequence of
@@ -400,22 +461,28 @@ export function makeEvalTerm(
  *
  * @throws LawError when the screen falsifies the law (nothing is installed).
  * @throws LawDeclarationError when the claim is not in the closed vocabulary
- * or is structurally ill-formed (from `LawRegistry.declareLaw`).
+ * or is structurally ill-formed (from `LawRegistry.validateLaw`).
  */
 export function declareScreenedLaw(
     law: Omit<LawDecl, "provenance">,
     omega: OpRegistry,
     laws: LawRegistry,
     eval_: EvalTerm,
+    checker?: LawTypeChecker,
     maxDepth: number = MAX_SAMPLE_DEPTH,
 ): { law: LawDecl; instances: number } {
     const op = omega.lookup(law.target)
     if (!op) {
         throw new LawDeclarationError(law.target, "the target operation is not declared in Ω")
     }
+    // Structural validation FIRST (loud, typed errors), then the screen.
+    const structuralReason = laws.validateLaw(law, omega, checker)
+    if (structuralReason !== undefined) {
+        throw new LawDeclarationError(law.target, structuralReason)
+    }
     // Screen BEFORE installing: a falsified claim never enters E.
     const decl: LawDecl = { ...law, provenance: "asserted" }
     const instances = screenLaw(decl, op, omega, eval_, maxDepth)
-    laws.declareLaw(law, omega, "asserted")
+    laws.declareLaw(law, omega, "asserted", checker)
     return { law: decl, instances }
 }

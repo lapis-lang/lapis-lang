@@ -39,6 +39,7 @@ export {
     type LawKind,
     type LawProvenance,
     LawRegistry,
+    type LawTypeChecker,
     SCHEMA_ARITY,
     screenableDomain,
 } from "./laws.ts"
