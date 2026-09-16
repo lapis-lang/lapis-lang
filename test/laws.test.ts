@@ -8,6 +8,7 @@
 
 import {
     declareScreenedLaw,
+    EvalErrorValue,
     LAW_KINDS,
     type LawDecl,
     LawDeclarationError,
@@ -852,20 +853,26 @@ Deno.test("screen inputs: op applications evaluate under bound sample envs", () 
 const { gen, evalOf: harnessEval } = createLawHarness()
 
 /**
- * Evaluate a law-side source, demanding a value.
+ * Evaluate a law-side source, demanding a real value.
  *
  * Unlike the residual screen — whose sample space can contain instances that
  * legitimately do not evaluate, and which skips them — this harness's domain
  * is closed: the generator emits only well-formed `Nat` sources and the law
- * embeddings are well-formed by construction. An `undefined` here therefore
- * means evaluation itself is broken, which must fail the run loudly rather
- * than pass vacuously. Throwing (not returning `false`) also keeps the
- * failure mode distinct from a mathematical falsification: `forAll` wraps the
- * throw in `PropertyFailure` with the thrown message as its reason.
+ * embeddings are well-formed by construction. Failure to evaluate here
+ * therefore means evaluation itself is broken, which must fail the run loudly
+ * rather than pass vacuously. LCEval reports evaluation failures (unknown
+ * variant, unbound variable, type mismatch) as an `EvalErrorValue` sentinel —
+ * a proper `Value` subclass, indistinguishable from a real result without the
+ * guard the screen applies (law_checking.ts). A sentinel entering the law
+ * comparison would make `valueEquals` return `false`: a tooling regression
+ * reported as a mathematical falsification. Reject it here, like the empty
+ * forest. Throwing (not returning `false`) also keeps the failure mode
+ * distinct from a falsification: `forAll` wraps the throw in
+ * `PropertyFailure` with the thrown message as its reason.
  */
 function mustEval(src: string): Value {
     const value = evalOne(harnessEval, src)
-    if (value === undefined) {
+    if (value === undefined || value instanceof EvalErrorValue) {
         throw new Error(`law instance did not evaluate: ${src}`)
     }
     return value

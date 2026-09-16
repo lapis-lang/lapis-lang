@@ -92,10 +92,11 @@ depends on how closed the generator's domain is — the two mechanisms differ de
   evaluate (an ill-typed embedding, an eval-error sentinel); those are sampling artifacts carrying
   no evidence against the law, so the screen skips them (`law_checking.ts`). A dedicated carrier
   grammar like the `Nat` value grammar is the opposite: it generates only well-formed `Nat` sources,
-  and well-formed embeddings of them are well-typed by construction. An `undefined` there means
+  and well-formed embeddings of them are well-typed by construction. Failure to evaluate there means
   evaluation itself is broken — a parse/eval regression — and must fail the run, never pass
-  vacuously. The harness's properties therefore throw on `undefined` (via a `mustEval` helper)
-  rather than returning `true`.
+  vacuously. LCEval reports evaluation failures two ways, and `mustEval` rejects both: an empty
+  parse forest (`undefined`) and the `EvalErrorValue` sentinel (a proper `Value` subclass that would
+  otherwise flow into the comparison and be reported as a falsification).
 - **Throw, don't return `false`, for non-falsifications.** `forAll` reports both failure modes as
   `PropertyFailure`, but they mean different things: `false` is a mathematical falsification (the
   shrunk counterexample is the artifact), while a thrown error's message becomes the failure reason
