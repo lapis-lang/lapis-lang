@@ -28,7 +28,24 @@ export {
 } from "./types.ts"
 
 // Values (lc.md §2.3)
-export { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
+export { SpanClosure, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
+
+// Laws (lc.md §2.4, §7.2 — the equational theory environment E)
+export {
+    LAW_KINDS,
+    type LawDecl,
+    LawDeclarationError,
+    LawError,
+    type LawKind,
+    type LawProvenance,
+    LawRegistry,
+    type LawTypeChecker,
+    SCHEMA_ARITY,
+    screenableDomain,
+} from "./laws.ts"
+
+// Law screening (semantics.md §5.4 — the residual screen for asserted laws)
+export { declareScreenedLaw, type EvalTerm, makeEvalTerm, screenLaw } from "./law_checking.ts"
 
 // Subtyping (lc.md §4)
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
