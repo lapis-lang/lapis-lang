@@ -83,8 +83,12 @@ const MAX_SAMPLE_DEPTH = 2
  * non-recursive fields have no sample vocabulary (function types,
  * `Any`-typed fields, empty variant sets) are dropped — the remaining space
  * is what the screen can honestly sweep.
+ *
+ * Exported for the ∂T shrinker (`law_testing.ts`): filler candidates for a
+ * hole are the hole type's sampled vocabulary — the same sampler, so the
+ * two mechanisms agree on what a carrier's values look like.
  */
-function samplesFor(type: DataType, depth: number, eval_: EvalTerm): VariantVal[] {
+export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): VariantVal[] {
     if (depth < 0) return []
     const all = type.allVariants()
     if (depth === 0) {

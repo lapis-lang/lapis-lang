@@ -491,6 +491,47 @@ with the current status, milestone, and dependencies.
 - **Files:** `test/laws.test.ts`, `test/fixtures.ts`, `_docs/theory/`
 - **Depends on:** #22 (law declarations), #19, #20, #21 (core soundness). Belongs in v0.3.0.
 
+#### PBI #64: ∂T machinery — one-hole contexts (structural shrinking; `old`/observation stretch)
+
+- **Status:** In progress — the two core acceptance items landed (`deno check` / `test` / `lint` /
+  `fmt` clean)
+- **Assignee:** @mlhaufe
+- **Plan:** `_docs/issue64-plan.md`
+- **Goal:** Implement type derivatives (McBride 2001: the derivative of a regular type is its type
+  of one-hole contexts) over the `Type` AST, per `type-algebra.md` §4 — and use them for ∂T-based
+  structural shrinking in the property harness.
+- **Landed:**
+  1. `src/core/type_algebra.ts` (new): `ContextSpec` (variant/field/holeType/surroundings — the
+     context SHAPE, not a synthesized type) and `derivative(type: DataType)` — structural recursion
+     with implicit differentiation at the μ-bound (`Field.isRecursive` IS the μ-bound occurrence;
+     the walk never follows recursive fields, so it terminates by construction). Boundaries:
+     intersection carriers are a typed rejection; function/`Any`/token/pattern/`Nothing` fields
+     contribute no context; chain rule read one level deep (a field of another data type opens
+     descent into that field's own structure). 10 tests in `test/type_algebra.test.ts`.
+  2. `src/core/law_testing.ts` (new): the value layer — `contextPaths` (contexts of a concrete
+     `VariantVal` as `(variant, field)` path steps), `plug` (pure tree surgery), `valueSize`,
+     `renderValue`, and `DerivativeGenerator extends GrammarGenerator` overriding only `shrink`:
+     enumerate the failing value's context paths, plug strictly-smaller fillers (the carrier's
+     sampled vocabulary via the exported `samplesFor`, plus the failing value's own subvalues —
+     reuse), render, return. Non-structured counterexamples (tokens, closures) delegate to the
+     inherited regeneration shrinker — a strict upgrade, never a coverage regression.
+  3. Harness promotion: `test/fixtures.ts` `createLawHarness` now builds a `DerivativeGenerator`;
+     the harness type is unchanged (`ValueGenerator<string>`), so all anchor-law tests run
+     unmodified — the minimal-falsifier contract (`Succ(Succ(Zero()))` for idempotent-`mul`) holds
+     under the new shrinker. Shrink quality is asserted relatively (property-invocation counts, ∂T
+     vs. regeneration, same seed): `test/laws.test.ts`.
+- **Deferred (stretch, per the issue):** `old`/paramorphism typing (the `old` keyword does not exist
+  yet — a language feature, not a library addition; `ContextSpec`'s surroundings are the future
+  typing substrate) and observation-channel evidence typing (the re-screening channel is
+  design-stage; `ContextSpec` is the future evidence vocabulary).
+- **Files:** `src/core/type_algebra.ts` (new), `src/core/law_testing.ts` (new),
+  `src/core/law_checking.ts` (`samplesFor` exported), `src/core/index.ts`, `test/fixtures.ts`,
+  `test/type_algebra.test.ts` (new), `test/law_testing.test.ts` (new), `test/laws.test.ts`,
+  `_docs/theory/type-algebra.md` (§7 status), `_docs/theory/law-testing.md` (shrinking section),
+  this document.
+- **Depends on:** Nothing structural (reuses the `Type` AST + sampler machinery). Blocks #65
+  (coefficients share the type-equation reading — one module, three readings).
+
 ### Milestone v0.4.0 — Patterns & surface
 
 #### PBI #23: T-FoldMatch + E-FoldMatch — pattern-matched fold (elimination)

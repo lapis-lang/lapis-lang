@@ -14,6 +14,7 @@ import { TypeRegistry, type Value } from "../src/index.ts"
 import { Any, CodataType, DataType, Field, Observer, Variant } from "../src/core/types.ts"
 import { LCTypeCheck } from "../src/core/typing_grammar.ts"
 import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
+import { DerivativeGenerator } from "../src/core/law_testing.ts"
 import { LCEval } from "../src/core/eval_grammar.ts"
 import { OpRegistry, OpSig } from "../src/core/ops.ts"
 import { ValueEnv } from "../src/core/values.ts"
@@ -242,7 +243,7 @@ export function createOpFixtures(): OpTestFixtures {
  * quantify over operand values of a fixed type. The grammar IS the
  * arbitrary — here specialized to the operand carrier `Nat`.
  */
-class NatSourceGrammar extends Grammar<{ nat: string }> {
+export class NatSourceGrammar extends Grammar<{ nat: string }> {
     override start(): Parser<string> {
         return this.natProd()
     }
@@ -259,7 +260,7 @@ class NatSourceGrammar extends Grammar<{ nat: string }> {
 
 /** The two pieces a property-based law test needs, created together. */
 export interface LawHarness {
-    /** Generates `Nat` LC source strings (grammar-aware shrinking included). */
+    /** Generates `Nat` LC source strings (∂T structural shrinking included). */
     gen: ValueGenerator<string>
     /** The op fixtures' evaluator — law instances evaluate through it. */
     evalOf: EvalTerm
@@ -267,7 +268,10 @@ export interface LawHarness {
 
 /**
  * Creates the property-based law harness: a `Nat`-source generator bound to
- * the op fixtures' evaluator.
+ * the op fixtures' evaluator, with ∂T-based structural shrinking
+ * (`DerivativeGenerator` — counterexamples shrink along the failing value's
+ * own structure; regeneration remains the fallback for non-structured
+ * values).
  *
  * Budgets: `maxRecursion` bounds the `Succ`-nesting depth (probes: 2 caps
  * at depth 1, 5 reaches depth 4); `branchStrategy: "random"` samples both
@@ -277,14 +281,19 @@ export interface LawHarness {
  * path here is finite).
  */
 export function createLawHarness(): LawHarness {
-    const { registry, opRegistry } = createOpFixtures()
+    const { registry, opRegistry, nat } = createOpFixtures()
     const evalGrammar = new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+    const grammar = new NatSourceGrammar()
     return {
-        gen: new NatSourceGrammar().toGenerator({
-            maxDepth: 4,
-            maxRecursion: 5,
-            branchStrategy: "random",
-        }),
+        gen: new DerivativeGenerator(
+            grammar,
+            {
+                maxDepth: 4,
+                maxRecursion: 5,
+                branchStrategy: "random",
+            },
+            { evalOf: makeEvalTerm(evalGrammar), carrier: nat },
+        ),
         evalOf: makeEvalTerm(evalGrammar),
     }
 }

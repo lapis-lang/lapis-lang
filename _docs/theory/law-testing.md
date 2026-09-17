@@ -2,9 +2,10 @@
 
 > **Status:** Draft v0.1. This document specifies the property-based law-testing pattern: how the
 > checking of an algebraic law becomes a `forAll` over a grammar-rooted `ValueGenerator`. The
-> executable harness lives in [`test/fixtures.ts`](../../test/fixtures.ts) (`createLawHarness`) and
-> [`test/laws.test.ts`](../../test/laws.test.ts) (the "Property-based law screening" section); this
-> document is the specification the harness implements.
+> executable harness lives in [`src/core/law_testing.ts`](../../src/core/law_testing.ts)
+> (`DerivativeGenerator` — promoted from the test-local harness, with ∂T-based structural shrinking)
+> and [`test/laws.test.ts`](../../test/laws.test.ts) (the "Property-based law screening" section);
+> this document is the specification the harness implements.
 
 ## 1. The pattern
 
@@ -27,10 +28,20 @@ role of the value generator; no hand-written `Arbitrary` is written alongside it
 
 lang-forma provides the harness natively: `Grammar.toGenerator(options)` yields a `ValueGenerator`
 whose `sample(seed)` produces well-formed values of the grammar and whose
-`forAll(property, options)` runs the generation/property loop with grammar-aware shrinking
-(re-generation at shallower depths) on failure. No third-party framework, and — because the
-generator owns the grammar — every sample is syntactically valid by construction, and every shrunk
-counterexample stays well-formed.
+`forAll(property, options)` runs the generation/property loop on failure. No third-party framework,
+and — because the generator owns the grammar — every sample is syntactically valid by construction,
+and every shrunk counterexample stays well-formed.
+
+**Shrinking (∂T-based, issue #64).** The promoted harness (`src/core/law_testing.ts`,
+`DerivativeGenerator`) replaces re-generation shrinking with McBride's one-hole contexts:
+lang-forma's `GrammarGenerator.shrink` minimizes by re-generating at shallower depths — structurally
+smaller, but derived from the GENERATOR, never from the failing value. The ∂T shrinker enumerates
+the failing value's context paths (`derivative(T)` over the carrier, `type_algebra.ts`), plugs
+strictly-smaller fillers into the holes (the carrier's sampled vocabulary plus the failing value's
+own subvalues — reuse), and renders the plugged candidates. The counterexample thus shrinks along
+the actual value's structure, monotone toward a minimal falsifier. Counterexamples that do not
+evaluate to a structured value (tokens, closures) delegate to the regeneration strategy — a strict
+upgrade, never a regression of coverage.
 
 ## 2. Rejection quality, not assurance quality
 

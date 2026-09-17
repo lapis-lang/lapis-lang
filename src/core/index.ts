@@ -101,6 +101,22 @@ export {
 // Inference rules: `LCTypeCheck.rules` (static) or `collectRules(LCTypeCheck)`.
 export { LCTypeCheck } from "./typing_grammar.ts"
 
+// Type algebra (type-algebra.md §4 — one-hole contexts for structural
+// shrinking, `old`/paramorphism typing, observation-evidence typing)
+export { type ContextSpec, derivative } from "./type_algebra.ts"
+
+// Law testing (law-testing.md — the property-based harness with ∂T-based
+// structural shrinking; the promotion of the test-local law harness)
+export {
+    type ContextPath,
+    contextPaths,
+    DerivativeGenerator,
+    type DerivativeGeneratorOptions,
+    plug,
+    renderValue,
+    valueSize,
+} from "./law_testing.ts"
+
 // Evaluation grammar subclass (lc.md §3 — parse, don't evaluate separately)
 // One-pass evaluator: parses LC text and produces values via _forward.
 export { EvalErrorValue, LCEval, SpanCodataVal } from "./eval_grammar.ts"
