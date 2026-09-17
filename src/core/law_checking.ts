@@ -154,11 +154,15 @@ function construct(
             bindings.set(argNames[i]!, value)
         } else {
             // Non-recursive fields: a typed sample of the field's own type —
-            // the shallowest sample of a data type; `undefined` (no sample
-            // vocabulary) when the field type is not sampleable. `Any`-typed
-            // fields have no declared sample vocabulary either — unsampleable.
+            // the shallowest sample of a data type, or a matched token for a
+            // pattern-typed field (see `patternSamples`); `undefined` (no
+            // sample vocabulary) when the field type is not sampleable.
+            // `Any`-typed fields have no declared sample vocabulary either —
+            // unsampleable.
             const fieldSamples = field.type instanceof DataType
                 ? samplesFor(field.type, Math.min(depth, 1), eval_)
+                : field.type instanceof PatternDataType
+                ? patternSamples(field.type, eval_)
                 : []
             const value = fieldSamples[0]
             if (value === undefined) return undefined
@@ -553,25 +557,20 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
     const results = [...eval_(type.name, new ValueEnv())]
     const tokens = results.filter((r): r is TokenVal => r instanceof TokenVal)
     if (results.length === 0) {
-        throw new LawError(
+        // A declaration failure, not a falsification: the message names the
+        // broken sampling, not a counterexample (LawError's contract).
+        throw new LawDeclarationError(
             type.name,
-            { kind: "associative", target: type.name },
-            [`pattern type ${type.name}: the token atom did not evaluate`],
-            "—",
-            "—",
+            `pattern type ${type.name}: the token atom did not evaluate — ` +
+                `the evaluator and the type registry disagree`,
         )
     }
     if (tokens.length !== 1 || results.length !== 1) {
-        throw new LawError(
+        throw new LawDeclarationError(
             type.name,
-            { kind: "associative", target: type.name },
-            [
-                `pattern type ${type.name}: the token atom's parse yielded ` +
+            `pattern type ${type.name}: the token atom's parse yielded ` +
                 `${results.length} results (${tokens.length} tokens) — ` +
                 `expected exactly one TokenVal`,
-            ],
-            "—",
-            "—",
         )
     }
     return tokens
@@ -782,13 +781,15 @@ export function screeningRegime(
  * `TypeError` from an unknown kind, or zero-coverage silence). The check
  * runs second, so a falsified claim never enters `E`.
  *
- * **Zero-coverage rejection:** a `residual`-regime law whose screen
- * *declined* (checked 0 instances because the domain is unscreenable or
- * yielded no samples) is REJECTED, not installed: `asserted` means "the
- * screen found no counterexample" — a claim the screen never exercised
- * carries no such evidence. (Exhaustion's zero-coverage case — a vacuous
- * claim over an empty carrier — stays honest: there the count 0 records a
- * *complete* sweep over ∅, a real proof shape.)
+ * **Zero-coverage rejection:** a `residual`-regime law whose screen yielded
+ * zero evidence — EITHER because it *declined* (no sample vocabulary; the
+ * domain is unscreenable) OR because the sweep *passed with 0 checked*
+ * instances (every drawn sample was a hole) — is REJECTED, not installed:
+ * `asserted` means "the screen found no counterexample", and a claim the
+ * screen never exercised carries no such evidence. (Exhaustion's
+ * zero-coverage case — a vacuous claim over an empty carrier — stays
+ * honest: there the count 0 records a *complete* sweep over ∅, a real
+ * proof shape.)
  *
  * Returns `{ law, instances, regime }` — the installed declaration, the
  * number of instances checked, and the regime that produced it.
@@ -799,8 +800,9 @@ export function screeningRegime(
  * `finite` regime — an instance of the axiom fails to evaluate (a
  * `discharged` tag must mean full coverage; holes in the sweep are a
  * rejected declaration, not silent under-coverage), or — in the `residual`
- * regime — the screen declined to exercise the claim at all (zero
- * coverage: an unscreenable domain or an empty sample space).
+ * regime — the screen exercised the claim zero times (declined: an
+ * unscreenable domain or an empty sample space; or passed with 0 checked:
+ * every drawn sample was a hole).
  */
 export function declareCheckedLaw(
     law: Omit<LawDecl, "provenance">,
@@ -829,19 +831,35 @@ export function declareCheckedLaw(
     const instances = screen
         ? screen.outcome === "passed" ? screen.checked : 0
         : exhaustLaw(law, op, eval_)
-    // Zero-coverage honesty: a DECLINED screen (unscreenable domain, empty
-    // sample space, unscreenable relational operand) exercised the claim
-    // ZERO times — installing it `asserted` would claim "the screen found
-    // no counterexample" with zero evidence. A passed screen with 0 checked
-    // instances is still evidence (every drawn sample failed to evaluate —
-    // reported in the count). Exhaustion's zero-coverage case — a vacuous
-    // claim over an empty carrier — stays honest: there the count 0 records
-    // a *complete* sweep over ∅, a real proof shape.
+    // Zero-coverage honesty — BOTH zero-coverage shapes reject:
+    //
+    // - **Declined** (unscreenable domain, empty sample space, unscreenable
+    //   relational operand): the screen never exercised the claim — zero
+    //   evidence, nothing installed.
+    // - **Passed with 0 checked** (the sweep ran but EVERY instance was a
+    //   hole — an error sentinel or a failed evaluation): the samples were
+    //   drawn, but the claim was exercised zero times. "No counterexample
+    //   found" over an all-holes sweep is no evidence either — an operation
+    //   whose every law instance errors would otherwise install `asserted`
+    //   on zero checked instances. Distinct diagnostic so the caller can
+    //   tell a broken evaluator from an unscreenable domain.
+    //
+    // Exhaustion's zero-coverage case — a vacuous claim over an empty
+    // carrier — stays honest: there the count 0 records a *complete* sweep
+    // over ∅, a real proof shape (not a screen artifact).
     if (screen?.outcome === "declined") {
         throw new LawDeclarationError(
             law.target,
             "the screen declined: no sample vocabulary for this claim's domain " +
                 "(higher-order or empty sample space) — zero coverage, nothing installed",
+        )
+    }
+    if (screen?.outcome === "passed" && screen.checked === 0) {
+        throw new LawDeclarationError(
+            law.target,
+            "the screen exercised zero instances: every drawn sample failed to " +
+                "evaluate — a passing sweep over all-holes samples is no evidence, " +
+                "nothing installed (check the operation's definition/evaluator)",
         )
     }
     const provenance: LawProvenance = regime === "finite" ? "discharged" : "asserted"

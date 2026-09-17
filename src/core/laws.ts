@@ -435,8 +435,30 @@ function checkSchemaWellTyped(
     return undefined
 }
 
-/** Operand-carrier compatibility: one sample space must inhabit both slots. */
+/**
+ * Operand-carrier compatibility: one sample space must inhabit both slots.
+ *
+ * Two slots are compatible when they hold the same carrier — two `DataType`s
+ * of the same name, two `PatternDataType`s of the same name, or the two
+ * non-data permissive shapes (function types / anything else, which
+ * `screenableDomain` separately disqualifies from screening). A mixed
+ * data/pattern signature (`(Pat, Bool)`) is NOT compatible: the schema
+ * sweeps one sample space through all slots, so the swapped axioms would
+ * put a token in a variant slot (or vice versa) — the instances are ill-
+ * typed by construction, `LCEval` does not enforce op argument types, and
+ * the all-holes sweep would silently pass zero-coverage validation.
+ */
 function paramTypeCompatible(a: Type, b: Type): boolean {
-    if (!(a instanceof DataType) || !(b instanceof DataType)) return true
-    return a.equals(b)
+    // Two pattern types: same name = same carrier (the token identity is
+    // type-qualified — see `valueEquals`'s `TokenVal` branch).
+    if (a instanceof PatternDataType && b instanceof PatternDataType) return a.equals(b)
+    // Mixed data/pattern: never compatible.
+    if (a instanceof PatternDataType !== (b instanceof PatternDataType)) return false
+    // Two data types: same name.
+    if (a instanceof DataType && b instanceof DataType) return a.equals(b)
+    // At most one of the two is a DataType/PatternDataType — the other is a
+    // non-data type (function, Any, …). Unscreenable regardless
+    // (`screenableDomain` routes such signatures away), so compatibility is
+    // moot here; conservatively report incompatible to fail loudly.
+    return false
 }

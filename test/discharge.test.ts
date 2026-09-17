@@ -996,3 +996,118 @@ Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is
     // produce one. Pinned here via the evaluator's public hook; the
     // checker's hook shares the base-production call site.
 })
+
+Deno.test("discharge: a data type with a pattern-typed field is sampled — Empty | With(Pat) screens both variants", () => {
+    // Pattern support is not only for TOP-LEVEL parameters: a `DataType`
+    // variant with a `PatternDataType` field gets its field sampled through
+    // `patternSamples` (a matched token), so the `With(Pat)` variant's
+    // inhabitant is constructed and the screen reaches its field-carrying
+    // arm — the whole 2-value space {Empty(), With(Pat("Pat"))}, not just
+    // the `Empty` variant the pre-fix field sampler would have dropped.
+    const h = boolHarness()
+    const pat = new PatternDataType("Pat", ["[0-9]+"])
+    const withPat = new DataType("WithPat", [])
+    withPat.variants.push(
+        new Variant("Empty", []),
+        new Variant("With", [new Field("p", pat)]),
+    )
+    h.registry.register(pat)
+    h.registry.register(withPat)
+    h.opRegistry.declare(
+        new OpSig(
+            "wpId",
+            [withPat],
+            withPat,
+            "\\x:WithPat. fold [WithPat] x { Empty() -> Empty(), With(p) -> With(p) }",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "involutory", target: "wpId" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(
+        regime,
+        "residual",
+        "the With(Pat) field makes the carrier pattern-containing → residual",
+    )
+    assertEquals(instances, 2, "both variants' inhabitants were constructed and swept")
+    assertEquals(law.provenance, "asserted")
+    // The token-typed field sample is a real TokenVal in the sweep's vocabulary.
+    const withSample = evalOfHarness(h.registry, h.opRegistry)("With(Pat)", new ValueEnv())[0]
+    assert(
+        withSample instanceof VariantVal,
+        "the sampler's field vocabulary can build With(Pat(...))",
+    )
+    const fieldToken = withSample instanceof VariantVal
+        ? [...withSample.fields.values()][0]
+        : undefined
+    assert(fieldToken instanceof TokenVal, "the pattern-typed field's sample is a TokenVal")
+})
+
+Deno.test("discharge: a mixed data/pattern signature is rejected — homogeneous-carrier validation covers pattern types", () => {
+    // A commutative op over (Pat, Bool): the swapped axiom puts a token in
+    // the Bool slot — ill-typed by construction, and since `LCEval` does not
+    // enforce op argument types, the instances would all be holes and the
+    // claim could pass validation on zero checked instances.
+    // `paramTypeCompatible` rejects mixed data/pattern signatures BEFORE
+    // screening: `LawDeclarationError`, nothing in E.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    h.opRegistry.declare(
+        new OpSig("mixed", [natPat, h.bool], h.bool, "\\x:NatPat. \\b:Bool. b"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "commutative", target: "mixed" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "homogeneous operand carriers",
+    )
+    assertEquals(h.laws.lookup("mixed").length, 0)
+})
+
+Deno.test("discharge: a passed screen with 0 checked instances is REJECTED — all-holes sweeps are no evidence", () => {
+    // The second zero-coverage shape: the sweep RAN (samples existed) but
+    // every law instance evaluated to a hole — an operation whose every law
+    // instance errors. Installing `asserted` would claim "no counterexample
+    // found" over zero checked instances. Distinct diagnostic from the
+    // declined screen (broken evaluation vs no vocabulary). The carrier is
+    // Nat (residual, samples exist) but the op's body constructs `Ghost()`,
+    // an unregistered variant — every instance is a hole.
+    const h = boolHarness()
+    const nat = createNatType()
+    h.registry.register(nat)
+    h.opRegistry.declare(
+        new OpSig(
+            "ghostNat",
+            [nat, nat],
+            nat,
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Ghost(), Succ(p) -> Ghost() }",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "commutative", target: "ghostNat" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "exercised zero instances",
+    )
+    assertEquals(h.laws.lookup("ghostNat").length, 0)
+})

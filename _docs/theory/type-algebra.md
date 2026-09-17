@@ -52,12 +52,24 @@ Three readings of one equation, one module:
   record chains cannot overflow the number range while the caller's comparison still decides
   enumerability.
 
-**Theorem (finiteness criterion).** A μ-type is finitely inhabitable **iff it is acyclic** — no
-`Family` occurrence in its own unfolding — and every field type is finitely inhabitable. Proof:
-acyclic types have polynomial generating functions (the recursion is syntactically absent); cyclic
-types have $T = F(T)$ with $T$ reachable from $F$'s product terms, hence infinitely many inhabitants
-of unbounded size. The classifier is $O(\text{size of type declaration})$ with memoization — a
-decision procedure, not a heuristic.
+**Theorem (finiteness criterion — qualified).** For **productive** μ-types (those with at least one
+non-recursive base variant), finitely inhabitable **iff acyclic** — no `Family` occurrence in its
+own unfolding — and every field type is finitely inhabitable. Proof: acyclic productive types have
+polynomial generating functions (the recursion is syntactically absent); cyclic productive types
+have $T = F(T)$ with $T$ reachable from $F$'s product terms, hence infinitely many inhabitants of
+unbounded size.
+
+**Unproductive recursive types are the boundary of the first cut.** A definition like `Wrap(T)` — a
+variant whose only field is recursive — has an _empty_ least fixpoint: no finite value inhabits it
+(every value would need to wrap another, forever), yet the classifier reports `undefined`
+("unbounded"). Treating every reachable recursive field as unbounded is therefore a **conservative
+approximation, not an exact decision procedure**: it correctly identifies all truly-unbounded types
+(no false "finite") but over-rejects unproductive recursive ones (false "unbounded") — they are
+routed to the residual screen, where the screen then honestly reports no vocabulary (a Stream-like
+carrier's sampler has no base case). Adding productivity analysis ("does the recursion have a base
+case?") would refine this to an exact criterion; until then the conservative routing is the honest
+choice — it never claims full coverage of a space it cannot enumerate. The classifier is
+$O(\text{size of type declaration})$ with memoization.
 
 ### 2.2 Regime routing as arithmetic
 
@@ -94,10 +106,26 @@ from `machineFinite` encodings (§5) or derivation (§6) — never from exhausti
 
 ## 3. Coefficients: certified screen coverage
 
-For a regular type $T$ with generating function $G_T(x) = \sum_n c_n x^n$, $c_n$ counts the
-inhabitants of size $n$ (size = constructor-node count). Regular types (both μ-types and pattern
-types) have rational generating functions, so $c_n$ is computable from a linear recurrence once the
-type equation is known.
+For a type $T$ with generating function $G_T(x) = \sum_n c_n x^n$, $c_n$ counts the inhabitants of
+size $n$ (size = constructor-node count). The two carrier classes differ in the GF's form, and the
+certification design must keep them apart:
+
+- **Pattern types are regular languages** — by Chomsky–Schützenberger their GFs are **rational**:
+  $c_n$ satisfies a _linear recurrence_ with constant coefficients, computable directly once the
+  pattern's language equation is known (§2.3).
+- **Recursive μ-types are generally NOT regular** — their GFs are _algebraic_, not rational. A
+  branching recursive type such as `Tree = Leaf + Node(Tree, Tree)` has the Catalan generating
+  function $T(x) = 1 + x\,T(x)^2$, whose coefficients satisfy a _quadratic recurrence_
+  ($c_n = \sum_i c_i c_{n-1-i}$ — the Catalan numbers), not a linear one. A chain-recursive type
+  (`List`) is the degenerate case: its GF $1/(1-a)$ is rational. So the coefficient-certification
+  implementation needs at least algebraic-recurrence support (or per-type equation solving) before
+  it can cover recursive μ-carriers; linear recurrences alone cover pattern types and
+  chain-recursive carriers only.
+
+The design (PBI #65) should state this split explicitly: rational GFs for pattern types
+(Chomsky–Schützenberger), algebraic GFs for recursive μ-types (the Lagrange/implicit-function
+reading of the type equation), and a per-type decision for which recurrence class the certification
+machinery supports.
 
 This upgrades the residual screen's evidence from an opaque instance count to a **certified
 prefix**: a sweep bounded at depth 2 can state "checked all inhabitants of size ≤ 2 for each operand
