@@ -62,7 +62,7 @@ import { type OpSig } from "./ops.ts"
 
 import { AbstractLC, type LCShape } from "./grammar.ts"
 
-import { SpanClosure, Value, ValueEnv, VariantVal } from "./values.ts"
+import { SpanClosure, TokenVal, Value, ValueEnv, VariantVal } from "./values.ts"
 // ── Shape for evaluation ──────────────────────────────────────────────────────
 
 interface EvalShape extends LCShape {
@@ -214,6 +214,16 @@ export class LCEval extends AbstractLC<EvalShape> {
 
     protected paren(e: Value): Value {
         return e
+    }
+
+    /**
+     * ρ membership for the token gate: a name bound in ρ is a term variable
+     * (`patternTokenProd` falls through to `varProd`), so a PascalCase
+     * variable always evaluates to its ρ value — the registry's pattern-type
+     * entry never shadows it.
+     */
+    protected override nameBound(name: string, ctx: unknown): boolean {
+        return ctx instanceof ValueEnv && ctx.lookup(name) !== undefined
     }
 
     protected variantCon(name: string, args: Value[]): Value {
@@ -1214,5 +1224,15 @@ export class LCEval extends AbstractLC<EvalShape> {
     )
     protected opApp(_opName: string, _args: Value[]): Value {
         throw new Error("LCEval.opApp: unreachable — opProd is overridden")
+    }
+
+    /**
+     * E-Token: `Ident` resolving to a registered `PatternDataType` evaluates
+     * to the matched token — the raw text as a `TokenVal`. The token is an
+     * axiom of the operational semantics (lc.md §2.3): no subterm evaluation,
+     * the value IS the matched text.
+     */
+    protected matchedToken(dataTypeName: string, text: string): Value {
+        return new TokenVal(dataTypeName, text)
     }
 }

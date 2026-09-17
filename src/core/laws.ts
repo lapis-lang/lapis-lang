@@ -42,7 +42,7 @@ import { type OpRegistry, type OpSig } from "./ops.ts"
 
 import { isSubtype } from "./subtyping.ts"
 
-import { DataType, type Type } from "./types.ts"
+import { DataType, PatternDataType, type Type } from "./types.ts"
 
 /**
  * The evaluation-free type-checking entry the law declarations need
@@ -344,15 +344,17 @@ export const SCHEMA_ARITY: Record<LawKind, number> = {
 }
 
 /**
- * Check a law's domain type: the screen walks the variants of the
- * operation's parameter types to generate samples, so every parameter must
- * be a (data) type with variants. Function-typed parameters (higher-order
- * operations) are outside the first cut's screen — a law over such an
- * operation declares but cannot be screened; the caller installs it
- * `asserted` unscreened (the residual's honest risk, semantics.md §7.4).
+ * Check a law's domain type: the screen walks the variants of data-typed
+ * parameters (or draws matched tokens for pattern-typed ones — a
+ * `PatternDataType` has a sample vocabulary, the token atom), so every
+ * parameter must be a data type with variants or a declared pattern type.
+ * Function-typed parameters (higher-order operations) are outside the first
+ * cut's screen — a law over such an operation declares but cannot be
+ * screened; the caller rejects it (zero coverage: the screen declined,
+ * law_checking.ts).
  */
 export function screenableDomain(op: { paramTypes: readonly Type[] }): boolean {
-    return op.paramTypes.every((t) => t instanceof DataType)
+    return op.paramTypes.every((t) => t instanceof DataType || t instanceof PatternDataType)
 }
 
 /**

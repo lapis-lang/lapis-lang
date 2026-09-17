@@ -55,11 +55,11 @@ import {
 
 import { type CheckedOpSig, type OpRegistry } from "./ops.ts"
 
-import { Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
+import { TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
 
 import { EvalErrorValue } from "./eval_grammar.ts"
 
-import { AnyType, DataType, type Type } from "./types.ts"
+import { AnyType, DataType, PatternDataType, type Type } from "./types.ts"
 
 // ── Sampling ──────────────────────────────────────────────────────────────────
 
@@ -217,7 +217,7 @@ const SCHEMA_NAMES: Record<LawKind, readonly string[]> = {
 function instantiate(
     law: Omit<LawDecl, "provenance">,
     op: CheckedOpSig,
-    bindings: readonly (readonly [string, VariantVal])[],
+    bindings: readonly (readonly [string, Value])[],
     argumentValue: Value | undefined,
 ): LawInstance[] {
     const opName = op.name
@@ -284,6 +284,12 @@ function instantiate(
 
 /**
  * Render a value as an LC-like term (for `LawError` and dedup keys).
+ *
+ * A token renders as `Type"text"` (quoted): the type name disambiguates two
+ * different pattern types whose tokens carry the same text, and the quotes
+ * make whitespace/boundary characters visible — a counterexample must be
+ * readable unambiguously. (The render mirrors `valueEquals`'s token
+ * identity: same type AND same text.)
  */
 function renderValue(value: Value): string {
     if (value instanceof VariantVal) {
@@ -292,21 +298,37 @@ function renderValue(value: Value): string {
             ? `${value.variantName}(${fields.join(", ")})`
             : `${value.variantName}()`
     }
+    if (value instanceof TokenVal) {
+        return `${value.dataTypeName}(${JSON.stringify(value.text)})`
+    }
     return `<${value.kind}>`
 }
 
 // ── The screen ────────────────────────────────────────────────────────────────
 
 /**
+ * The screen's outcome: `"declined"` (the screen has no sample vocabulary
+ * for this claim — coverage 0 is a HOLE, not evidence) or `"passed"` with
+ * the number of instances actually checked. Falsification throws `LawError`
+ * and never returns.
+ */
+export type ScreenOutcome =
+    | { outcome: "declined" }
+    | { outcome: "passed"; checked: number }
+
+/**
  * Screen one law: instantiate its schema over bounded samples of the
  * operation's domain and evaluate both sides. The **first** falsifying
  * sample wins; the thrown `LawError` carries the counterexample.
  *
- * Returns the number of instances checked (evidence of coverage; passing is
- * still only evidence, never proof). The caller installs the law `asserted`
- * on a passing screen — `LawRegistry.declareLaw`, or the all-in-one
- * `declareCheckedLaw` (which routes `finite`-regime laws to exhaustion
- * instead — this function is the residual regime's mechanism).
+ * Returns the screen outcome: `"declined"` when the screen has no sample
+ * vocabulary for the claim (unscreenable domain, unscreenable relational
+ * operand, empty sample space — the claim was exercised ZERO times);
+ * `"passed"` with the instance count when the sweep ran (evidence of
+ * coverage; passing is still only evidence, never proof). The caller
+ * installs the law `asserted` on a passed screen — `LawRegistry.declareLaw`,
+ * or the all-in-one `declareCheckedLaw` (which routes `finite`-regime laws
+ * to exhaustion instead — this function is the residual regime's mechanism).
  *
  * @param law      the law declaration — structurally pre-validated by
  *                 `LawRegistry.validateLaw` in the `declareCheckedLaw`
@@ -326,10 +348,12 @@ export function screenLaw(
     omega: OpRegistry,
     eval_: EvalTerm,
     maxDepth: number = MAX_SAMPLE_DEPTH,
-): number {
+): ScreenOutcome {
     // Higher-order parameters: no finite sample vocabulary — the screen
-    // declines (checked = 0; the caller installs the law unscreened).
-    if (!screenableDomain(op)) return 0
+    // declines (the caller rejects a zero-coverage claim; installing an
+    // `asserted` law the screen never exercised would be silent under-
+    // coverage). See `declareCheckedLaw`.
+    if (!screenableDomain(op)) return { outcome: "declined" }
 
     // The argument value for argument-taking kinds (shared precondition with
     // exhaustion — see `evalArgument`): a non-evaluating argument rejects
@@ -343,7 +367,7 @@ export function screenLaw(
     // Distributive's relational operand operation must be screenable too.
     if (RELATIONAL_KINDS.includes(law.kind)) {
         const other = omega.lookup(law.argument!)
-        if (!other || !screenableDomain(other)) return 0
+        if (!other || !screenableDomain(other)) return { outcome: "declined" }
     }
 
     // Per-position samples: schema operand i draws from the samples of the
@@ -352,10 +376,12 @@ export function screenLaw(
     // the instance fails to evaluate and is silently skipped, losing
     // coverage. Heterogeneous types still share a position's samples with
     // the operation's actual signature (each position sweeps ITS OWN type).
-    const positionSamples: VariantVal[][] = op.paramTypes.map((
-        type,
-    ) => [...dedupe(samplesFor(type as DataType, maxDepth, eval_))])
-    if (positionSamples.some((s) => s.length === 0)) return 0
+    // Pattern-typed positions draw matched tokens (see `patternSamples`).
+    const positionSamples: Value[][] = op.paramTypes.map((type) => {
+        if (type instanceof PatternDataType) return patternSamples(type, eval_)
+        return [...dedupe(samplesFor(type as DataType, maxDepth, eval_))]
+    })
+    if (positionSamples.some((s) => s.length === 0)) return { outcome: "declined" }
 
     let checked = 0
     // Enumerate assignments over the schema variables: every combination of
@@ -382,7 +408,7 @@ export function screenLaw(
             checked++
         }
     }
-    return checked
+    return { outcome: "passed", checked }
 }
 
 /**
@@ -435,10 +461,10 @@ function checkInstance(
  */
 function* assignments(
     names: readonly string[],
-    positionSamples: readonly (readonly VariantVal[])[],
+    positionSamples: readonly (readonly Value[])[],
     paramCount: number,
     variableIndex: number = 0,
-): Generator<(readonly [string, VariantVal])[]> {
+): Generator<(readonly [string, Value])[]> {
     if (names.length === 0) {
         yield []
         return
@@ -481,6 +507,75 @@ export function makeEvalTerm(
 }
 
 // ── The screening regime (semantics.md §5.4) ─────────────────────────────────
+
+/**
+ * Sample values for a pattern-matched type: bounded representatives,
+ * evaluated through the evaluator so they become real `TokenVal`s (the same
+ * construction path evaluation uses).
+ *
+ * The pattern universe is unbounded IN TOTAL (type-algebra.md §2.3: a
+ * pattern type's generating function is rational, never polynomial) — but a
+ * **certified prefix** is checkable. In this grammar-based evaluator the
+ * token's source form is the pattern type's NAME (the atom production is
+ * name-lexed, matching LC's identifier rule), so the representative set is
+ * the singleton per pattern type: the name itself, whose `TokenVal` carries
+ * it as the raw text. That is the size-1 prefix of the type's space — the
+ * smallest honest sweep a term-grammar evaluator can exercise. A type with
+ * no declared patterns has NO inhabitants — the empty space declines the
+ * screen (zero-coverage honesty, `declareCheckedLaw`).
+ */
+function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
+    if (type.patterns.length === 0) return []
+    // The token atom evaluates via the evaluator's `matchedToken` (a
+    // `TokenVal` of the pattern type) — construction goes through the
+    // evaluator so the value's type resolution follows the same registry
+    // rules as every other value.
+    //
+    // The evaluator's result is validated EXPLICITLY, not indexed blindly:
+    // 0 results and >1 results are distinct failure shapes with distinct
+    // meanings, and neither may masquerade as "no vocabulary":
+    //
+    // - **0 results** — the token atom did not parse/evaluate (the registry
+    //   entry and the evaluator's registry disagree, or evaluation broke):
+    //   this is an EVALUATOR inconsistency, not a legitimate empty space
+    //   (the empty space is the `patterns.length === 0` case above, already
+    //   handled). Throwing surfaces the breakage; a silent decline would
+    //   misreport it as a sample-space shape.
+    // - **>1 results**: the evaluator's determinism policy treats an
+    //   ambiguous internal parse as an error (`evalOp` fails loudly rather
+    //   than first-picking). A token atom whose parse yields multiple
+    //   `TokenVal`s is the same defect shape — report it as an error, don't
+    //   sweep an arbitrary first pick.
+    // - **a non-token result** (a variant, a closure): the name resolved to
+    //   something else entirely — also an evaluator/registry inconsistency
+    //   (the gate checked a `PatternDataType`; the evaluator should agree).
+    //   Same loud failure.
+    const results = [...eval_(type.name, new ValueEnv())]
+    const tokens = results.filter((r): r is TokenVal => r instanceof TokenVal)
+    if (results.length === 0) {
+        throw new LawError(
+            type.name,
+            { kind: "associative", target: type.name },
+            [`pattern type ${type.name}: the token atom did not evaluate`],
+            "—",
+            "—",
+        )
+    }
+    if (tokens.length !== 1 || results.length !== 1) {
+        throw new LawError(
+            type.name,
+            { kind: "associative", target: type.name },
+            [
+                `pattern type ${type.name}: the token atom's parse yielded ` +
+                `${results.length} results (${tokens.length} tokens) — ` +
+                `expected exactly one TokenVal`,
+            ],
+            "—",
+            "—",
+        )
+    }
+    return tokens
+}
 
 /**
  * The checking regime the law-checking pass applies (semantics.md §5.4):
@@ -646,7 +741,13 @@ export function screeningRegime(
         // size is irrelevant (this is what keeps an identity claim over
         // (Bool, 2¹⁸) exhaustible — only position 0 is ever enumerated).
         if (exponents[position] === 0) continue
-        if (!(op.paramTypes[position]! instanceof DataType)) return "residual"
+        if (!(op.paramTypes[position]! instanceof DataType)) {
+            // Pattern types route residual ALWAYS (type-algebra.md §2.3: a
+            // pattern type's generating function is rational — unbounded in
+            // total — so exhaustion is never honest for one; the screen's
+            // token samples cover a certified size-1 prefix instead).
+            return "residual"
+        }
         const inhabitants = finiteInhabitants(op.paramTypes[position]! as DataType)
         if (inhabitants === undefined) return "residual"
         // Saturated count = "finite but at or past the ceiling" — the true
@@ -681,15 +782,25 @@ export function screeningRegime(
  * `TypeError` from an unknown kind, or zero-coverage silence). The check
  * runs second, so a falsified claim never enters `E`.
  *
+ * **Zero-coverage rejection:** a `residual`-regime law whose screen
+ * *declined* (checked 0 instances because the domain is unscreenable or
+ * yielded no samples) is REJECTED, not installed: `asserted` means "the
+ * screen found no counterexample" — a claim the screen never exercised
+ * carries no such evidence. (Exhaustion's zero-coverage case — a vacuous
+ * claim over an empty carrier — stays honest: there the count 0 records a
+ * *complete* sweep over ∅, a real proof shape.)
+ *
  * Returns `{ law, instances, regime }` — the installed declaration, the
  * number of instances checked, and the regime that produced it.
  *
  * @throws LawError when the check falsifies the law (nothing is installed).
  * @throws LawDeclarationError when the claim is not in the closed vocabulary,
- * is structurally ill-formed (from `LawRegistry.validateLaw`), or — in the
+ * is structurally ill-formed (from `LawRegistry.validateLaw`) — in the
  * `finite` regime — an instance of the axiom fails to evaluate (a
  * `discharged` tag must mean full coverage; holes in the sweep are a
- * rejected declaration, not silent under-coverage).
+ * rejected declaration, not silent under-coverage), or — in the `residual`
+ * regime — the screen declined to exercise the claim at all (zero
+ * coverage: an unscreenable domain or an empty sample space).
  */
 export function declareCheckedLaw(
     law: Omit<LawDecl, "provenance">,
@@ -712,9 +823,27 @@ export function declareCheckedLaw(
     // residual → the bounded-depth screen. The check runs BEFORE installing:
     // a falsified claim never enters E.
     const regime = screeningRegime(law, op)
-    const instances = regime === "finite"
-        ? exhaustLaw(law, op, eval_)
-        : screenLaw(law, op, omega, eval_, maxDepth)
+    const screen: ScreenOutcome | undefined = regime === "residual"
+        ? screenLaw(law, op, omega, eval_, maxDepth)
+        : undefined
+    const instances = screen
+        ? screen.outcome === "passed" ? screen.checked : 0
+        : exhaustLaw(law, op, eval_)
+    // Zero-coverage honesty: a DECLINED screen (unscreenable domain, empty
+    // sample space, unscreenable relational operand) exercised the claim
+    // ZERO times — installing it `asserted` would claim "the screen found
+    // no counterexample" with zero evidence. A passed screen with 0 checked
+    // instances is still evidence (every drawn sample failed to evaluate —
+    // reported in the count). Exhaustion's zero-coverage case — a vacuous
+    // claim over an empty carrier — stays honest: there the count 0 records
+    // a *complete* sweep over ∅, a real proof shape.
+    if (screen?.outcome === "declined") {
+        throw new LawDeclarationError(
+            law.target,
+            "the screen declined: no sample vocabulary for this claim's domain " +
+                "(higher-order or empty sample space) — zero coverage, nothing installed",
+        )
+    }
     const provenance: LawProvenance = regime === "finite" ? "discharged" : "asserted"
     laws.declareLaw(law, omega, provenance, checker)
     const decl: LawDecl = { ...law, provenance }
