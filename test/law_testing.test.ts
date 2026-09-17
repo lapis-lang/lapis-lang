@@ -18,18 +18,28 @@ import {
     valueEquals,
     valueSize,
 } from "../src/index.ts"
-import { type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
+import { TokenVal, type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
 import { LCEval } from "../src/core/eval_grammar.ts"
 import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
 import { DataType, Field, Variant } from "../src/core/types.ts"
 
-import { createLawHarness, createOpFixtures, NatSourceGrammar } from "./fixtures.ts"
+import {
+    createLawHarness,
+    createOpFixtures,
+    createStackType,
+    NatSourceGrammar,
+} from "./fixtures.ts"
 
 import { PropertyFailure } from "@lapis-lang/lang-forma"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const { registry, opRegistry, nat } = createOpFixtures()
+// `nat` is NOT destructured here: the shrinker tests build their generator
+// with the carrier from ITS OWN fixture (`derivativeGenerator`) — the
+// identity-based carrier guard and `reuseAdmissible` compare `DataType`
+// instances by reference, so a module-level type mixed with a fresh eval
+// grammar would silently disable reuse and route shrinks to the fallback.
+const { registry, opRegistry } = createOpFixtures()
 const evalGrammar = new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
 const evalOf: EvalTerm = makeEvalTerm(evalGrammar)
 
@@ -153,10 +163,43 @@ Deno.test("valueSize: node count — Zero()=1, Succ(Zero())=2", () => {
 Deno.test("renderValue: the round trip parses and evaluates back to the same value", () => {
     for (const n of [0, 1, 3]) {
         const value = natOf(n)
-        const [reparsed] = evalGrammar.parseWith(renderValue(value), new ValueEnv())
+        const rendered = renderValue(value)
+        assert(rendered !== undefined, "a Nat always renders")
+        const [reparsed] = evalGrammar.parseWith(rendered, new ValueEnv())
         assert(reparsed instanceof VariantVal)
-        assertEquals(renderValue(reparsed), renderValue(value))
+        assertEquals(renderValue(reparsed), rendered)
     }
+})
+
+Deno.test("renderValue: a token renders as its bare type name and round-trips", () => {
+    // The evaluator's token source form is the bare pattern-type name
+    // (patternTokenProd emits matchedToken(name, name) — text IS the
+    // name-lexed source). `Pat("x")` is NOT LC syntax: it was the old
+    // renderer's output and failed to re-parse (the malformed-candidate
+    // bug this contract fixes).
+    const rendered = renderValue(new TokenVal("Pat", "Pat"))
+    assertEquals(rendered, "Pat")
+})
+
+Deno.test("renderValue: a deviant token (text ≠ type name) declines", () => {
+    // Only constructible directly (the evaluator always stamps text = name);
+    // the decline keeps such a value from becoming a malformed candidate.
+    assertEquals(renderValue(new TokenVal("Pat", "x")), undefined)
+})
+
+Deno.test("renderValue: a closure-valued field declines the whole candidate", () => {
+    // Stack's `value` field is Any-typed — a Push holding a closure is a
+    // real evaluated value, and the closure has NO LC source form. The
+    // decline PROPAGATES: a partial render is never emitted.
+    const stack = createStackType()
+    const [closure] = evalGrammar.parseWith("\\x:Any. x", new ValueEnv())
+    assert(closure !== undefined && !(closure instanceof VariantVal))
+    const value = new VariantVal(
+        "Push",
+        stack,
+        new Map([["value", closure as Value], ["rest", new VariantVal("Empty", stack, new Map())]]),
+    )
+    assertEquals(renderValue(value), undefined)
 })
 
 // ── The ∂T shrinker (standalone) ──────────────────────────────────────────────
@@ -164,21 +207,30 @@ Deno.test("renderValue: the round trip parses and evaluates back to the same val
 /**
  * A generator bound to the fixtures — shrink tests run against `shrink`
  * directly (forAll-level quality is pinned in laws.test.ts's anchor).
+ *
+ * The carrier comes from THIS fixture, not the module-level one: reused
+ * values produced by `evalG` carry the fresh registry's `DataType` identity,
+ * and the shrinker's carrier guard (value.dataType !== carrier → fallback)
+ * plus `reuseAdmissible`'s identity check both compare by reference — a
+ * module-level `nat` here would silently disable reuse and route every
+ * shrink to the regeneration fallback.
  */
 function derivativeGenerator(): DerivativeGenerator<{ nat: string }> {
-    const { registry, opRegistry } = createOpFixtures()
+    const { registry, opRegistry, nat: fixtureNat } = createOpFixtures()
     const evalG = new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
     return new DerivativeGenerator(
         new NatSourceGrammar(),
         { maxDepth: 4, maxRecursion: 5, branchStrategy: "random" },
-        { evalOf: makeEvalTerm(evalG), carrier: nat },
+        { evalOf: makeEvalTerm(evalG), carrier: fixtureNat },
     )
 }
 
 Deno.test("shrink: a Nat's candidates are exactly the strictly smaller Nats, ordered smallest-first per path", () => {
     const gen = derivativeGenerator()
     const value = natOf(2)
-    const candidates = gen.shrink(renderValue(value))
+    const source = renderValue(value)
+    assert(source !== undefined)
+    const candidates = gen.shrink(source)
     // Every candidate is a Nat, strictly smaller, and re-parses.
     assert(candidates.length > 0)
     for (const candidate of candidates) {
@@ -226,7 +278,9 @@ Deno.test("shrink: fillers reuse the failing value's own subvalues (no generatio
     // is exhausted, not skipped. So the candidate list is exactly
     // [Succ(Zero())]: one-level spine shrink, deduped (plugging Zero() into
     // the outer hole renders the SAME source as the existing candidate).
-    const candidates = gen.shrink(renderValue(natOf(2)))
+    const source = renderValue(natOf(2))
+    assert(source !== undefined)
+    const candidates = gen.shrink(source)
     assertEquals(candidates, ["Succ(Zero())"])
 })
 

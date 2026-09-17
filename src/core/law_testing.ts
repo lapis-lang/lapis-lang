@@ -163,23 +163,48 @@ export function valueSize(value: Value): number {
 /**
  * Render a value as LC source — the harness's property domain is source
  * strings, so plugged candidates render back to the concrete syntax the
- * evaluator parses.
+ * evaluator parses. Returns `undefined` when the value has NO valid source
+ * form: the result must always re-parse (a malformed candidate would be
+ * reported as a falsification the evaluator cannot even run).
+ *
+ - A `VariantVal` renders as `Name(field, …)` — recursively; a variant
+   whose field subtree is not renderable declines the whole candidate
+   (decline propagates: a partial render is never emitted).
+ - A `TokenVal` renders as its bare type name — the token's source form in
+   this grammar (`patternTokenProd` emits `matchedToken(name, name)`: the
+   text IS the name-lexed source). A token whose text differs from its type
+   name (possible only by direct construction, never by evaluation) declines.
+ - Closures, codata values, and error sentinels decline: they have no
+   LC source form this renderer can emit.
  *
  * Field order follows the value's construction order (`VariantVal.fields`
  * is insertion-ordered by field declaration), mirroring how the law
- * checker's own renderer prints values.
+ * checker's own renderer prints values (law_checking.ts — display-only;
+ * THIS renderer is round-trip-checked).
  */
-export function renderValue(value: Value): string {
+export function renderValue(value: Value): string | undefined {
     if (value instanceof VariantVal) {
-        const fields = [...value.fields.values()].map(renderValue)
+        const fields: string[] = []
+        for (const field of value.fields.values()) {
+            const rendered = renderValue(field)
+            if (rendered === undefined) return undefined
+            fields.push(rendered)
+        }
         return fields.length > 0
             ? `${value.variantName}(${fields.join(", ")})`
             : `${value.variantName}()`
     }
     if (value instanceof TokenVal) {
-        return `${value.dataTypeName}(${JSON.stringify(value.text)})`
+        // The token's source form is the bare pattern-type name (the
+        // evaluator's `patternTokenProd` emits `matchedToken(name, name)` —
+        // text IS the name-lexed source). `Pat("x")` is NOT LC syntax; a
+        // token whose text deviates from the name-lexed form has no source
+        // form and declines.
+        return value.text === value.dataTypeName ? value.dataTypeName : undefined
     }
-    return `<${value.kind}>`
+    // Closures, codata values, error sentinels: no LC source form — decline
+    // (the caller either skips this candidate or falls back to regeneration).
+    return undefined
 }
 
 // ── The ∂T shrinker ───────────────────────────────────────────────────────────
@@ -250,10 +275,18 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
     override shrink(source: string): string[] {
         // Parse the counterexample into a structured value. Failure shapes:
         // an empty forest (did not parse), an error sentinel (evaluation
-        // broke), a non-structured value (token/closure), or a value of a
-        // different family — all fall back to regeneration.
+        // broke), a non-structured value (token/closure), or a value whose
+        // carrier differs from the generator's — all fall back to
+        // regeneration.
         const value = this.evalOf(source, new ValueEnv())[0]
         if (!(value instanceof VariantVal)) return super.shrink(source)
+        // The value's carrier must be the generator's carrier: contextPaths
+        // walks with the VALUE's stamped type while `holeTypeAt` resolves
+        // from this.carrier — a value evaluated under a different registry
+        // or family would produce paths resolved against the wrong type
+        // (fillers of the wrong space, plugs of the wrong shape). Identity
+        // check: same registry, same instance, or no ∂T path is trusted.
+        if (value.dataType !== this.carrier) return super.shrink(source)
         const paths = contextPaths(value)
 
         // Prefetch the reuse pool once: the failing value's own subvalues
@@ -276,7 +309,7 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
         // Nat — the dominant cost). The sampled vocabulary itself is cached
         // across calls (`sampleCache`); only the reuse pool differs per
         // counterexample, so the per-call work is pool assembly + plug.
-        const poolByHoleType = new Map<DataType, readonly VariantVal[]>()
+        const fillersByHoleType = new Map<DataType, readonly VariantVal[]>()
         // Shallower paths first: a context closer to the root replaces a
         // LARGER subtree, so its fillers are the strongest reductions. Within
         // a path, fillers ascend by size (smallest first).
@@ -290,21 +323,27 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
             const holeType = this.holeTypeAt(path)
             if (!(holeType instanceof DataType)) continue
             const size = valueSize(subtree)
-            let pool = poolByHoleType.get(holeType)
-            if (pool === undefined) {
-                const built = this.fillers(holeType, pool ?? [])
-                poolByHoleType.set(holeType, built)
-                pool = built
+            let holeFillers = fillersByHoleType.get(holeType)
+            if (holeFillers === undefined) {
+                holeFillers = this.fillers(holeType, pool)
+                fillersByHoleType.set(holeType, holeFillers)
             }
-            for (const filler of pool) {
+            for (const filler of holeFillers) {
                 // Strictly smaller than the subtree at THIS hole — the
                 // monotone filter is per-path (the pool itself is not).
                 if (valueSize(filler) >= size) continue
                 const patched = plug(value, path, filler)
                 if (patched === undefined) continue
+                // Round-trip-checked render: a candidate whose subtree is
+                // not renderable (a closure- or codata-valued field, a
+                // deviant token) declines — NEVER emitted as malformed
+                // source the evaluator would fail on (an unparseable
+                // candidate would surface as a non-evaluation, i.e. a fake
+                // falsification the runner reports).
                 const rendered = renderValue(patched)
-                if (seen.has(rendered)) continue
+                if (rendered === undefined) continue
                 if (rendered === source) continue
+                if (seen.has(rendered)) continue
                 seen.add(rendered)
                 candidates.push(rendered)
             }
@@ -352,7 +391,12 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
         const out: VariantVal[] = []
         const seen = new Set<string>()
         const push = (v: VariantVal): void => {
+            // Unrenderable fillers (a closure- or codata-valued subvalue) are
+            // excluded HERE: a filler that cannot render can never produce a
+            // valid candidate, so keeping it would only waste plug+render
+            // work per path.
             const key = renderValue(v)
+            if (key === undefined) return
             if (seen.has(key)) return
             seen.add(key)
             out.push(v)

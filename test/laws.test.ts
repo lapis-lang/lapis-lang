@@ -900,8 +900,13 @@ function countInvocations(gen: ValueGenerator<string>): number {
             calls++
             return idempotentMulHolds(src)
         }, { numRuns: 100, seed: 42 })
-    } catch {
-        // PropertyFailure — the count is what the loop consumed.
+    } catch (error) {
+        // Only the EXPECTED failure shape is tolerated: a PropertyFailure
+        // means the shrink loop completed and the count is what it consumed.
+        // Any other error (a malformed candidate breaking the evaluator, a
+        // property bug) must fail the test — swallowing it would report a
+        // count for a run that never completed its shrink.
+        if (!(error instanceof PropertyFailure)) throw error
     }
     return calls
 }
