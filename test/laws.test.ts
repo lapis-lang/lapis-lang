@@ -33,10 +33,11 @@ import {
     createLawHarness,
     createOpFixtures,
     evalOne,
+    NatSourceGrammar,
     slowTestsEnabled,
 } from "./fixtures.ts"
 
-import { PropertyFailure } from "@lapis-lang/lang-forma"
+import { PropertyFailure, type ValueGenerator } from "@lapis-lang/lang-forma"
 
 import { assert, assertEquals, assertThrows } from "@std/assert"
 
@@ -879,6 +880,61 @@ Deno.test("forAll: the same seed reproduces the same counterexample", () => {
         PropertyFailure,
     )
     assertEquals(e1.counterexample, e2.counterexample)
+})
+
+// ── Shrink quality: ∂T vs. regeneration (the measurable improvement) ────────
+
+/**
+ * Count the property invocations a falsified run consumes end to end
+ * (generation + shrink loop): the same seed and numRuns, differing only in
+ * the generator's shrink strategy. The ∂T shrinker's claim — candidates
+ * derived from the failing value's structure converge faster than
+ * re-generation's depth-dropping search — is asserted RELATIVELY, in the
+ * same run, so the comparison is not pinned to absolute constants that a
+ * library bump would shift.
+ */
+function countInvocations(gen: ValueGenerator<string>): number {
+    let calls = 0
+    try {
+        gen.forAll((src: string) => {
+            calls++
+            return idempotentMulHolds(src)
+        }, { numRuns: 100, seed: 42 })
+    } catch (error) {
+        // Only the EXPECTED failure shape is tolerated: a PropertyFailure
+        // means the shrink loop completed and the count is what it consumed.
+        // Any other error (a malformed candidate breaking the evaluator, a
+        // property bug) must fail the test — swallowing it would report a
+        // count for a run that never completed its shrink.
+        if (!(error instanceof PropertyFailure)) throw error
+    }
+    return calls
+}
+
+Deno.test("forAll: the ∂T shrinker does not consume more property invocations than regeneration (shrink quality, relative)", () => {
+    // The ∂T harness (the promoted one — candidates from the failing
+    // value's own structure).
+    const derivativeCalls = countInvocations(gen)
+    // The baseline: the same grammar and budgets, but the library's
+    // regeneration shrinker (toGenerator — no ∂T hook).
+    const baselineGen = new NatSourceGrammar().toGenerator({
+        maxDepth: 4,
+        maxRecursion: 5,
+        branchStrategy: "random",
+    })
+    const baselineCalls = countInvocations(baselineGen)
+    // Parity-or-better: the ∂T candidates shrink along the actual value
+    // (deterministically), so they cannot need MORE invocations than the
+    // regeneration re-roll lottery on the same seed. A strict win is
+    // expected but not required for merge — a tie is acceptable evidence
+    // of parity (both shrinkers can converge in one candidate on a small
+    // anchor), so the assertion is `<=`. What must hold for BOTH is that
+    // the minimal falsifier is still Nat 2 — pinned by the contract test
+    // above.
+    assert(
+        derivativeCalls <= baselineCalls,
+        `∂T shrink invocations (${derivativeCalls}) must not exceed regeneration's (${baselineCalls})`,
+    )
 })
 
 Deno.test({

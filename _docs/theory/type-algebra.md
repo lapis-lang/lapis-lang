@@ -252,10 +252,15 @@ total maps (`from`/`to`) checked against the calculus.
 | Zero-coverage rejection (declined screen)  | **implemented** (`screenLaw` outcome + reject)              |
 | `Token` value form (`TokenVal`, T-Token)   | **implemented** (`values.ts`, `grammar.ts`)                 |
 | Pattern sampling (token prefix, §2.3/§3)   | **implemented** (`patternSamples` in `law_checking.ts`)     |
+| ∂T machinery (§4) — `derivative(T)`        | **implemented** (`type_algebra.ts`; `ContextSpec` shapes,   |
+|                                            | implicit differentiation at the μ-bound)                    |
+| ∂T-based structural shrinking              | **implemented** (`law_testing.ts`; `DerivativeGenerator`,   |
+|                                            | regeneration as the fallback)                               |
+| ∂T: `old`/paramorphism typing (§4.2)       | pending (stretch — needs the `old` language feature)        |
+| ∂T: observation-channel evidence typing    | pending (stretch — needs the re-screening channel)          |
 | Coefficient-certified screen coverage (§3) | pending (screen enumerates the size-1 prefix; GF check TBD) |
 | Encoding declarations (§5)                 | pending (design above; `semantics.md` §5.4 note)            |
 | BMF derivation engine (§6)                 | pending (awaits the handler-fragment characterization)      |
-| ∂T machinery (§4)                          | pending (shrinking / `old` typing / observation)            |
 
 Ordering rationale: counting and routing landed first because they are the **decision procedures**
 everything else consults; pattern-value support next (it unblocks the largest unserved universe);
