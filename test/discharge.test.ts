@@ -28,13 +28,14 @@ import {
     OpSig,
     screeningRegime,
     screenLaw,
+    TokenVal,
     TypeRegistry,
     type Value,
     ValueEnv,
     VariantVal,
 } from "../src/index.ts"
 
-import { DataType, Field, FunType, TypeEnv, Variant } from "../src/core/types.ts"
+import { DataType, Field, FunType, PatternDataType, TypeEnv, Variant } from "../src/core/types.ts"
 
 import { createBoolType, createNatType } from "./fixtures.ts"
 
@@ -399,7 +400,7 @@ Deno.test("screen: typed field samples — residual folds over field variants ev
     )
     assertEquals(
         sweep,
-        instances,
+        { outcome: "passed", checked: instances },
         "the all-in-one entry reports the same coverage as the raw screen",
     )
 })
@@ -443,7 +444,12 @@ Deno.test("discharge: the residual screen still skips non-evaluating instances",
         "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
     )
     const blindEval = (_source: string, _rho: ValueEnv): readonly VariantVal[] => []
-    // Raw screenLaw (caller-beware) with a dead evaluator: 0 checked, no throw.
+    // Raw screenLaw (caller-beware) with a dead evaluator: the sampler
+    // itself cannot construct any sample (variant construction is an
+    // evaluation), so the screen has NO sample vocabulary — declined. The
+    // passed-with-0-coverage shape (a running sweep whose every instance is
+    // a hole) needs a live sampler and a blind instance evaluator, which is
+    // the heterogeneous-commutative case in laws.test.ts.
     assertEquals(
         screenLaw(
             { kind: "associative", target: "andOp" },
@@ -451,7 +457,7 @@ Deno.test("discharge: the residual screen still skips non-evaluating instances",
             h.opRegistry,
             blindEval,
         ),
-        0,
+        { outcome: "declined" },
     )
 })
 
@@ -745,4 +751,363 @@ Deno.test("discharge: a variant with a zero-inhabitant field contributes nothing
     assertEquals(law.provenance, "discharged")
     assertEquals(instances, 1, "the true space is {Live()} — Dead contributes zero values")
     assertEquals(bigConstructions, 0, "Big's space is never enumerated for a dead variant")
+})
+
+// ── Zero-coverage honesty (the declined screen) ──────────────────────────────
+
+Deno.test("discharge: a residual law whose screen declines is REJECTED — zero coverage installs nothing", () => {
+    // The all-in-one entry's zero-coverage contract: a screen that DECLINED
+    // (no sample vocabulary) means the claim was exercised zero times, so
+    // installing it `asserted` would claim evidence where there is none. The
+    // declaration is rejected, and nothing enters E. The fixture: a carrier
+    // whose ONLY variant is recursive (`Wrap(Family)` — Stream-shaped): no
+    // base case, so the sampler has NO depth-0 vocabulary and the sample
+    // space is empty at every depth. finiteInhabitants is undefined
+    // (unbounded) → regime residual → the screen runs and declines.
+    // (An empty-variant carrier does NOT hit this path: it routes `finite`
+    // and discharges vacuously — a complete sweep over ∅ is a real proof.)
+    const h = boolHarness()
+    const streamLike = new DataType("StreamLike", [])
+    streamLike.variants.push(new Variant("Wrap", [new Field("inner", streamLike, true)]))
+    h.registry.register(streamLike)
+    h.opRegistry.declare(
+        new OpSig(
+            "wrapOp",
+            [streamLike, streamLike],
+            streamLike,
+            "\\x:StreamLike. \\y:StreamLike. x",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "associative", target: "wrapOp" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "the screen declined",
+    )
+    assertEquals(h.laws.lookup("wrapOp").length, 0, "a zero-coverage law never enters E")
+})
+
+// ── Pattern-typed carriers (TokenVal sampling) ───────────────────────────────
+
+Deno.test("discharge: a pattern-typed op screens via token samples — asserted with real coverage", () => {
+    // The pattern universe is unbounded in total (rational generating
+    // function — type-algebra.md §2.3), so the regime is residual ALWAYS.
+    // But a pattern carrier has a sample vocabulary: the token atom (the
+    // pattern type's name, evaluated to a TokenVal). The screen exercises
+    // the claim over that certified size-1 prefix — real coverage, not a
+    // declined sweep — and the law enters E as `asserted`.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    h.opRegistry.declare(
+        new OpSig("tokOr", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. y"),
+        { checkDefinition: () => undefined },
+    )
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "commutative", target: "tokOr" },
+        h.opRegistry,
+        h.laws,
+        eval_,
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "residual", "a pattern carrier never routes finite")
+    assertEquals(instances, 1, "the singleton token sample gives real coverage")
+    assertEquals(law.provenance, "asserted")
+    assertEquals(h.laws.lookup("tokOr").length, 1)
+})
+
+Deno.test("discharge: an absorbing law over a pattern carrier screens both directions (2 instances)", () => {
+    // The argument-taking schema (`absorbing: e`) evaluates its argument —
+    // the token atom — and sweeps BOTH directions over the token samples:
+    // two instances per assignment (the schema's dual-axiom shape), real
+    // coverage over the pattern carrier's certified prefix.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    h.opRegistry.declare(
+        new OpSig("tokConst", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    // On the singleton sample space (a = z — the same token), the absorbing
+    // axiom is satisfied by the projection `op(x, y) = x` in BOTH directions:
+    // op(z, a) = z holds; op(a, z) = a = z holds. Passing with 2 instances is
+    // the honest coverage measure — falsification needs a richer vocabulary
+    // (multiple token samples), which is the screen's bounded-evidence
+    // contract, not a hole.
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "absorbing", target: "tokConst", argument: "NatPat" },
+        h.opRegistry,
+        h.laws,
+        eval_,
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "residual")
+    assertEquals(instances, 2, "both axiom directions checked")
+    assertEquals(law.provenance, "asserted")
+})
+
+// ── Token/variable precedence (the nameBound gate) ──────────────────────────
+
+Deno.test("token: the nameBound gate — a term-variable name is never a token", () => {
+    // Precedence contract: `patternTokenProd` consults `nameBound` BEFORE the
+    // registry, so a live term variable can never be captured by the token
+    // branch. LC's lexical convention makes variables camelCase (`ident`,
+    // surface-syntax.md §1.2) and pattern types PascalCase, so the collision
+    // is not reachable through the surface binders (lambda/let/handlers all
+    // bind via `ident`) — the gate is the defensive invariant that keeps
+    // T-Var/E-Var correct even if a future binder accepts PascalCase names.
+    // Direct gate test: the checker's `nameBound` sees Γ, the evaluator's ρ.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    const tc = new LCTypeCheck().setRegistry(h.registry).setOpRegistry(h.opRegistry)
+    // A bound lowercase variable of the pattern type: resolves via Γ (the
+    // token branch declines on the bound name — same result either way, but
+    // the ROUTE differs; pinned by the unbound control below).
+    const boundLower = new TypeEnv().extend("natPat", natPat)
+    assertEquals(
+        [...tc.parseWith("natPat", boundLower)],
+        [natPat],
+        "a bound lowercase variable types via Γ",
+    )
+    // Unbound registered name: the token branch.
+    assertEquals(
+        [...tc.parseWith("NatPat", new TypeEnv())],
+        [natPat],
+        "an unbound registered name is a matched token",
+    )
+})
+
+Deno.test("token: the evaluator's nameBound gate routes ρ bindings to the variable branch", () => {
+    // The evaluator side: a ρ-bound name (any case) is a variable reference;
+    // an unbound registered name is a token. The gate's contract, probed
+    // through the evaluator's public parse.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    const ev = new LCEval().setRegistry(h.registry)
+    // Bound lowercase name: the bound value flows (E-Var), not a token.
+    const bound = new VariantVal("True", h.bool, new Map())
+    const values = [...ev.parseWith("natPat", new ValueEnv().extend("natPat", bound))]
+    assertEquals(values.length, 1)
+    assert(
+        values[0] instanceof VariantVal,
+        "the ρ binding wins: the value is the bound variant, not a token",
+    )
+    // Unbound registered name: a token.
+    const tokenValues = [...ev.parseWith("NatPat", new ValueEnv())]
+    assertEquals(tokenValues.length, 1)
+    assertEquals((tokenValues[0] as TokenVal).dataTypeName, "NatPat")
+})
+
+Deno.test("discharge: a pattern type with NO patterns has no vocabulary — the screen declines", () => {
+    // The empty-pattern early return in `patternSamples`: a pattern type
+    // with no declared patterns has zero inhabitants, so the screen has no
+    // sample vocabulary and declines — the declaration is rejected rather
+    // than installed `asserted` with zero coverage.
+    const h = boolHarness()
+    const hollow = new PatternDataType("HollowPat", [])
+    h.registry.register(hollow)
+    h.opRegistry.declare(
+        new OpSig("hollowTok", [hollow, hollow], hollow, "\\x:HollowPat. \\y:HollowPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "associative", target: "hollowTok" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "the screen declined",
+    )
+    assertEquals(h.laws.lookup("hollowTok").length, 0)
+})
+
+Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is a variable, not a token", () => {
+    // The gate's core guarantee, pinned at the hook level: `nameBound` reports
+    // Γ/ρ membership for a PascalCase name, so `patternTokenProd` declines
+    // the token branch BEFORE the registry consult — the variable path wins
+    // for any bound name, regardless of case.
+    //
+    // The full parse path (`Γ-bound NatPat` lexed as a variable) is not
+    // reachable today: every binder lexes via `ident` (lowercase-first,
+    // surface-syntax.md §1.2 — variables are camelCase by convention) and
+    // `varProd` itself lexes via `ident`, so a PascalCase atom can never be
+    // READ as a variable. The gate is therefore the defensive invariant for
+    // a future binder that accepts PascalCase names — and the hook is the
+    // observable that pins it. (The checker's `TypeCheckCtx` is
+    // module-private, so the checker-side hook is exercised through the
+    // parse-level behavior it guards: with the gate removed, the token
+    // branch would type a Γ-bound PascalCase name as the pattern type —
+    // the shadowing the gate prevents.)
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+
+    // Evaluator side (ρ is a public ValueEnv): bind the PascalCase name
+    // DIRECTLY and observe the hook — the gate's input, exactly as
+    // `patternTokenProd` calls it.
+    class ExposedEval extends LCEval {
+        nameBoundExposed(name: string, ctx: unknown): boolean {
+            return this.nameBound(name, ctx)
+        }
+    }
+    const ev = new ExposedEval().setRegistry(h.registry)
+    const boundRho = new ValueEnv().extend(
+        "NatPat",
+        new TokenVal("NatPat", "NatPat"), // any Value — the gate reads only membership
+    )
+    assert(
+        ev.nameBoundExposed("NatPat", boundRho),
+        "a ρ-bound PascalCase name reports BOUND — the token branch must decline and route to varProd",
+    )
+    assert(
+        !ev.nameBoundExposed("NatPat", new ValueEnv()),
+        "an unbound name reports UNBOUND — the token branch is free to take the registry path",
+    )
+
+    // Checker side: same hook shape against Γ. `TypeCheckCtx` is
+    // module-private, so the checker-side observation rides on the parse:
+    // a Γ binding must never change which branch the unbound control takes.
+    // (If the gate were registry-first, the unbound and bound cases would
+    // behave identically — the control distinguishes them.)
+    const tc = new LCTypeCheck().setRegistry(h.registry).setOpRegistry(h.opRegistry)
+    assertEquals(
+        [...tc.parseWith("NatPat", new TypeEnv())],
+        [natPat],
+        "control: the unbound registered name is a token",
+    )
+    // The gate's decision precedes the registry: `nameBound` is consulted
+    // with the SAME context the variable branch would see, so a Γ holding
+    // the name is observable to the hook even though the surface cannot
+    // produce one. Pinned here via the evaluator's public hook; the
+    // checker's hook shares the base-production call site.
+})
+
+Deno.test("discharge: a data type with a pattern-typed field is sampled — Empty | With(Pat) screens both variants", () => {
+    // Pattern support is not only for TOP-LEVEL parameters: a `DataType`
+    // variant with a `PatternDataType` field gets its field sampled through
+    // `patternSamples` (a matched token), so the `With(Pat)` variant's
+    // inhabitant is constructed and the screen reaches its field-carrying
+    // arm — the whole 2-value space {Empty(), With(Pat("Pat"))}, not just
+    // the `Empty` variant the pre-fix field sampler would have dropped.
+    const h = boolHarness()
+    const pat = new PatternDataType("Pat", ["[0-9]+"])
+    const withPat = new DataType("WithPat", [])
+    withPat.variants.push(
+        new Variant("Empty", []),
+        new Variant("With", [new Field("p", pat)]),
+    )
+    h.registry.register(pat)
+    h.registry.register(withPat)
+    h.opRegistry.declare(
+        new OpSig(
+            "wpId",
+            [withPat],
+            withPat,
+            "\\x:WithPat. fold [WithPat] x { Empty() -> Empty(), With(p) -> With(p) }",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "involutory", target: "wpId" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(
+        regime,
+        "residual",
+        "the With(Pat) field makes the carrier pattern-containing → residual",
+    )
+    assertEquals(instances, 2, "both variants' inhabitants were constructed and swept")
+    assertEquals(law.provenance, "asserted")
+    // The token-typed field sample is a real TokenVal in the sweep's vocabulary.
+    const withSample = evalOfHarness(h.registry, h.opRegistry)("With(Pat)", new ValueEnv())[0]
+    assert(
+        withSample instanceof VariantVal,
+        "the sampler's field vocabulary can build With(Pat(...))",
+    )
+    const fieldToken = withSample instanceof VariantVal
+        ? [...withSample.fields.values()][0]
+        : undefined
+    assert(fieldToken instanceof TokenVal, "the pattern-typed field's sample is a TokenVal")
+})
+
+Deno.test("discharge: a mixed data/pattern signature is rejected — homogeneous-carrier validation covers pattern types", () => {
+    // A commutative op over (Pat, Bool): the swapped axiom puts a token in
+    // the Bool slot — ill-typed by construction, and since `LCEval` does not
+    // enforce op argument types, the instances would all be holes and the
+    // claim could pass validation on zero checked instances.
+    // `paramTypeCompatible` rejects mixed data/pattern signatures BEFORE
+    // screening: `LawDeclarationError`, nothing in E.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    h.opRegistry.declare(
+        new OpSig("mixed", [natPat, h.bool], h.bool, "\\x:NatPat. \\b:Bool. b"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "commutative", target: "mixed" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "homogeneous operand carriers",
+    )
+    assertEquals(h.laws.lookup("mixed").length, 0)
+})
+
+Deno.test("discharge: a passed screen with 0 checked instances is REJECTED — all-holes sweeps are no evidence", () => {
+    // The second zero-coverage shape: the sweep RAN (samples existed) but
+    // every law instance evaluated to a hole — an operation whose every law
+    // instance errors. Installing `asserted` would claim "no counterexample
+    // found" over zero checked instances. Distinct diagnostic from the
+    // declined screen (broken evaluation vs no vocabulary). The carrier is
+    // Nat (residual, samples exist) but the op's body constructs `Ghost()`,
+    // an unregistered variant — every instance is a hole.
+    const h = boolHarness()
+    const nat = createNatType()
+    h.registry.register(nat)
+    h.opRegistry.declare(
+        new OpSig(
+            "ghostNat",
+            [nat, nat],
+            nat,
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Ghost(), Succ(p) -> Ghost() }",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "commutative", target: "ghostNat" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "exercised zero instances",
+    )
+    assertEquals(h.laws.lookup("ghostNat").length, 0)
 })

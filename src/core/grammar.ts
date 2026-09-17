@@ -230,10 +230,33 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     ): S["expr"]
     protected abstract opApp(opName: string, args: S["atom"][]): S["atom"]
 
+    /**
+     * A matched token: `Ident` resolving to a registered `PatternDataType`.
+     * The action receives both the type name and the raw matched text (they
+     * coincide in this grammar-based lexer — the token's source IS its
+     * content; a richer lexer would pass the lexed span's text here).
+     */
+    protected abstract matchedToken(dataTypeName: string, text: string): S["atom"]
+
     // ── Context extension hook (for type checker / evaluator subclasses) ──────
 
     protected extendCtx(ctx: unknown, _name: string, _type: Type): unknown {
         return ctx // no-op for AST builder
+    }
+
+    /**
+     * Whether `name` is bound as a TERM VARIABLE in the inherited context
+     * (Γ for the type checker, ρ for the evaluator). The base grammar has no
+     * term context, so this returns `false`.
+     *
+     * Consumed by `patternTokenProd`: the token branch is ordered BEFORE the
+     * variable branch, so a registered pattern-type name would shadow a
+     * bound variable of the same name — the gate consults this hook to fall
+     * through to `varProd` whenever the name is a live term variable, which
+     * keeps T-Var/E-Var reachable for PascalCase names.
+     */
+    protected nameBound(_name: string, _ctx: unknown): boolean {
+        return false
     }
 
     /**
@@ -727,7 +750,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         )
     }
 
-    // ( expr )  |  Ident(args)  |  ident(args)  |  Ident
+    // ( expr )  |  Ident(args)  |  ident(args)  |  Ident  |  patternToken
     @rule
     protected atomProd(ctx: unknown): Parser<S["atom"]> {
         return or(
@@ -738,9 +761,42 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.opProd(ctx),
             // Variant construction: Ident(args)
             this.variantProd(ctx),
+            // Matched token: Ident — gated on the registry (a PatternDataType
+            // name) and on the term context (a bound name is a variable)
+            this.patternTokenProd(ctx),
             // Variable
             this.varProd(ctx),
         )
+    }
+
+    // Ident — matched token (registry-gated, variable-binding-aware)
+    //
+    // A bare PascalCase atom whose name resolves to a registered
+    // `PatternDataType` is a matched token: the sole inhabitant of a
+    // pattern-matched type (`match(pₖ)`, lc.md §2.3). Gated on the registry —
+    // like `opProd`'s Ω gate — and on the term context via `nameBound`: a
+    // name bound as a term variable (Γ/ρ) is a VARIABLE reference, not a
+    // token — the branch falls through to `varProd` so T-Var/E-Var stays
+    // reachable for PascalCase names (a bound `NatPat` variable must type as
+    // its Γ type, not as the pattern type the registry happens to hold).
+    // An unresolved name also falls through, keeping the grammar's ambiguity
+    // surface unchanged.
+    //
+    // Ordered AFTER `variantProd`: `Ident(args)` is tried first, so a
+    // pattern-typed name used as a constructor attempt fails here rather
+    // than being mis-lexed as a token.
+    @rule
+    protected patternTokenProd(ctx: unknown): Parser<S["atom"]> {
+        return this.variantName.bind((name) => {
+            if (this.nameBound(name, ctx)) {
+                return empty<S["atom"]>()
+            }
+            const resolved = this.registry.lookup(name)
+            if (!(resolved instanceof PatternDataType)) {
+                return empty<S["atom"]>()
+            }
+            return epsilon(name).map(() => this.matchedToken(name, name))
+        })
     }
 
     // Ident(args)  — variant construction

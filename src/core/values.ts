@@ -69,7 +69,36 @@ export class VariantVal extends Value {
     }
 }
 
-// ── Pattern match value ───────────────────────────────────────────────────────
+// ── Token value ───────────────────────────────────────────────────────────────
+
+/**
+ * `match(pₖ)` — a matched token: the sole inhabitant of a pattern-matched
+ * data type (`PatternDataType`). The raw matched text IS the value — there is
+ * no structure beneath it (lc.md §2.1: the token is introduced by the lexer,
+ * an axiom of the operational semantics, with no evaluation rule producing
+ * it). In this grammar-based evaluator the "lexer" is the term grammar
+ * itself: an atom whose name resolves to a registered `PatternDataType`
+ * parses the matched text and yields the token as a value.
+ *
+ * Two tokens are equal (structurally, like `valueEquals`) iff they inhabit
+ * the SAME pattern type AND their raw text is equal. The type name is part
+ * of the identity because cross-type token collisions are plausible (two
+ * pattern types can share the token atom's name-lexed form) and a law's
+ * schema operands range over a typed carrier — a `PatA` token and a `PatB`
+ * token with identical text are distinct values, as distinct as two variants
+ * of different data types with the same constructor shape.
+ */
+export class TokenVal extends Value {
+    readonly kind = "tokenVal"
+    constructor(
+        /** The pattern-matched type this token inhabits. */
+        readonly dataTypeName: string,
+        /** The raw matched text — the token's entire content. */
+        readonly text: string,
+    ) {
+        super()
+    }
+}
 
 // ── Value environment ─────────────────────────────────────────────────────────
 
@@ -112,15 +141,17 @@ export class ValueEnv {
  * on data (semantics.md §7): two values are equal when they have the same
  * constructor and equal fields, recursively.
  *
- * Scope (first cut): finite data values — `VariantVal` trees. Function
- * values (closures) and codata values have no structural equality:
- * closures are code, codata equality is bisimulation, and both are outside
- * the first cut — comparing a value containing one returns `false` unless
- * it is literally the same reference (identical closures ARE equal, which
- * keeps `idempotent` on a closure-valued argument well-defined at the
- * reference level). Law screening (law_checking.ts) restricts itself to
- * operations whose parameter types are data types, so its comparisons
- * observe only the `VariantVal` part.
+ * Scope (first cut): finite data values — `VariantVal` trees, plus `TokenVal`
+ * (two tokens are equal iff they inhabit the same pattern type AND their raw
+ * text is equal — see `TokenVal`). Function values (closures) and codata
+ * values have no structural equality: closures are code, codata equality is
+ * bisimulation, and both are outside the first cut — comparing a value
+ * containing one returns `false` unless it is literally the same reference
+ * (identical closures ARE equal, which keeps `idempotent` on a closure-
+ * valued argument well-defined at the reference level). Law checking
+ * (law_checking.ts) restricts itself to operations whose parameter types
+ * are data or pattern types, so its comparisons observe the `VariantVal`
+ * and `TokenVal` parts.
  */
 export function valueEquals(a: Value, b: Value): boolean {
     if (a === b) return true
@@ -129,6 +160,9 @@ export function valueEquals(a: Value, b: Value): boolean {
         return a.variantName === b.variantName &&
             a.dataType.name === b.dataType.name &&
             fieldsEqual(a.fields, b.fields)
+    }
+    if (a instanceof TokenVal && b instanceof TokenVal) {
+        return a.dataTypeName === b.dataTypeName && a.text === b.text
     }
     return false
 }

@@ -542,14 +542,14 @@ Deno.test("screen: an instance that evaluates to error sentinels is skipped, not
         new OpSig("ho2", [new FunType(nat, nat)], nat, "\\f:Nat → Nat. f Zero()"),
         tc.opWellFormedness,
     )
-    // ho2 is non-screenable (function-typed param) — returns 0 instances.
+    // ho2 is non-screenable (function-typed param) — the screen declines.
     const checked = screenLaw(
         { kind: "associative", target: "ho2" },
         ops.lookup("ho2")!,
         ops,
         evalOf,
     )
-    assertEquals(checked, 0)
+    assertEquals(checked, { outcome: "declined" })
 })
 
 Deno.test("E: schema typing — a heterogeneous carrier is rejected (idempotent on trunc)", () => {
@@ -583,13 +583,18 @@ Deno.test("E: schema typing — a heterogeneous carrier is rejected (idempotent 
     )
 })
 
-Deno.test("screen: heterogeneous commutative — zero coverage, declared unscreened", () => {
+Deno.test("screen: heterogeneous commutative — passed with zero coverage (all holes)", () => {
     // Raw screenLaw bypasses validation (its contract is caller-beware), so a
     // heterogeneous commutative claim reaches the screen: the schema swaps
     // operands, putting a Bool sample in the Nat fold position — the swapped
-    // side evaluates to an error sentinel and is skipped, so the screen yields
-    // ZERO instances (no evidence either way). Zero coverage is the honest
-    // report; `declareCheckedLaw` would have rejected the claim structurally.
+    // side evaluates to an error sentinel and is skipped, so the screen RUNS
+    // but checks ZERO instances (no evidence either way). This is the
+    // passed-with-0-coverage shape — distinct from a DECLINED screen (no
+    // sample vocabulary at all): here the sampler built real samples for
+    // both positions, the sweep ran, every instance was a hole.
+    // `declareCheckedLaw` would have rejected the claim structurally
+    // (homogeneous-carrier validation), so this shape is unreachable
+    // through the all-in-one entry.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
     const ops = new OpRegistry()
     ops.declare(
@@ -608,13 +613,14 @@ Deno.test("screen: heterogeneous commutative — zero coverage, declared unscree
         ops,
         makeEvalTerm(ev),
     )
-    assertEquals(checked, 0)
+    assertEquals(checked, { outcome: "passed", checked: 0 })
 })
 
-Deno.test("screen: a non-screenable domain (higher-order op) is skipped, not falsified", () => {
+Deno.test("screen: a non-screenable domain (higher-order op) is declined, not falsified", () => {
     // An op whose parameters are function types has no finite sample
-    // vocabulary: the screen checks 0 instances and the caller installs
-    // the law unscreened (the residual's honest risk).
+    // vocabulary: the screen DECLINES (no coverage, not evidence) and the
+    // all-in-one entry rejects the declaration — installing an `asserted`
+    // law the screen never exercised would be silent under-coverage.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
     const ops = new OpRegistry()
     // ho : (Nat → Nat) → Nat — a function-typed parameter. The definition
@@ -631,7 +637,7 @@ Deno.test("screen: a non-screenable domain (higher-order op) is skipped, not fal
         ops,
         evalOf,
     )
-    assertEquals(checked, 0)
+    assertEquals(checked, { outcome: "declined" })
     assertEquals(e.lookup("ho").length, 0)
 })
 

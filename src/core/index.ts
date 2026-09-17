@@ -28,7 +28,7 @@ export {
 } from "./types.ts"
 
 // Values (lc.md §2.3)
-export { SpanClosure, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
+export { SpanClosure, TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
 
 // Laws (lc.md §2.4, §7.2 — the equational theory environment E)
 export {
@@ -54,6 +54,7 @@ export {
     type ScreeningRegime,
     screeningRegime,
     screenLaw,
+    type ScreenOutcome,
 } from "./law_checking.ts"
 
 // Subtyping (lc.md §4)

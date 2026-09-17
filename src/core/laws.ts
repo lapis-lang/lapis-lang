@@ -42,7 +42,7 @@ import { type OpRegistry, type OpSig } from "./ops.ts"
 
 import { isSubtype } from "./subtyping.ts"
 
-import { DataType, type Type } from "./types.ts"
+import { DataType, PatternDataType, type Type } from "./types.ts"
 
 /**
  * The evaluation-free type-checking entry the law declarations need
@@ -344,15 +344,17 @@ export const SCHEMA_ARITY: Record<LawKind, number> = {
 }
 
 /**
- * Check a law's domain type: the screen walks the variants of the
- * operation's parameter types to generate samples, so every parameter must
- * be a (data) type with variants. Function-typed parameters (higher-order
- * operations) are outside the first cut's screen — a law over such an
- * operation declares but cannot be screened; the caller installs it
- * `asserted` unscreened (the residual's honest risk, semantics.md §7.4).
+ * Check a law's domain type: the screen walks the variants of data-typed
+ * parameters (or draws matched tokens for pattern-typed ones — a
+ * `PatternDataType` has a sample vocabulary, the token atom), so every
+ * parameter must be a data type with variants or a declared pattern type.
+ * Function-typed parameters (higher-order operations) are outside the first
+ * cut's screen — a law over such an operation declares but cannot be
+ * screened; the caller rejects it (zero coverage: the screen declined,
+ * law_checking.ts).
  */
 export function screenableDomain(op: { paramTypes: readonly Type[] }): boolean {
-    return op.paramTypes.every((t) => t instanceof DataType)
+    return op.paramTypes.every((t) => t instanceof DataType || t instanceof PatternDataType)
 }
 
 /**
@@ -433,8 +435,30 @@ function checkSchemaWellTyped(
     return undefined
 }
 
-/** Operand-carrier compatibility: one sample space must inhabit both slots. */
+/**
+ * Operand-carrier compatibility: one sample space must inhabit both slots.
+ *
+ * Two slots are compatible when they hold the same carrier — two `DataType`s
+ * of the same name, two `PatternDataType`s of the same name, or the two
+ * non-data permissive shapes (function types / anything else, which
+ * `screenableDomain` separately disqualifies from screening). A mixed
+ * data/pattern signature (`(Pat, Bool)`) is NOT compatible: the schema
+ * sweeps one sample space through all slots, so the swapped axioms would
+ * put a token in a variant slot (or vice versa) — the instances are ill-
+ * typed by construction, `LCEval` does not enforce op argument types, and
+ * the all-holes sweep would silently pass zero-coverage validation.
+ */
 function paramTypeCompatible(a: Type, b: Type): boolean {
-    if (!(a instanceof DataType) || !(b instanceof DataType)) return true
-    return a.equals(b)
+    // Two pattern types: same name = same carrier (the token identity is
+    // type-qualified — see `valueEquals`'s `TokenVal` branch).
+    if (a instanceof PatternDataType && b instanceof PatternDataType) return a.equals(b)
+    // Mixed data/pattern: never compatible.
+    if (a instanceof PatternDataType !== (b instanceof PatternDataType)) return false
+    // Two data types: same name.
+    if (a instanceof DataType && b instanceof DataType) return a.equals(b)
+    // At most one of the two is a DataType/PatternDataType — the other is a
+    // non-data type (function, Any, …). Unscreenable regardless
+    // (`screenableDomain` routes such signatures away), so compatibility is
+    // moot here; conservatively report incompatible to fail loudly.
+    return false
 }

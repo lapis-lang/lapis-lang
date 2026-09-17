@@ -32,6 +32,7 @@
  */
 
 import {
+    assert,
     char,
     empty,
     ensures,
@@ -341,6 +342,16 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
     protected paren(e: Type): Type {
         return e
+    }
+
+    /**
+     * Γ membership for the token gate: a name bound in Γ is a term variable
+     * (`patternTokenProd` falls through to `varProd`), so a PascalCase
+     * variable always types by its Γ binding — the registry's pattern-type
+     * entry never shadows it.
+     */
+    protected override nameBound(name: string, ctx: unknown): boolean {
+        return TypeCheckCtx.is(ctx) && ctx.gamma.lookup(name) !== undefined
     }
 
     /**
@@ -1333,5 +1344,26 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         )
                 })
         })
+    }
+
+    /**
+     * A matched token types as the pattern-matched type it inhabits
+     * (lc.md §5.1 T-Token: the sole inhabitant of a `PatternDataType`).
+     *
+     * The premise `p ∈ registry ∧ p is a PatternDataType` is enforced by the
+     * base `patternTokenProd`'s gate — the branch is only taken when the
+     * lookup yields a `PatternDataType`, so a violation here is a caller
+     * bug, not an input error: it fails LOUDLY (`assert`) rather than
+     * degrading to `Any`. A silent `Any` would type an unregistered token,
+     * and under an `Any` annotation the wrong type satisfies S-Refl — the
+     * same absorption shape the variantProd override closes for T-Variant.
+     */
+    protected matchedToken(dataTypeName: string, _text: string): Type {
+        const resolved = this.registry.lookup(dataTypeName)
+        assert(
+            resolved instanceof PatternDataType,
+            `matchedToken premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the token gate (patternTokenProd) must be consulted before this action`,
+        )
+        return resolved
     }
 }
