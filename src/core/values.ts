@@ -176,3 +176,22 @@ function fieldsEqual(a: Map<string, Value>, b: Map<string, Value>): boolean {
     }
     return true
 }
+
+/**
+ * The structural size of a value: its node count (one per variant
+ * constructor; tokens and atoms count as nodes at their position).
+ *
+ * This is the monotone measure the ∂T shrinker minimizes (a filler is a
+ * candidate only when STRICTLY smaller than the subtree it replaces) and
+ * the size the certified screen's prefix is stated in (size-≤ k classes).
+ * One definition keeps the two mechanisms agreeing on what "smaller" and
+ * "the prefix" mean.
+ */
+export function valueSize(value: Value): number {
+    if (value instanceof VariantVal) {
+        let size = 1
+        for (const field of value.fields.values()) size += valueSize(field)
+        return size
+    }
+    return 1
+}

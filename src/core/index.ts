@@ -28,7 +28,15 @@ export {
 } from "./types.ts"
 
 // Values (lc.md §2.3)
-export { SpanClosure, TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
+export {
+    SpanClosure,
+    TokenVal,
+    Value,
+    ValueEnv,
+    valueEquals,
+    valueSize,
+    VariantVal,
+} from "./values.ts"
 
 // Laws (lc.md §2.4, §7.2 — the equational theory environment E)
 export {
@@ -45,11 +53,14 @@ export {
 } from "./laws.ts"
 
 // Law checking (semantics.md §5.4 — regime-based: finite → exhaustion →
-// discharged; residual → screen → asserted)
+// discharged; residual → certified screen → asserted)
 export {
+    type CertifiedCoverage,
+    type CertifiedPosition,
     declareCheckedLaw,
     type EvalTerm,
     finiteInhabitants,
+    inhabitantsUpToSize,
     makeEvalTerm,
     type ScreeningRegime,
     screeningRegime,
@@ -101,9 +112,15 @@ export {
 // Inference rules: `LCTypeCheck.rules` (static) or `collectRules(LCTypeCheck)`.
 export { LCTypeCheck } from "./typing_grammar.ts"
 
-// Type algebra (type-algebra.md §4 — one-hole contexts for structural
-// shrinking, `old`/paramorphism typing, observation-evidence typing)
-export { type ContextSpec, derivative } from "./type_algebra.ts"
+// Type algebra (type-algebra.md §3+§4 — the contexts and coefficients
+// readings of the type equation)
+export {
+    type Coefficients,
+    coefficients,
+    type ContextSpec,
+    derivative,
+    MAX_COEFFICIENT,
+} from "./type_algebra.ts"
 
 // Law testing (law-testing.md — the property-based harness with ∂T-based
 // structural shrinking; the promotion of the test-local law harness)
@@ -114,7 +131,6 @@ export {
     type DerivativeGeneratorOptions,
     plug,
     renderValue,
-    valueSize,
 } from "./law_testing.ts"
 
 // Evaluation grammar subclass (lc.md §3 — parse, don't evaluate separately)

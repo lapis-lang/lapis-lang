@@ -9,11 +9,11 @@
  * what a passing check claims:
  *
  * - **The residual screen** (`screenLaw`) — best-effort falsification over
- *   bounded-depth samples (lc.md §7.2 schema instantiation; the sample
- *   budget is depth-capped). It *rejects* declarations it can falsify; it
- *   never *establishes* — passing is evidence, not proof (Model A
- *   authority), which is why a law admitted through the screen carries
- *   provenance `asserted`.
+ *   certified size-≤ k prefixes (lc.md §7.2 schema instantiation; the
+ *   certificate is per-position, `type-algebra.md` §3). It *rejects*
+ *   declarations it can falsify; it never *establishes* — passing is
+ *   evidence, not proof (Model A authority), which is why a law admitted
+ *   through the screen carries provenance `asserted`.
  * - **The finite-regime exhaustion** (`exhaustLaw`) — the ENTIRE inhabitant
  *   space of a bounded carrier is enumerated and checked, so passing is a
  *   **proof**: provenance `discharged`.
@@ -26,8 +26,8 @@
  * both sides of every instance terminate — no timeouts, no divergence.
  *
  * Scope (first cut): laws over operations whose parameters are **data
- * types** (μ-types). The residual screen samples variants to a bounded
- * depth; the finite regime requires a bounded inhabitant space (see
+ * types** (μ-types). The residual screen sweeps certified size prefixes;
+ * the finite regime requires a bounded inhabitant space (see
  * `finiteInhabitants`). Higher-order parameters (functions) have no finite
  * sample vocabulary — such a law declares but is installed `asserted`
  * unscreened (the residual's honest risk, semantics.md §7.4).
@@ -59,19 +59,13 @@ import { TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
 
 import { EvalErrorValue } from "./eval_grammar.ts"
 
+import { coefficients } from "./type_algebra.ts"
+
+import { valueSize } from "./values.ts"
+
 import { AnyType, DataType, PatternDataType, type Type } from "./types.ts"
 
 // ── Sampling ──────────────────────────────────────────────────────────────────
-
-/**
- * The screen's sample depth: recursive variants recurse up to this many
- * levels (a `Succ` chain of length ≤ depth; depth 0 = the base cases only).
- * Per semantics.md §5.4 the residual samples "singleton variants one each;
- * primitive-field variants up to three combinations; recursive-field
- * variants one shallow sample" — a small bounded space that reaches the
- * interesting folds (nonempty scrutinees) without combinatorial growth.
- */
-const MAX_SAMPLE_DEPTH = 2
 
 /**
  * Generate sample values for one parameter type by walking its variants
@@ -82,7 +76,7 @@ const MAX_SAMPLE_DEPTH = 2
  * variant per shallower sample, capped by the depth bound. Variants whose
  * non-recursive fields have no sample vocabulary (function types,
  * `Any`-typed fields, empty variant sets) are dropped — the remaining space
- * is what the screen can honestly sweep.
+ * is what the shrinker can honestly plug.
  *
  * Exported for the ∂T shrinker (`law_testing.ts`): filler candidates for a
  * hole are the hole type's sampled vocabulary — the same sampler, so the
@@ -317,26 +311,37 @@ function renderValue(value: Value): string {
 /**
  * The screen's outcome: `"declined"` (the screen has no sample vocabulary
  * for this claim — coverage 0 is a HOLE, not evidence) or `"passed"` with
- * the number of instances actually checked. Falsification throws `LawError`
- * and never returns.
+ * the number of instances actually checked and the **certified coverage**
+ * report (per-position certificates + the rendered claim). Falsification
+ * throws `LawError` and never returns.
  */
 export type ScreenOutcome =
     | { outcome: "declined" }
-    | { outcome: "passed"; checked: number }
+    | { outcome: "passed"; checked: number; coverage: CertifiedCoverage }
 
 /**
- * Screen one law: instantiate its schema over bounded samples of the
- * operation's domain and evaluate both sides. The **first** falsifying
- * sample wins; the thrown `LawError` carries the counterexample.
+ * Screen one law: instantiate its schema over the **certified size-≤ kᵢ
+ * prefix** of each operand position and evaluate both sides. The **first**
+ * falsifying sample wins; the thrown `LawError` carries the counterexample.
+ *
+ * Coverage is a theorem, not a vibe: each position's sample space is its
+ * type's complete size-≤ kᵢ class set — enumerated by `inhabitantsUpToSize`
+ * and asserted against `coefficients` — so the coverage report states "all
+ * inhabitants of size ≤ kᵢ per operand position — exactly N, verified". A
+ * sweep/coefficient mismatch rejects the declaration loudly (an enumeration
+ * hole must not masquerade as coverage); so does a projected sweep past the
+ * budgets — today such a law would install `asserted` on ~1 masquerading
+ * instance.
  *
  * Returns the screen outcome: `"declined"` when the screen has no sample
  * vocabulary for the claim (unscreenable domain, unscreenable relational
- * operand, empty sample space — the claim was exercised ZERO times);
- * `"passed"` with the instance count when the sweep ran (evidence of
- * coverage; passing is still only evidence, never proof). The caller
- * installs the law `asserted` on a passed screen — `LawRegistry.declareLaw`,
- * or the all-in-one `declareCheckedLaw` (which routes `finite`-regime laws
- * to exhaustion instead — this function is the residual regime's mechanism).
+ * operand — the claim was exercised ZERO times); `"passed"` with the
+ * instance count and the certificate when the sweep ran (evidence of
+ * coverage; passing is still only evidence, never proof — the provenance
+ * ladder is unchanged, D7). The caller installs the law `asserted` on a
+ * passed screen — `LawRegistry.declareLaw`, or the all-in-one
+ * `declareCheckedLaw` (which routes `finite`-regime laws to exhaustion
+ * instead — this function is the residual regime's mechanism).
  *
  * @param law      the law declaration — structurally pre-validated by
  *                 `LawRegistry.validateLaw` in the `declareCheckedLaw`
@@ -346,16 +351,16 @@ export type ScreenOutcome =
  * @param omega    the operation registry — `distributive`'s argument
  *                 operation is looked up here.
  * @param eval_    the evaluation primitive (see `makeEvalTerm`).
- * @param maxDepth the sample depth bound (default 2).
  *
  * @throws LawError when a sample falsifies the law.
+ * @throws LawDeclarationError when a position's certification declines or
+ *         mismatches (see `certifyPosition`/`certifyCoverage`).
  */
 export function screenLaw(
     law: Omit<LawDecl, "provenance">,
     op: CheckedOpSig,
     omega: OpRegistry,
     eval_: EvalTerm,
-    maxDepth: number = MAX_SAMPLE_DEPTH,
 ): ScreenOutcome {
     // Higher-order parameters: no finite sample vocabulary — the screen
     // declines (the caller rejects a zero-coverage claim; installing an
@@ -378,26 +383,44 @@ export function screenLaw(
         if (!other || !screenableDomain(other)) return { outcome: "declined" }
     }
 
-    // Per-position samples: schema operand i draws from the samples of the
-    // parameter type at position i (mod the parameter count). Drawing from
-    // the union across positions would put a Nat value in a Bool position —
-    // the instance fails to evaluate and is silently skipped, losing
-    // coverage. Heterogeneous types still share a position's samples with
-    // the operation's actual signature (each position sweeps ITS OWN type).
-    // Pattern-typed positions draw matched tokens (see `patternSamples`).
-    const positionSamples: Value[][] = op.paramTypes.map((type) => {
-        if (type instanceof PatternDataType) return patternSamples(type, eval_)
-        return [...dedupe(samplesFor(type as DataType, maxDepth, eval_))]
-    })
-    if (positionSamples.some((s) => s.length === 0)) return { outcome: "declined" }
+    // Per-position exponents: schema variable i maps to position i (mod the
+    // parameter count) — the same mapping `assignments` enumerates, so the
+    // certification's projection IS the sweep the check will run.
+    const exponents = new Array<number>(op.paramTypes.length).fill(0)
+    for (let i = 0; i < SCHEMA_NAMES[law.kind]!.length; i++) {
+        exponents[i % op.paramTypes.length]!++
+    }
+    const instancesPerAssignment = ARGUMENT_KINDS.includes(law.kind) ? 2 : 1
+
+    // CERTIFY FIRST (fail fast at sample generation): each swept position's
+    // size bound, its enumerated prefix, and the coefficient assertion. The
+    // certified samples ARE the screen's sweep space.
+    const { coverage, positionSamples } = certifyCoverage(
+        op,
+        exponents,
+        instancesPerAssignment,
+        eval_,
+    )
+    // Zero sample vocabulary on a SWEPT position (an exponent > 0): the
+    // claim was exercised zero times. Positions with exponent 0 have empty
+    // sample arrays by construction (`certifyCoverage` never certifies
+    // them — the assignments generator never reads them) and must NOT trip
+    // this guard: an identity claim over (Nat, Big) sweeps position 0 only.
+    if (
+        positionSamples.some((samples, position) =>
+            exponents[position]! > 0 && samples.length === 0
+        )
+    ) {
+        return { outcome: "declined" }
+    }
 
     let checked = 0
     // Enumerate assignments over the schema variables: every combination of
     // per-position samples the schema names (Cartesian across distinct
     // variables). Cyclic reuse would make some schemas vacuous — commutative
     // on a homogeneous op would degenerate to `op(a, a) ≡ op(a, a)`, passing
-    // a non-commutative operation. Bounded sample spaces keep the product
-    // small (depth ≤ 2 ⇒ a handful of samples per position).
+    // a non-commutative operation. The certified prefixes bound the product
+    // (the sweep projection was checked against SWEEP_BUDGET above).
     for (
         const bindings of assignments(
             SCHEMA_NAMES[law.kind]!,
@@ -416,7 +439,7 @@ export function screenLaw(
             checked++
         }
     }
-    return { outcome: "passed", checked }
+    return { outcome: "passed", checked, coverage }
 }
 
 /**
@@ -580,6 +603,427 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
     return tokens
 }
 
+// ── The certified prefix (the size-bounded enumerator) ───────────────────────
+
+/**
+ * The certified screen's size bound: positions certify their full size-≤ k
+ * classes up to this size (parity with the ∂T shrinker's chain reach:
+ * `sampleDepth = 2` ⇒ sizes ≤ 3 for chain carriers — chain-carrier sweeps
+ * keep their shrinker-compatible reach).
+ */
+const MAX_SCREEN_SIZE = 3
+
+/**
+ * The per-position instance ceiling for the certified prefix: a position's
+ * certified space (the size-≤ kᵢ class set) must stay within this budget,
+ * or the certification declines. Bounds the enumerator's footprint (real
+ * `VariantVal`s, memoized per distinct type — the same discipline as
+ * exhaustion's `MAX_FINITE_INHABITANTS`).
+ */
+const PREFIX_BUDGET = 2 ** 8
+
+/**
+ * The sweep ceiling across ALL positions (the projected assignment count ×
+ * instances per assignment): the certified sweep must stay within this
+ * budget, or the certification declines. Mirrors `MAX_EXHAUSTION_INSTANCES`
+ * at a tighter bound (the screen runs on every residual declaration).
+ */
+const SWEEP_BUDGET = 2 ** 16
+
+/**
+ * A position's certified coverage: the size bound and the two sides of the
+ * certificate (expected from the coefficients, actual from the sweep).
+ */
+export interface CertifiedPosition {
+    /** The certified size bound (all inhabitants of size ≤ k). */
+    readonly k: number
+    /** The type's name (for the report). */
+    readonly typeName: string
+    /** The coefficient count: exactly how many inhabitants size ≤ k holds. */
+    readonly expected: number
+    /** How many distinct samples the sweep actually produced. */
+    readonly actual: number
+}
+
+/**
+ * The certified-coverage report the screen's outcome carries: per-position
+ * certificates plus the rendered claim. Evidence, never proof — the
+ * provenance ladder is unchanged (certification upgrades the claim's
+ * precision, not its authority tier); this upgrades WHAT the screen's
+ * evidence claims, from "N instances" to a verified prefix.
+ */
+export interface CertifiedCoverage {
+    readonly positions: readonly CertifiedPosition[]
+    /** The rendered theorem: "all inhabitants of size ≤ k per position — exactly N, verified". */
+    readonly claim: string
+}
+
+/**
+ * Enumerate ALL inhabitants of a data type up to a size bound, LAZILY and
+ * COMPLETELY: the size-≤ k class set, bottom-up over (type, size) so
+ * subvalue spaces are shared (the same per-type memo discipline as
+ * exhaustion's `spaceOf`).
+ *
+ * The result is exactly what `coefficients(type, k)`'s prefix counts: a
+ * pattern type yields its singleton name-token only when k ≥ 1 (the token
+ * is a size-1 inhabitant; a size-≤ 0 prefix is EMPTY, matching c₀ = 0); a
+ * data type's walk covers every size class 1..k.
+ *
+ * This is the upgrade the certification requires: a depth-bounded sampler
+ * is NOT a size prefix for branching or wide carriers — it takes one field
+ * sample per variant (`construct` binds `fieldSamples[0]`), so
+ * `One(False())` is never sampled and a depth-2 Tree sweep contains one
+ * size-5 tree while omitting the other. A size-indexed sweep is complete
+ * WITHIN each size class: every combination of field values whose total
+ * node count is ≤ k is produced exactly once.
+ *
+ * Field spaces follow the coefficient reading's own table (type-algebra.md
+ * §3): a recursive field draws from the CARRIER's smaller sizes (the comb's
+ * algebra is the carrier — even for inherited variants); a data field from
+ * that type's space; a pattern field is the singleton token; a variant with
+ * an unsampleable field (function/`Any`/pattern/token/`Nothing`) contributes
+ * nothing (the same unsampleable rule everywhere).
+ *
+ * Construction goes through the evaluator (as everywhere else): a variant
+ * whose constructor form fails to evaluate is a HOLE in the certificate —
+ * the enumerated count would fall short of the coefficient count, so the
+ * caller rejects the declaration loudly (completeness is the certified
+ * contract; the screen's skip only ever applied to instance evaluation,
+ * never to sample construction).
+ *
+ * @param type the carrier (μ data type, or a pattern type for the declared
+ *             fallback)
+ * @param k    the certified size bound (all inhabitants of size ≤ k); a
+ *             NEGATIVE bound is a caller bug — a `RangeError` surfaces it
+ *             (k = 0 is valid: the size-≤ 0 prefix is empty, c₀ = 0)
+ * @param eval_ the evaluation primitive (see `makeEvalTerm`)
+ * @returns the deduped size-≤ k inhabitants; the count is what the
+ *          certificate asserts (and what the caller asserts against
+ *          `coefficients`).
+ *
+ * @throws RangeError when k < 0 (an invalid bound — the coefficients
+ *         reading rejects it the same way).
+ */
+export function inhabitantsUpToSize(
+    type: DataType | PatternDataType,
+    k: number,
+    eval_: EvalTerm,
+): readonly Value[] {
+    if (k < 0) {
+        throw new RangeError(`inhabitantsUpToSize(${type.name}): the size bound k must be ≥ 0`)
+    }
+    if (type instanceof PatternDataType) {
+        // The declared fallback: the singleton name-token — the same
+        // vocabulary `patternSamples` produces. The token is a SIZE-1
+        // inhabitant, so it enters the prefix only when k ≥ 1: a size-≤ 0
+        // prefix is empty, exactly what `coefficients(type, 0)` counts
+        // (c₀ = 0). Skipping the bound here would make the enumerator
+        // return a sample the certificate itself does not count — a
+        // mismatch masquerading as full coverage.
+        return k >= 1 && type.patterns.length > 0 ? patternSamples(type, eval_) : []
+    }
+    const spaces = new Map<DataType, readonly VariantVal[]>()
+    const degrees = new Map<DataType, number>()
+    return spaceUpToSize(type, k, eval_, spaces, degrees)
+}
+
+/**
+ * A type's deduped size-≤ k space, materialized at most once per
+ * certification (the memo is shared across operand positions and variant
+ * fields — a carrier appearing in several places is enumerated a single
+ * time).
+ *
+ * The walk is BOTTOM-UP over size classes: a size-n value is a variant node
+ * plus field combinations of total size n−1, so class n is built only after
+ * all smaller classes of the SAME carrier are complete — the same fixpoint
+ * shape the coefficient reading's `currentFor` applies (a recursive field
+ * reads the carrier's SMALLER-size space through the memo; the memo grows
+ * with each completed class). A data field's space is that type's ≤ n−1
+ * space, grown through the same memo discipline (an inner type's walk
+ * registers its own completed degree).
+ *
+ * The memo (`spaces` + `degrees`) is PER-CERTIFICATION, and its two maps
+ * move together: degree metadata next to the values it describes. A
+ * module-global degree map would outlive its walk and VOUCH FOR A PREFIX
+ * THE CURRENT MEMO NEVER BUILT — a later certification (a fresh `spaces`)
+ * would read a stale completed degree and trust an empty array as a full
+ * prefix.
+ *
+ * **Re-entrancy.** A field can name its own carrier WITHOUT the recursive
+ * flag (a data field typed as the carrier itself), and mutual systems
+ * (A's field references B, B's references A) re-enter the walk mid-build.
+ * An IN-PROGRESS type (seeded in the memo, degree 0 — not yet complete) is
+ * served its PARTIAL prefix and is NOT rebuilt: the re-entrant reader needs
+ * exactly the smaller classes the outer walk has already completed, and
+ * clearing the memo would silently DROP them. The outer walk reads its own
+ * partial prefix the same way (the recursive-field branch), so both
+ * re-entrancy shapes extend rather than reset.
+ */
+function spaceUpToSize(
+    type: DataType,
+    k: number,
+    eval_: EvalTerm,
+    spaces: Map<DataType, readonly VariantVal[]>,
+    degrees: Map<DataType, number>,
+): readonly VariantVal[] {
+    // A previous walk (within this same certification) that already
+    // completed degree ≥ k has the full prefix in the memo — reuse it (a
+    // completed degree is the certificate's contract: classes 1..degree
+    // are complete).
+    const cached = spaces.get(type)
+    const cachedDegree = degrees.get(type) ?? -2
+    if (cached && cachedDegree >= k) return cached
+    // An IN-PROGRESS entry (seeded by an outer walk of THIS type — marker
+    // degree −1, never yet completed) serves its PARTIAL prefix: the caller
+    // needs exactly the smaller-size space the outer walk has built so far.
+    // Rebuilding here would re-enter the running walk; clearing the memo
+    // would drop its already-enumerated classes — a silent loss the
+    // certificate would then miscount as an enumeration hole. The marker is
+    // −1, NOT 0: a COMPLETED k=0 walk also carries degree 0 (its empty
+    // prefix is a real, complete result) and must be distinguishable from
+    // the seed — otherwise an inner k=0 walk (a data field whose space is
+    // empty at this size) would mark its type in-progress forever, and the
+    // NEXT size class would read that type's field space as the stale empty
+    // array instead of re-walking at the new degree.
+    if (cached && cachedDegree === -1) return cached
+    // Seed the memo BEFORE the walk: a re-entrant request for this type
+    // (through a non-isRecursive self-typed field, or a mutual pair) sees
+    // the in-progress marker (degree −1) and never rebuilds. The empty
+    // prefix is CORRECT at the walk's start — class 1's recursive fields
+    // read exactly this empty array.
+    spaces.set(type, [])
+    degrees.set(type, -1)
+    // Productive variants: those whose every field has sample vocabulary.
+    // A variant with an unsampleable field contributes nothing — matched by
+    // the zero polynomial in `coefficients` (the same unsampleable rule
+    // everywhere).
+    const variants = type.allVariants().filter((variant) => {
+        const fieldTypes = variant.fields.map((field) => field.type)
+        if (fieldTypes.some((t) => t instanceof DataType && (finiteInhabitants(t) ?? 1) === 0)) {
+            return false
+        }
+        return variant.fields.every((field) => {
+            const fieldType = field.type
+            if (field.isRecursive) return true
+            if (fieldType instanceof DataType) return true
+            if (fieldType instanceof PatternDataType) return fieldType.patterns.length > 0
+            return false
+        })
+    })
+    for (let size = 1; size <= k; size++) {
+        const classValues: VariantVal[] = []
+        for (const variant of variants) {
+            // Each field's space at this size: recursive → the carrier's
+            // ≤ size−1 space (the memo's completed prefix); data field →
+            // that type's ≤ size−1 space (grown through the shared memo);
+            // pattern field → the singleton token; unsampleable → empty.
+            const fieldSpaces: readonly (readonly Value[])[] = variant.fields.map((
+                field,
+            ) => {
+                const fieldType = field.type
+                if (field.isRecursive) return spaces.get(type) ?? []
+                if (fieldType instanceof DataType) {
+                    return spaceUpToSize(fieldType, size - 1, eval_, spaces, degrees)
+                }
+                if (fieldType instanceof PatternDataType) {
+                    return fieldType.patterns.length > 0 ? patternSamples(fieldType, eval_) : []
+                }
+                return [] as readonly Value[]
+            })
+            for (const combo of cartesian(fieldSpaces)) {
+                const totalSize = 1 + combo.reduce((sum, v) => sum + valueSize(v), 0)
+                if (totalSize !== size) continue
+                const argNames = variant.fields.map((_, i) => `f${i}`)
+                const bindings = new Map<string, Value>()
+                combo.forEach((value, i) => bindings.set(argNames[i]!, value))
+                const source = `${variant.name}(${argNames.join(", ")})`
+                const value = eval_(source, new ValueEnv(bindings))[0]
+                if (!(value instanceof VariantVal)) {
+                    // A hole in the certified prefix — construction is the
+                    // enumeration's contract (D5). The certificate counts
+                    // COMPLETE size classes; a failed construction would make
+                    // the sweep's count fall short of the coefficients, so the
+                    // hole rejects loudly instead of masquerading as coverage.
+                    throw new LawDeclarationError(
+                        type.name,
+                        `certification could not construct an inhabitant: "${source}" ` +
+                            `did not evaluate — the certified prefix cannot sweep ` +
+                            `this type`,
+                    )
+                }
+                classValues.push(value)
+            }
+        }
+        // Extend the memo with the completed class (deduped against
+        // everything so far — the sweep sees each distinct value once).
+        const grown = [...dedupe([...(spaces.get(type) ?? []), ...classValues])]
+        spaces.set(type, grown)
+    }
+    // The completed degree registers the certificate's coverage: later
+    // readers at degree ≤ k reuse this space; a HIGHER degree re-walks
+    // (the classes beyond k are built then).
+    degrees.set(type, k)
+    return spaces.get(type) ?? []
+}
+
+// ── The certification (the per-position kᵢ policy) ─────────────────────────
+
+/**
+ * Certify one operand position: choose its size bound kᵢ, enumerate the
+ * full size-≤ kᵢ prefix, and assert the count against `coefficients` —
+ * the theorem, machine-checked.
+ *
+ * The kᵢ policy (D3):
+ * 1. The smallest nonempty size class min S(T) (from the coefficients).
+ * 2. Candidate kᵢ = min(MAX_SCREEN_SIZE, max { k | prefix(k) ≤ PREFIX_BUDGET }),
+ *    RAISED to min S(T) when min S(T) > MAX_SCREEN_SIZE (the wide-record
+ *    escape: without it every record wider than three fields would decline
+ *    — a Triple(a, b, c) has no inhabitants below size 4).
+ * 3. If the raised kᵢ's prefix exceeds PREFIX_BUDGET, the certification
+ *    declines loudly (LawDeclarationError naming the blocking class).
+ *
+ * @returns the position's certificate; the enumeration is a side effect
+ *          (the certified samples ARE the screen's sweep space).
+ *
+ * @throws LawDeclarationError when the smallest nonempty class exceeds the
+ *         prefix budget (the certificate cannot be swept), or when the
+ *         enumerated count mismatches the coefficient count (a hole in the
+ *         sweep — the loud error D5 requires).
+ */
+function certifyPosition(
+    type: DataType | PatternDataType,
+    eval_: EvalTerm,
+): CertifiedPosition {
+    const coeffs = coefficients(type, MAX_SCREEN_SIZE)
+    // The smallest nonempty size class (the prefix's floor).
+    const minClass = coeffs.findIndex((c) => c > 0)
+    if (minClass < 0) {
+        // No inhabitants up to MAX_SCREEN_SIZE: either the carrier's
+        // smallest class is beyond the range (the wide-record escape —
+        // raised below), or it is uninhabited. Probe up to the RAISE LIMIT:
+        // an 18-Bool record's only variant is MkWide(18 Bool fields) — size
+        // 19; a 7-Bool record's min class is size 8. A carrier with no class
+        // within the raise limit declines honestly (StreamLike: NO size has
+        // inhabitants — its only variant is recursive with no base case).
+        const RAISE_LIMIT = 2 * MAX_SCREEN_SIZE + 1
+        const probe = coefficients(type, RAISE_LIMIT)
+        const probeMin = probe.findIndex((c) => c > 0)
+        if (probeMin < 0) {
+            throw new LawDeclarationError(
+                type.name,
+                `certification declined: the type has NO inhabitants in the ` +
+                    `certified size range (c₁..c${RAISE_LIMIT} are all ` +
+                    `0) — zero coverage, nothing installed`,
+            )
+        }
+        // The smallest class is at probeMin > MAX_SCREEN_SIZE: certify
+        // exactly that class (the floor raise), if it fits the budget.
+        const raisedPrefix = probe[probeMin]!
+        if (raisedPrefix > PREFIX_BUDGET) {
+            throw new LawDeclarationError(
+                type.name,
+                `certification declined: the smallest nonempty size class ` +
+                    `${probeMin} holds ${raisedPrefix} inhabitants — past ` +
+                    `the prefix budget (${PREFIX_BUDGET}); the screen cannot ` +
+                    `certify this carrier`,
+            )
+        }
+        const samples = inhabitantsUpToSize(type, probeMin, eval_)
+        if (samples.length !== raisedPrefix) {
+            throw new LawDeclarationError(
+                type.name,
+                `certification MISMATCH: the size-≤ ${probeMin} sweep produced ` +
+                    `${samples.length} samples but the type equation counts ` +
+                    `${raisedPrefix} — an enumeration hole would masquerade as ` +
+                    `coverage, so the declaration is rejected (check the ` +
+                    `registry/evaluator consistency)`,
+            )
+        }
+        return {
+            k: probeMin,
+            typeName: type.name,
+            expected: raisedPrefix,
+            actual: samples.length,
+        }
+    }
+    // The largest k whose prefix fits the per-position budget (candidates
+    // only above the floor — sizes below minClass contribute nothing).
+    let k = 0
+    let prefix = 0
+    for (let n = minClass; n <= MAX_SCREEN_SIZE; n++) {
+        const next = prefix + coeffs[n]!
+        if (next > PREFIX_BUDGET) break
+        prefix = next
+        k = n
+    }
+    const samples = inhabitantsUpToSize(type, k, eval_)
+    if (samples.length !== prefix) {
+        throw new LawDeclarationError(
+            type.name,
+            `certification MISMATCH: the size-≤ ${k} sweep produced ` +
+                `${samples.length} samples but the type equation counts ` +
+                `${prefix} — an enumeration hole would masquerade as ` +
+                `coverage, so the declaration is rejected (check the ` +
+                `registry/evaluator consistency)`,
+        )
+    }
+    return { k, typeName: type.name, expected: prefix, actual: samples.length }
+}
+
+/**
+ * Certify the screen's per-position coverage and return the report:
+ * per-position certificates plus the rendered claim. The sweep projection
+ * (the same exponent arithmetic `screeningRegime` runs) must stay within
+ * `SWEEP_BUDGET` — a projected sweep past the budget declines loudly (the
+ * screen would otherwise silently sweep a space it cannot hold).
+ *
+ * @throws LawDeclarationError from any position's certification (see
+ *         `certifyPosition`), or when the projected sweep exceeds the
+ *         budget.
+ */
+function certifyCoverage(
+    op: CheckedOpSig,
+    exponents: readonly number[],
+    instancesPerAssignment: number,
+    eval_: EvalTerm,
+): { coverage: CertifiedCoverage; positionSamples: Value[][] } {
+    const positions: CertifiedPosition[] = []
+    const positionSamples: Value[][] = []
+    let sweep = instancesPerAssignment
+    for (let position = 0; position < op.paramTypes.length; position++) {
+        const type = op.paramTypes[position]!
+        // A position no schema variable lands on is never swept: its
+        // certification is irrelevant (and its samples are empty — the
+        // assignments generator never reads them).
+        if (exponents[position] === 0) {
+            positionSamples.push([])
+            continue
+        }
+        const certified = certifyPosition(type as DataType | PatternDataType, eval_)
+        positions.push(certified)
+        const samples = inhabitantsUpToSize(
+            type as DataType | PatternDataType,
+            certified.k,
+            eval_,
+        )
+        positionSamples.push([...samples])
+        sweep *= certified.actual ** exponents[position]!
+        if (sweep > SWEEP_BUDGET) {
+            throw new LawDeclarationError(
+                op.name,
+                `certification declined: the certified sweep exceeds the ` +
+                    `sweep budget (${SWEEP_BUDGET}) — position ${position} ` +
+                    `(${certified.typeName}) certifies ${certified.actual} ` +
+                    `samples at exponent ${exponents[position]}`,
+            )
+        }
+    }
+    const total = positions.reduce((sum, p) => sum + p.expected, 0)
+    const bounds = positions.map((p) => `size ≤ ${p.k} (${p.typeName})`).join(" × ")
+    const claim = `all inhabitants of ${bounds} per operand position — exactly ${total} verified`
+    return { coverage: { positions, claim }, positionSamples }
+}
+
 /**
  * The checking regime the law-checking pass applies (semantics.md §5.4):
  *
@@ -588,7 +1032,7 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
  *   within budget, so the law can be checked exhaustively — a passing
  *   exhaustion establishes it (`discharged` provenance).
  * - **`residual`** — everything else (unbounded-depth μ-types, or a space
- *   beyond the budget): the bounded-depth screen applies, falsifying only —
+ *   beyond the budget): the certified screen applies, falsifying only —
  *   `asserted` provenance.
  *
  * `machineFinite` (fixed encodings — binary64, Char alphabets) is not yet
@@ -715,7 +1159,7 @@ export function finiteInhabitants(type: DataType): number | undefined {
  * `Π inhabitants(position)^exponent(position)` — an exact estimate, not a
  * per-position worst case. `finite` requires every carrier exhaustible and
  * the sweep within the instance budget; everything else falls to the
- * residual's bounded-depth screen.
+ * residual's certified screen.
  */
 export function screeningRegime(
     law: Omit<LawDecl, "provenance">,
@@ -777,7 +1221,7 @@ export function screeningRegime(
  *
  * - `finite` regime → `exhaustLaw` (the entire input space is checked) →
  *   installed **`discharged`** on a full-coverage pass.
- * - `residual` regime → `screenLaw` (bounded-depth samples) → installed
+ * - `residual` regime → `screenLaw` (certified size prefixes) → installed
  *   **`asserted`** on a passing screen (evidence, not proof).
  *
  * Validation runs BEFORE the check: a vocabulary/argument/arity/typing
@@ -795,8 +1239,11 @@ export function screeningRegime(
  * honest: there the count 0 records a *complete* sweep over ∅, a real
  * proof shape.)
  *
- * Returns `{ law, instances, regime }` — the installed declaration, the
- * number of instances checked, and the regime that produced it.
+ * Returns `{ law, instances, regime, coverage }` — the installed
+ * declaration, the number of instances checked, the regime that produced
+ * it, and — for the residual regime — the screen's certified-coverage
+ * report (undefined for exhaustion: a discharged law's coverage is the
+ * full space, which the regime itself already certifies).
  *
  * @throws LawError when the check falsifies the law (nothing is installed).
  * @throws LawDeclarationError when the claim is not in the closed vocabulary,
@@ -814,8 +1261,12 @@ export function declareCheckedLaw(
     laws: LawRegistry,
     eval_: EvalTerm,
     checker?: LawTypeChecker,
-    maxDepth: number = MAX_SAMPLE_DEPTH,
-): { law: LawDecl; instances: number; regime: ScreeningRegime } {
+): {
+    law: LawDecl
+    instances: number
+    regime: ScreeningRegime
+    coverage: CertifiedCoverage | undefined
+} {
     const op = omega.lookup(law.target)
     if (!op) {
         throw new LawDeclarationError(law.target, "the target operation is not declared in Ω")
@@ -826,11 +1277,11 @@ export function declareCheckedLaw(
         throw new LawDeclarationError(law.target, structuralReason)
     }
     // Regime dispatch (semantics.md §5.4): finite → exhaustive discharge;
-    // residual → the bounded-depth screen. The check runs BEFORE installing:
+    // residual → the certified screen. The check runs BEFORE installing:
     // a falsified claim never enters E.
     const regime = screeningRegime(law, op)
     const screen: ScreenOutcome | undefined = regime === "residual"
-        ? screenLaw(law, op, omega, eval_, maxDepth)
+        ? screenLaw(law, op, omega, eval_)
         : undefined
     const instances = screen
         ? screen.outcome === "passed" ? screen.checked : 0
@@ -869,7 +1320,12 @@ export function declareCheckedLaw(
     const provenance: LawProvenance = regime === "finite" ? "discharged" : "asserted"
     laws.declareLaw(law, omega, provenance, checker)
     const decl: LawDecl = { ...law, provenance }
-    return { law: decl, instances, regime }
+    return {
+        law: decl,
+        instances,
+        regime,
+        coverage: screen?.outcome === "passed" ? screen.coverage : undefined,
+    }
 }
 
 // ── Exhaustion (the finite regime — semantics.md §5.4) ───────────────────────
@@ -910,10 +1366,10 @@ function evalArgument(
  * left unchecked — so the caller installs the law `discharged`.
  *
  * Full enumeration reuses the screen's schema machinery (`assignments`,
- * `instantiate`) but not its sampler: `samplesFor` deliberately samples one
- * value per non-recursive field (bounded depth, bounded breadth) — the
- * residual's bounded budget. Exhaustion needs the full product: every
- * variant, every field combination, across the type's whole (finite) space.
+ * `instantiate`) but not its enumerator: the certified screen sweeps a
+ * size-≤ k prefix (bounded by the budget constants); exhaustion needs the
+ * full product — every variant, every field combination, across the type's
+ * whole (finite) space.
  *
  * Coverage honesty: an instance that fails to evaluate REJECTS the
  * declaration (`LawDeclarationError`) rather than being skipped. A
@@ -1020,8 +1476,8 @@ function exhaustLaw(
  * form fails to evaluate (unknown variant, failed field construction) is a
  * hole in the sweep, not a droppable sample — the enumeration THROWS
  * `LawDeclarationError` rather than returning a shrunken space that the
- * caller would pass as full coverage. (The residual screen's sampler may
- * drop failed constructions: its claim is bounded evidence, not a proof.)
+ * caller would pass as full coverage. (The certified screen's construction
+ * failures reject the declaration outright — see `inhabitantsUpToSize`.)
  */
 function* inhabitantsOf(
     type: DataType,
@@ -1082,9 +1538,10 @@ function* inhabitantsOf(
 
 /**
  * Stream the Cartesian product across materialized field spaces,
- * innermost-last (field order preserved in each emitted combo).
+ * innermost-last (field order preserved in each emitted combo). Spaces may
+ * be readonly (the certified enumerator's memoized spaces are shared).
  */
-function* cartesian(spaces: readonly (readonly VariantVal[])[]): Generator<Value[]> {
+function* cartesian(spaces: readonly (readonly Value[])[]): Generator<Value[]> {
     if (spaces.length === 0) {
         yield []
         return

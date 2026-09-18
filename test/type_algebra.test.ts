@@ -1,7 +1,7 @@
 /**
  * Type algebra tests — `derivative(T)` (one-hole contexts).
  *
- * See _docs/theory/type-algebra.md §4 and issue #64. The rules are checked
+ * See _docs/theory/type-algebra.md §4. The rules are checked
  * structurally: sum over variants, Leibniz over fields, the μ-bound spelled
  * by `Field.isRecursive` as the hole, and the chain rule's one-level reading
  * for fields of other data types.
@@ -9,7 +9,7 @@
 
 import { assertEquals, assertThrows } from "@std/assert"
 
-import { type ContextSpec, derivative } from "../src/core/type_algebra.ts"
+import { coefficients, type ContextSpec, derivative } from "../src/core/type_algebra.ts"
 import {
     Any,
     DataType,
@@ -199,4 +199,133 @@ Deno.test("derivative: an intersection-headed carrier is a typed rejection (not 
     const intersection = new IntersectionType(bool(), nat())
     const mistyped = intersection as unknown as DataType
     assertThrows(() => derivative(mistyped), TypeError, "intersection")
+})
+
+// ── Coefficients (type-algebra.md §3 — certified screen coverage) ────────────
+
+Deno.test("coefficients: Bool — the exact product count c₁ = 2, c₀ = 0", () => {
+    const b = bool()
+    assertEquals(coefficients(b, 3), [0, 2, 0, 0])
+})
+
+Deno.test("coefficients: Nat — the chain, one inhabitant per size cₙ = 1", () => {
+    const n = nat()
+    // Zero is size 1; each Succ adds one node. GF: T = x + x·T (the
+    // fixpoint of the chain — a linear recurrence, the rational-GF family).
+    assertEquals(coefficients(n, 5), [0, 1, 1, 1, 1, 1])
+})
+
+Deno.test("coefficients: Pair(a: Bool, b: Bool) — a record's exact count c₃ = 4", () => {
+    const p = pair()
+    // MkPair(a: Bool, b: Bool): 1 node + two Bool fields, each contributing
+    // 2 size-1 inhabitants → 2·2 = 4 at size 3. The other sizes are 0.
+    assertEquals(coefficients(p, 4), [0, 0, 0, 4, 0])
+})
+
+Deno.test("coefficients: NS (Zero | One(b: Bool) | Succ(p)) — both field values counted", () => {
+    // The coefficient reading sees One(False()) — which the old depth
+    // sampler never generated (it took the first field sample per variant).
+    const ns = new DataType("NS", [])
+    ns.variants.push(
+        new Variant("Zero", []),
+        new Variant("One", [new Field("b", bool(), false)]),
+        new Variant("Succ", [new Field("p", ns, true)]),
+    )
+    // Size 1: Zero. Size 2: One(True), One(False), Succ(Zero) → 3.
+    // Size 3: Succ(One(True)), Succ(One(False)), Succ(Succ(Zero)) → 3.
+    // Size 4: three Succ-chains → 3.
+    assertEquals(coefficients(ns, 4), [0, 1, 3, 3, 3])
+})
+
+Deno.test("coefficients: Tree (Leaf | Node(l, r)) — the Catalan shape (the algebraic family)", () => {
+    const t = new DataType("Tree", [])
+    t.variants.push(
+        new Variant("Leaf", []),
+        new Variant("Node", [new Field("l", t, true), new Field("r", t, true)]),
+    )
+    // GF: T = x + x·T² → the Catalan numbers, node-counted: sizes 1, 3, 5
+    // hold 1, 1, 2 trees; even sizes hold none (a Node has two subtrees).
+    // c₅ = 2: Node(Leaf, Node(Leaf, Leaf)) and its mirror.
+    assertEquals(coefficients(t, 5), [0, 1, 0, 1, 0, 2])
+})
+
+Deno.test("coefficients: a mutually recursive pair with a base case converges", () => {
+    // A = mkA(b: B) | baseA(), B = mkB(a: A). The system advances in
+    // lockstep: each round every equation reads the others' PREVIOUS round,
+    // so the minimal nonzero degree advances one step per round and the
+    // fixpoint settles at the true truncated series.
+    const a = new DataType("A", [])
+    const b = new DataType("B", [])
+    a.variants.push(new Variant("baseA", []), new Variant("mkA", [new Field("b", b, false)]))
+    b.variants.push(new Variant("mkB", [new Field("a", a, false)]))
+    // Size 1: baseA. Size 2: mkB(baseA). Size 3: mkA(mkB(baseA)). ...
+    assertEquals(coefficients(a, 4), [0, 1, 0, 1, 0])
+    assertEquals(coefficients(b, 4), [0, 0, 1, 0, 1])
+})
+
+Deno.test("coefficients: a strictly alternating system has NO inhabitants (honest zeros)", () => {
+    // A = mkA(b: B), B = mkB(a: A) — no base case: every inhabitant would
+    // need the other type at every depth, so both series are identically
+    // zero. The fixpoint converges to the honest zeros (an unproductive
+    // variant has no inhabitants, consistent with the sampler's drop).
+    const a = new DataType("A", [])
+    const b = new DataType("B", [])
+    a.variants.push(new Variant("mkA", [new Field("b", b, false)]))
+    b.variants.push(new Variant("mkB", [new Field("a", a, false)]))
+    assertEquals(coefficients(a, 4), [0, 0, 0, 0, 0])
+    assertEquals(coefficients(b, 4), [0, 0, 0, 0, 0])
+})
+
+Deno.test("coefficients: a variant with a function-typed field contributes 0", () => {
+    const fnBox = new DataType("FnBox", [])
+    fnBox.variants.push(
+        new Variant("MkFnBox", [new Field("fn", new FunType(bool(), nat()), false)]),
+    )
+    // Function-typed fields have no finite vocabulary — the variant dies,
+    // the same rule `construct` applies.
+    assertEquals(coefficients(fnBox, 3), [0, 0, 0, 0])
+})
+
+Deno.test("coefficients: a recursive carrier with an Any field contributes only the chain", () => {
+    // Stack = Empty | Push(value: Any, rest: Stack): Push's Any field
+    // contributes the zero polynomial — but the variant itself still
+    // exists (the product through fields is x·0·x·T = 0, so Push
+    // contributes nothing). Only Empty counts.
+    const s = stack()
+    // GF: S = x (Empty) + x·0 (Push — zero annihilates the product).
+    assertEquals(coefficients(s, 3), [0, 1, 0, 0])
+})
+
+Deno.test("coefficients: comb inheritance — the parent chain's variants are summed", () => {
+    const p = natPos()
+    // NatPos = Top | (Nat's Zero | Succ(pred)). The Succ field's hole type
+    // is the carrier the derivative was taken of; for coefficients, the
+    // recursive field's GF is the CARRIER's (NatPos) — the comb's algebra.
+    // Size 1: Zero, Top → 2. Size 2+: one Succ-chain each.
+    assertEquals(coefficients(p, 4), [0, 2, 2, 2, 2])
+})
+
+Deno.test("coefficients: a pattern type — the declared singleton fallback c₁ = 1", () => {
+    const pat = new PatternDataType("NatPat", ["[0-9]+"])
+    assertEquals(coefficients(pat, 3), [0, 1, 0, 0])
+})
+
+Deno.test("coefficients: an empty pattern set has no inhabitants — all zeros", () => {
+    const hollow = new PatternDataType("HollowPat", [])
+    assertEquals(coefficients(hollow, 2), [0, 0, 0])
+})
+
+Deno.test("coefficients: k = 0 yields just c₀ (empty for every productive type)", () => {
+    assertEquals(coefficients(nat(), 0), [0])
+    assertEquals(coefficients(bool(), 0), [0])
+})
+
+Deno.test("coefficients: an intersection-headed carrier is a typed rejection", () => {
+    const intersection = new IntersectionType(bool(), nat())
+    const mistyped = intersection as unknown as DataType
+    assertThrows(() => coefficients(mistyped, 2), TypeError, "intersection")
+})
+
+Deno.test("coefficients: a negative degree is a typed rejection", () => {
+    assertThrows(() => coefficients(nat(), -1), RangeError)
 })

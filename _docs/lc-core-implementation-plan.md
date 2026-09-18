@@ -532,6 +532,35 @@ with the current status, milestone, and dependencies.
 - **Depends on:** Nothing structural (reuses the `Type` AST + sampler machinery). Blocks #65
   (coefficients share the type-equation reading — one module, three readings).
 
+#### PBI #65: Coefficient-certified screen coverage — `coefficients(T, k)` + the certified prefix
+
+- **Status:** Implemented — 337 tests green (`deno check` / `test` / `lint` / `fmt` clean). Plan:
+  `_docs/issue65-plan.md`.
+- **Assignee:** @mlhaufe
+- **Goal:** Upgrade the residual screen's evidence from an opaque instance count to a **certified
+  prefix** — a theorem: "checked all inhabitants of size ≤ kᵢ per operand position — exactly N,
+  verified". `coefficients(type, k)` reads the type equation directly (truncated fixpoint over
+  `T(x) = Σ x·Π GF(field)` — no closed forms, no per-type case analysis; chain carriers satisfy
+  linear recurrences, branching carriers quadratic ones); `inhabitantsUpToSize` enumerates the
+  complete size-≤ kᵢ class set per position; the certification asserts the two counts agree, and a
+  mismatch rejects the declaration loudly (an enumeration hole must not masquerade as coverage).
+- **Design decisions:** size-based certificates (not depth-based — the old sampler was NOT a size
+  prefix for branching/wide carriers: `One(False())` was never sampled); the kᵢ policy with a
+  min-size-class floor raise (wide records certify their first class instead of declining); budget
+  constants (`MAX_SCREEN_SIZE = 3`, `PREFIX_BUDGET = 2⁸`, `SWEEP_BUDGET = 2¹⁶`); construction holes
+  reject while instance-evaluation holes still skip (completeness is the certified contract);
+  pattern types certify their declared singleton fallback (language equations deferred to #62);
+  provenance UNCHANGED — a certified screen still installs `asserted`.
+- **Files:** `src/core/type_algebra.ts` (`coefficients`), `src/core/law_checking.ts`
+  (`inhabitantsUpToSize`, `certifyPosition`/`certifyCoverage`, `ScreenOutcome.coverage`),
+  `src/core/values.ts` (`valueSize` moved here — the size measure shared by the shrinker and the
+  certificates), `src/core/law_testing.ts` (re-export), `src/core/index.ts`,
+  `test/type_algebra.test.ts`, `test/discharge.test.ts`, `test/laws.test.ts`,
+  `_docs/theory/type-algebra.md` (§3 + §7), `_docs/theory/semantics.md` (§5.4),
+  `_docs/theory/law-testing.md` (§2), this document.
+- **Depends on:** #64 (the type-equation reading lands with ∂T — one module, three readings).
+  #62/#63 consume the module next (declared encodings / the derivable regime).
+
 ### Milestone v0.4.0 — Patterns & surface
 
 #### PBI #23: T-FoldMatch + E-FoldMatch — pattern-matched fold (elimination)

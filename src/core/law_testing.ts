@@ -34,7 +34,7 @@ import {
 
 import { type ContextSpec, derivative } from "./type_algebra.ts"
 import { type EvalTerm, samplesFor } from "./law_checking.ts"
-import { TokenVal, type Value, ValueEnv, VariantVal } from "./values.ts"
+import { TokenVal, type Value, ValueEnv, valueSize, VariantVal } from "./values.ts"
 import { DataType, type Type } from "./types.ts"
 
 // ── Context paths ─────────────────────────────────────────────────────────────
@@ -142,22 +142,6 @@ export function plug(
     const fields = new Map(value.fields)
     fields.set(fieldName!, patched)
     return new VariantVal(value.variantName, value.dataType, fields)
-}
-
-/**
- * The structural size of a value: its node count (one per variant
- * constructor; tokens and atoms count as nodes at their position).
- *
- * This is the monotone measure the shrinker minimizes — a filler is a
- * candidate only when STRICTLY smaller than the subtree it replaces.
- */
-export function valueSize(value: Value): number {
-    if (value instanceof VariantVal) {
-        let size = 1
-        for (const field of value.fields.values()) size += valueSize(field)
-        return size
-    }
-    return 1
 }
 
 /**

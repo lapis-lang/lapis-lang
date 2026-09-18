@@ -614,7 +614,11 @@ Deno.test("screen: heterogeneous commutative — passed with zero coverage (all 
         ops,
         makeEvalTerm(ev),
     )
-    assertEquals(checked, { outcome: "passed", checked: 0 })
+    assertEquals(checked.outcome, "passed")
+    assertEquals(
+        checked.outcome === "passed" ? checked.checked : -1,
+        0,
+    )
 })
 
 Deno.test("screen: a non-screenable domain (higher-order op) is declined, not falsified", () => {

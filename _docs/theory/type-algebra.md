@@ -122,23 +122,22 @@ certification design must keep them apart:
   it can cover recursive μ-carriers; linear recurrences alone cover pattern types and
   chain-recursive carriers only.
 
-The design (PBI #65) should state this split explicitly: rational GFs for pattern types
+The design (PBI #65, implemented) states this split explicitly: rational GFs for pattern types
 (Chomsky–Schützenberger), algebraic GFs for recursive μ-types (the Lagrange/implicit-function
 reading of the type equation), and a per-type decision for which recurrence class the certification
-machinery supports.
+machinery supports. One mechanism covers both: the equations are iterated, never solved.
 
 This upgrades the residual screen's evidence from an opaque instance count to a **certified
-prefix**: a sweep bounded at depth 2 can state "checked all inhabitants of size ≤ 2 for each operand
-position" — a theorem, not a vibe. The screen's existing machinery (`samplesFor` walks variants
-depth-bounded) already enumerates exactly the $c_{\le 2}$ prefix; the missing piece is computing
-$c_{\le 2}$ **independently** (from the type equation) and asserting the sweep's instance count
-matches it. Coverage goes from "we checked N instances" to "we checked the first $k$ size classes,
-containing exactly $c_0 + \dots + c_k$ inhabitants".
-
-For pattern types, $c_n$ comes from the language equation: a pattern `p` with generating function
-$P(x)$ (concatenation multiplies, alternation sums, Kleene star inverts $(1-P)$) gives the count of
-matched strings of each length. The coefficient reading is what makes the pattern universe checkable
-at bounded size even though it is unbounded in total (§2.3).
+prefix**: "checked all inhabitants of size ≤ k per operand position — exactly N, verified". The
+certificate's independence is the point: `coefficients(type, k)` reads the type equation directly (a
+truncated fixpoint over `T(x) = Σ x·Π GF(field)`, in `type_algebra.ts`), while the screen enumerates
+the size-≤ kᵢ class set (`inhabitantsUpToSize` in `law_checking.ts`) — a different method computing
+the same count, asserted equal. A mismatch rejects the declaration loudly: an enumeration hole would
+otherwise masquerade as full-prefix coverage. The certificate states the split (§3's
+rational/algebraic division) but the implementation needs no per-type case analysis: chain carriers
+satisfy linear recurrences, branching carriers quadratic ones, and the fixpoint solves both.
+(Pattern types use the declared fallback — the singleton token — until #62's declared encodings
+arrive; the language-equation reading needs the pattern as a first-class surface.)
 
 ## 4. Derivatives: one-hole contexts
 
@@ -244,23 +243,24 @@ total maps (`from`/`to`) checked against the calculus.
 
 ## 7. Implementation status and roadmap
 
-| Piece                                      | Status                                                      |
-| ------------------------------------------ | ----------------------------------------------------------- |
-| `finiteInhabitants` (counting classifier)  | **implemented** (`law_checking.ts`)                         |
-| Exact sweep routing (`screeningRegime`)    | **implemented** (`law_checking.ts`)                         |
-| Exhaustion (`exhaustLaw` → `discharged`)   | **implemented** (`law_checking.ts`)                         |
-| Zero-coverage rejection (declined screen)  | **implemented** (`screenLaw` outcome + reject)              |
-| `Token` value form (`TokenVal`, T-Token)   | **implemented** (`values.ts`, `grammar.ts`)                 |
-| Pattern sampling (token prefix, §2.3/§3)   | **implemented** (`patternSamples` in `law_checking.ts`)     |
-| ∂T machinery (§4) — `derivative(T)`        | **implemented** (`type_algebra.ts`; `ContextSpec` shapes,   |
-|                                            | implicit differentiation at the μ-bound)                    |
-| ∂T-based structural shrinking              | **implemented** (`law_testing.ts`; `DerivativeGenerator`,   |
-|                                            | regeneration as the fallback)                               |
-| ∂T: `old`/paramorphism typing (§4.2)       | pending (stretch — needs the `old` language feature)        |
-| ∂T: observation-channel evidence typing    | pending (stretch — needs the re-screening channel)          |
-| Coefficient-certified screen coverage (§3) | pending (screen enumerates the size-1 prefix; GF check TBD) |
-| Encoding declarations (§5)                 | pending (design above; `semantics.md` §5.4 note)            |
-| BMF derivation engine (§6)                 | pending (awaits the handler-fragment characterization)      |
+| Piece                                                    | Status                                                    |
+| -------------------------------------------------------- | --------------------------------------------------------- |
+| `finiteInhabitants` (counting classifier)                | **implemented** (`law_checking.ts`)                       |
+| Exact sweep routing (`screeningRegime`)                  | **implemented** (`law_checking.ts`)                       |
+| Exhaustion (`exhaustLaw` → `discharged`)                 | **implemented** (`law_checking.ts`)                       |
+| Zero-coverage rejection (declined screen)                | **implemented** (`screenLaw` outcome + reject)            |
+| `Token` value form (`TokenVal`, T-Token)                 | **implemented** (`values.ts`, `grammar.ts`)               |
+| Pattern sampling (token prefix, §2.3/§3)                 | **implemented** (`patternSamples` in `law_checking.ts`)   |
+| ∂T machinery (§4) — `derivative(T)`                      | **implemented** (`type_algebra.ts`; `ContextSpec` shapes, |
+|                                                          | implicit differentiation at the μ-bound)                  |
+| ∂T-based structural shrinking                            | **implemented** (`law_testing.ts`; `DerivativeGenerator`, |
+|                                                          | regeneration as the fallback)                             |
+| ∂T: `old`/paramorphism typing (§4.2)                     | pending (stretch — needs the `old` language feature)      |
+| ∂T: observation-channel evidence typing                  | pending (stretch — needs the re-screening channel)        |
+| Coefficient-certified screen coverage (§3)               | **implemented** (`type_algebra.ts` `coefficients`;        |
+| `law_checking.ts` `inhabitantsUpToSize` + certification) |                                                           |
+| Encoding declarations (§5)                               | pending (design above; `semantics.md` §5.4 note)          |
+| BMF derivation engine (§6)                               | pending (awaits the handler-fragment characterization)    |
 
 Ordering rationale: counting and routing landed first because they are the **decision procedures**
 everything else consults; pattern-value support next (it unblocks the largest unserved universe);

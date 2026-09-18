@@ -57,9 +57,11 @@ install nothing stronger than evidence; a failing run throws `PropertyFailure` w
 counterexample, and the declaration is rejected outright.
 
 The mirror is the Cartesian sweep of `screenLaw` (`law_checking.ts`): the screen enumerates a
-_bounded, exhaustive_ sample space per operand position (bounded depth ⇒ a handful of samples).
-`forAll` complements it with _random_ samples deeper into the space: same falsify-never-establish
-contract, different coverage profile.
+_bounded, exhaustive_ sample space per operand position — now a **certified prefix** (the complete
+size-≤ kᵢ class set, counted independently by the type equation's coefficients; `type-algebra.md`
+§3). `forAll` complements it with _random_ samples deeper into the space: same
+falsify-never-establish contract, different coverage profile (the certificate upgrades the sweep's
+claim, not its provenance).
 
 ## 3. The generator root problem
 
