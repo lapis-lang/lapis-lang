@@ -101,8 +101,14 @@ bound, hence no exhaustion, ever. This is the formal refutation of proof-by-exha
 discharge for the pattern universe (`Rational`, `Complex`, `Nat`, `Int`, `String`): the classifier
 returns "unbounded" for every one of them, permanently.
 
-Pattern types get their counting from the **coefficient** reading instead (§3), and their discharge
-from `machineFinite` encodings (§5) or derivation (§6) — never from exhaustion.
+Pattern types get their counting from the **coefficient** reading (§3), whose pattern arm is now the
+**language-equation reading** (implemented, `pattern_lang.ts`): each pattern's AST states its
+equation directly — character/class → count at length 1, concatenation → convolution, star →
+$L = \varepsilon + P \cdot L$, plus → $P \cdot P^*$, optional → the $\varepsilon$-branch, type
+reference → the referenced type's counts (memoized, cycles rejected loudly). For `Nat = [0-9]+` this
+reads as $L = P \cdot L$ with $P$ = 10 chars — $c_n = 10^n$, exactly as the geometric series
+$1/(1-a)$ says. Discharge is `machineFinite` sub-space sweeps (§5) or derivation (§6) — never
+exhaustion.
 
 ## 3. Coefficients: certified screen coverage
 
@@ -136,8 +142,8 @@ the same count, asserted equal. A mismatch rejects the declaration loudly: an en
 otherwise masquerade as full-prefix coverage. The certificate states the split (§3's
 rational/algebraic division) but the implementation needs no per-type case analysis: chain carriers
 satisfy linear recurrences, branching carriers quadratic ones, and the fixpoint solves both.
-(Pattern types use the declared fallback — the singleton token — until #62's declared encodings
-arrive; the language-equation reading needs the pattern as a first-class surface.)
+(Pattern types use the language-equation reading for the same coefficients (#62 implemented,
+`pattern_lang.ts`) — the singleton fallback is gone; see §5.)
 
 ## 4. Derivatives: one-hole contexts
 
@@ -201,27 +207,41 @@ heterogeneous fields — a hole can sit deep inside a field's own structure.
 - **Codata (ν)** is the coalgebraic dual — bounded observation stays bounded; nothing here touches
   ν.
 
-## 5. machineFinite: encoding declarations (design)
+## 5. machineFinite: sub-space specifications (implemented)
 
-The `machineFinite` regime (semantics.md §5.4) needs the encodings themselves declared — the bound
-must be spec-able, not an implementation accident. Three declaration forms:
+The `machineFinite` regime (semantics.md §5.4) is now implemented for pattern carriers, on a single
+declaration form:
 
-1. **Encoding declarations on data types** — a `data` type states its encoding family (`binary64`,
-   `char-unicode`, `int-two-complement`), fixing `|T|` **as part of the language definition**
-   (binary64 = exactly $2^{64}$, `Inf`/`NaN` as in-domain values). The classifier _reads_ the
-   declared count; it never infers an encoding from the runtime representation.
-2. **Sub-space specifications** — a law declaration may scope its claim ("all Floats in [-1, 1]"),
-   so bounded enumeration **certifies the checked sub-space**: `discharged` for the sub-space,
-   `asserted` beyond it. The certification is the claim.
-3. **Alphabet declarations for Char-like types** — a fixed finite alphabet makes bounded-length
-   string enumeration well-posed (the length bound rides on sized types, already a design decision
-   for termination).
+**Sub-space specifications** — a law declaration may scope its claim ("all Ints with $|x| \le
+2^{31}$"), so bounded enumeration **certifies the checked sub-space**: `discharged` for the
+sub-space, `asserted` beyond it. The certification is the claim. A spec is a predicate over the
+swept operand position, type-checked against the operand carrier, evaluated by the same total
+evaluator as the law body; the enumeration materializes the carrier's strings (length-bounded,
+budget-capped) and keeps exactly the members the predicate admits. The sweep's **visible extent** is
+part of the certificate (`SubSpaceSweep`: the length bound reached and each scoped position's
+admitted cardinality) — the claim is "discharged on strings of length ≤ N matching the scope", not
+an unqualified `discharged`. An EMPTY filtered space rejects the declaration (a vacuous discharge is
+almost never the scoped claim its author meant). Structural exhaustion stays permanently unavailable
+to pattern carriers (§2.3); the sub-space sweep is the honest alternative.
 
-In type-algebra terms, an encoding declaration is just a **fixed `|T|` constant** the classifier
-reads before its own structural analysis: binary64's GF is the constant $2^{64}$, and sub-space
-specs restrict enumeration to a certified subset with the same sweep arithmetic as §2.2. This is the
-discharge route for machine-finite _pattern_ carriers (`Float`, `Int`, `Char`) — the only route,
-since §2.3 bars them from structural exhaustion forever.
+**Rejected design: encoding declarations on data types.** The original design ( `type-algebra.md`
+before the #62 rescope; semantics.md §5.4's note) proposed a `data` type stating its encoding family
+(`binary64`, `char-unicode`, `int-two-complement`), fixing `|T|` as part of the language definition
+(binary64 = exactly $2^{64}$, `Inf`/`NaN` as in-domain values). This is **dropped**: it contradicts
+the token-value architecture. A pattern-matched type is a _lexeme space_ — its patterns constrain
+the raw token text only; interpretation (which lexeme is a Float, which is an Int) belongs to the
+fold layer, and machine-numerics trust is the `primitive` provenance tier's business. A `|T|`
+constant read from a declaration would assert an encoding the pattern language cannot express
+(`binary64`'s exact $2^{64}$ count is a property of the interleaved interpretation, not of any
+lexeme set). The `alphabet` declaration form is likewise dropped for the same reason — the character
+universe is instead a **one-line language fiat**: `.` and classes range over code points 0–127
+(ASCII) for now; Unicode widening is a later, separate decision (surface-syntax.md §1.3).
+
+In type-algebra terms, the sub-space sweep applies §2.2's sweep arithmetic to a **filtered
+carrier**: the certified size is the sub-space's cardinality, which `exhaustLaw` knows exactly
+because it enumerated it. This is the discharge route for machine-finite _pattern_ carriers (`Nat`,
+`Int`, `Char`, user-declared pattern types) — the only route besides §6's derivation, since §2.3
+bars them from structural exhaustion forever.
 
 ## 6. Derivation: the BMF engine (design)
 
@@ -259,7 +279,15 @@ total maps (`from`/`to`) checked against the calculus.
 | ∂T: observation-channel evidence typing                  | pending (stretch — needs the re-screening channel)        |
 | Coefficient-certified screen coverage (§3)               | **implemented** (`type_algebra.ts` `coefficients`;        |
 | `law_checking.ts` `inhabitantsUpToSize` + certification) |                                                           |
-| Encoding declarations (§5)                               | pending (design above; `semantics.md` §5.4 note)          |
+| Pattern language-equation coefficients (§2.3/§3)         | **implemented** (`pattern_lang.ts` parse + counting;      |
+|                                                          | `types.ts` AST patterns; `type_algebra.ts` pattern arm)   |
+| Token size = text length (§3 certificates)               | **implemented** (`values.ts` `valueSize` token arm)       |
+| Sub-space specifications + `machineFinite` (§5)          | **implemented** (`laws.ts` `LawDecl.subSpace` +           |
+|                                                          | validation; `law_checking.ts` machineFinite arm +         |
+|                                                          | `exhaustLaw` sub-space filtering)                         |
+| Encoding declarations (§5)                               | **rejected** — contradicts the token architecture (§5)    |
+| Sub-space surface syntax                                 | pending (core: structured `subSpace` field; the surface   |
+|                                                          | form lands with the pattern-surface PBI)                  |
 | BMF derivation engine (§6)                               | pending (awaits the handler-fragment characterization)    |
 
 Ordering rationale: counting and routing landed first because they are the **decision procedures**

@@ -14,6 +14,10 @@
  *          | σ ∧ τ              intersection type
  */
 
+// The pattern AST type — pattern_lang.ts owns the language; this import is
+// type-only (a cycle-free edge: pattern_lang.ts imports the pattern TYPE here).
+import type { PatternAST } from "./pattern_lang.ts"
+
 // ── Type ──────────────────────────────────────────────────────────────────────
 
 /** The root of the LC type hierarchy. Every type is a subtype of this. */
@@ -143,14 +147,18 @@ export class DataType extends Type {
 /**
  * `μ α. Σᵢ pᵢ` — a pattern-matched data type.
  *
- * Each `pᵢ` is a pattern (a restricted regular expression) specifying an
- * infinite set of constructors. There are no fields (no Family); the sole
- * inhabitant of a matched constructor is the `Token` — the raw matched text.
+ * Each `pᵢ` is a parsed pattern (a restricted regular expression — see
+ * `pattern_lang.ts`) specifying an infinite set of constructors. There are
+ * no fields (no Family); the sole inhabitant of a matched constructor is the
+ * `Token` — the raw matched text. The AST is stored (not the source string):
+ * the language-equation reading (`pattern_lang.ts` — concatenation multiplies,
+ * alternation sums, Kleene star inverts (1−P)) reads the structure, and
+ * rendering back to source is the AST's `toString`.
  */
 export class PatternDataType extends Type {
     constructor(
         readonly name: string,
-        readonly patterns: string[],
+        readonly patterns: PatternAST[],
     ) {
         super()
     }

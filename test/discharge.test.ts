@@ -36,11 +36,11 @@ import {
     VariantVal,
 } from "../src/index.ts"
 
-import { DataType, Field, FunType, PatternDataType, TypeEnv, Variant } from "../src/core/types.ts"
+import { DataType, Field, FunType, TypeEnv, Variant } from "../src/core/types.ts"
 
 import { coefficients } from "../src/core/type_algebra.ts"
 
-import { createBoolType, createNatType } from "./fixtures.ts"
+import { createBoolType, createNatType, createPatternType } from "./fixtures.ts"
 
 import { assert, assertEquals, assertThrows } from "@std/assert"
 
@@ -74,14 +74,16 @@ function evalOfHarness(
  * rejecting valid terms (mirroring the evaluator's binding of both).
  */
 function checkerFor(registry: TypeRegistry, opRegistry: OpRegistry) {
+    const check = (source: string, gamma: TypeEnv) => {
+        const results = [
+            ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(source, gamma),
+        ]
+        return results.length === 1 ? results[0] : undefined
+    }
     return {
-        checkSource: (source: string) => {
-            const results = [
-                ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
-                    .parseWith(source, new TypeEnv()),
-            ]
-            return results.length === 1 ? results[0] : undefined
-        },
+        checkSource: (source: string) => check(source, new TypeEnv()),
+        checkSourceIn: (source: string, gamma: TypeEnv) => check(source, gamma),
     }
 }
 
@@ -808,63 +810,66 @@ Deno.test("discharge: a residual law whose screen declines is REJECTED — zero 
 
 // ── Pattern-typed carriers (TokenVal sampling) ───────────────────────────────
 
-Deno.test("discharge: a pattern-typed op screens via token samples — asserted with real coverage", () => {
+Deno.test("discharge: a pattern-typed op screens via token samples — the screen FALSIFIES a false axiom", () => {
     // The pattern universe is unbounded in total (rational generating
     // function — type-algebra.md §2.3), so the regime is residual ALWAYS.
-    // But a pattern carrier has a sample vocabulary: the token atom (the
-    // pattern type's name, evaluated to a TokenVal). The screen exercises
-    // the claim over that certified size-1 prefix — real coverage, not a
-    // declined sweep — and the law enters E as `asserted`.
+    // With the language-equation enumeration, the certified
+    // prefix is the TRUE size-≤ k token set (k = 2: the 110 digit strings
+    // of length 1–2), so the screen exercises a RICH vocabulary — a
+    // non-commutative operation falsifies loudly (a singleton-only
+    // vocabulary could never distinguish `y` from a swap).
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     h.opRegistry.declare(
         new OpSig("tokOr", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. y"),
         { checkDefinition: () => undefined },
     )
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
-    const { law, instances, regime } = declareCheckedLaw(
-        { kind: "commutative", target: "tokOr" },
-        h.opRegistry,
-        h.laws,
-        eval_,
-        checkerFor(h.registry, h.opRegistry),
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "commutative", target: "tokOr" },
+                h.opRegistry,
+                h.laws,
+                eval_,
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawError,
+        "commutative",
     )
-    assertEquals(regime, "residual", "a pattern carrier never routes finite")
-    assertEquals(instances, 1, "the singleton token sample gives real coverage")
-    assertEquals(law.provenance, "asserted")
-    assertEquals(h.laws.lookup("tokOr").length, 1)
+    assertEquals(h.laws.lookup("tokOr").length, 0, "a falsified claim never enters E")
 })
 
-Deno.test("discharge: an absorbing law over a pattern carrier screens both directions (2 instances)", () => {
+Deno.test("discharge: an absorbing law over a pattern carrier falsifies loudly (rich vocabulary)", () => {
     // The argument-taking schema (`absorbing: e`) evaluates its argument —
-    // the token atom — and sweeps BOTH directions over the token samples:
-    // two instances per assignment (the schema's dual-axiom shape), real
-    // coverage over the pattern carrier's certified prefix.
+    // the token atom — and sweeps BOTH directions over the token samples.
+    // With the language-equation enumeration, the certified
+    // prefix is the true size-≤ 2 token set (110 digit strings): the
+    // projection `op(x, y) = x` satisfies op(z, a) = z only when z = a —
+    // a ≠ z falsifies the left direction. A singleton-only vocabulary
+    // (a = z always) could never detect this; the richer vocabulary can.
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     h.opRegistry.declare(
         new OpSig("tokConst", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. x"),
         { checkDefinition: () => undefined },
     )
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
-    // On the singleton sample space (a = z — the same token), the absorbing
-    // axiom is satisfied by the projection `op(x, y) = x` in BOTH directions:
-    // op(z, a) = z holds; op(a, z) = a = z holds. Passing with 2 instances is
-    // the honest coverage measure — falsification needs a richer vocabulary
-    // (multiple token samples), which is the screen's bounded-evidence
-    // contract, not a hole.
-    const { law, instances, regime } = declareCheckedLaw(
-        { kind: "absorbing", target: "tokConst", argument: "NatPat" },
-        h.opRegistry,
-        h.laws,
-        eval_,
-        checkerFor(h.registry, h.opRegistry),
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "absorbing", target: "tokConst", argument: "NatPat" },
+                h.opRegistry,
+                h.laws,
+                eval_,
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawError,
+        "absorbing",
     )
-    assertEquals(regime, "residual")
-    assertEquals(instances, 2, "both axiom directions checked")
-    assertEquals(law.provenance, "asserted")
+    assertEquals(h.laws.lookup("tokConst").length, 0, "a falsified claim never enters E")
 })
 
 // ── Token/variable precedence (the nameBound gate) ──────────────────────────
@@ -879,7 +884,7 @@ Deno.test("token: the nameBound gate — a term-variable name is never a token",
     // T-Var/E-Var correct even if a future binder accepts PascalCase names.
     // Direct gate test: the checker's `nameBound` sees Γ, the evaluator's ρ.
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     const tc = new LCTypeCheck().setRegistry(h.registry).setOpRegistry(h.opRegistry)
     // A bound lowercase variable of the pattern type: resolves via Γ (the
@@ -904,7 +909,7 @@ Deno.test("token: the evaluator's nameBound gate routes ρ bindings to the varia
     // an unbound registered name is a token. The gate's contract, probed
     // through the evaluator's public parse.
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     const ev = new LCEval().setRegistry(h.registry)
     // Bound lowercase name: the bound value flows (E-Var), not a token.
@@ -927,7 +932,7 @@ Deno.test("discharge: a pattern type with NO patterns has no vocabulary — the 
     // sample vocabulary and declines — the declaration is rejected rather
     // than installed `asserted` with zero coverage.
     const h = boolHarness()
-    const hollow = new PatternDataType("HollowPat", [])
+    const hollow = createPatternType("HollowPat", [])
     h.registry.register(hollow)
     h.opRegistry.declare(
         new OpSig("hollowTok", [hollow, hollow], hollow, "\\x:HollowPat. \\y:HollowPat. x"),
@@ -966,7 +971,7 @@ Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is
     // branch would type a Γ-bound PascalCase name as the pattern type —
     // the shadowing the gate prevents.)
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
 
     // Evaluator side (ρ is a public ValueEnv): bind the PascalCase name
@@ -1012,12 +1017,14 @@ Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is
 Deno.test("discharge: a data type with a pattern-typed field is sampled — Empty | With(Pat) screens both variants", () => {
     // Pattern support is not only for TOP-LEVEL parameters: a `DataType`
     // variant with a `PatternDataType` field gets its field sampled through
-    // `patternSamples` (a matched token), so the `With(Pat)` variant's
-    // inhabitant is constructed and the screen reaches its field-carrying
-    // arm — the whole 2-value space {Empty(), With(Pat("Pat"))}, not just
-    // the `Empty` variant the pre-fix field sampler would have dropped.
+    // the language-equation enumeration (the size-≤ k token
+    // classes), so the `With(Pat)` variant's inhabitants are constructed
+    // and the screen reaches its field-carrying arm. With tokens sized by
+    // TEXT LENGTH, the size-≤ 3 prefix holds Empty() (size 1), the ten
+    // length-1 tokens (size 2), and the hundred length-2 tokens (size 3) —
+    // 111 distinct inhabitants swept.
     const h = boolHarness()
-    const pat = new PatternDataType("Pat", ["[0-9]+"])
+    const pat = createPatternType("Pat", ["[0-9]+"])
     const withPat = new DataType("WithPat", [])
     withPat.variants.push(
         new Variant("Empty", []),
@@ -1046,7 +1053,11 @@ Deno.test("discharge: a data type with a pattern-typed field is sampled — Empt
         "residual",
         "the With(Pat) field makes the carrier pattern-containing → residual",
     )
-    assertEquals(instances, 2, "both variants' inhabitants were constructed and swept")
+    assertEquals(
+        instances,
+        111,
+        "Empty, the ten length-1 tokens, and the hundred length-2 tokens were constructed and swept",
+    )
     assertEquals(law.provenance, "asserted")
     // The token-typed field sample is a real TokenVal in the sweep's vocabulary.
     const withSample = evalOfHarness(h.registry, h.opRegistry)("With(Pat)", new ValueEnv())[0]
@@ -1068,7 +1079,7 @@ Deno.test("discharge: a mixed data/pattern signature is rejected — homogeneous
     // `paramTypeCompatible` rejects mixed data/pattern signatures BEFORE
     // screening: `LawDeclarationError`, nothing in E.
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     h.opRegistry.declare(
         new OpSig("mixed", [natPat, h.bool], h.bool, "\\x:NatPat. \\b:Bool. b"),
@@ -1203,46 +1214,42 @@ Deno.test("certified screen: per-position coverage via the raw screen over (Bool
     assert(sweep.coverage.claim.includes("exactly 5"), "the claim sums both positions")
 })
 
-Deno.test("certified screen: a pattern carrier certifies its declared fallback (k=1, exactly 1)", () => {
-    // The declared fallback: a pattern type's certified prefix is the
-    // singleton name-token — the same vocabulary `patternSamples` produces.
-    // The language-equation reading rides on the declared-encodings
-    // machinery (a follow-up).
+Deno.test("certified screen: a pattern carrier certifies its language-equation prefix (k=2, exactly 110)", () => {
+    // The language-equation prefix: `NatPat = [0-9]+` counts
+    // 10 + 100 = 110 strings of length ≤ 2 (c₃ = 1000 exceeds the prefix
+    // budget, so the kᵢ policy stops at k = 2). The certificate's COUNT is
+    // the theorem — enumerated and equation-counted independently.
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     h.opRegistry.declare(
         new OpSig("tokOr", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. y"),
         { checkDefinition: () => undefined },
     )
-    const { coverage } = declareCheckedLaw(
-        { kind: "commutative", target: "tokOr" },
-        h.opRegistry,
-        h.laws,
-        evalOfHarness(h.registry, h.opRegistry),
-        checkerFor(h.registry, h.opRegistry),
-    )
-    assertEquals(coverage!.positions.length, 2)
-    // k extends through the EMPTY classes (c₂ = c₃ = 0 — the declared
-    // fallback's prefix is exactly {the token}); the COUNT is the theorem.
-    assertEquals(coverage!.positions[0]!.k, 3)
-    assertEquals(coverage!.positions[0]!.expected, 1)
-    assertEquals(coverage!.positions[0]!.actual, 1)
+    // The theorem, both sides: coefficients count from the language
+    // equation, the enumerator materializes the same set independently.
+    assertEquals(coefficients(natPat, 2), [0, 10, 100])
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(inhabitantsUpToSize(natPat, 2, eval_).length, 110)
 })
 
 Deno.test("enumerator contract: a pattern type at k = 0 yields NO samples (c₀ = 0)", () => {
-    // The size-≤ 0 prefix is EMPTY for every carrier — the token is a
-    // SIZE-1 inhabitant, so it enters the prefix only when k ≥ 1. Returning
-    // it at k = 0 would disagree with `coefficients(pattern, 0)` (= [0]) and
-    // make the exported enumerator miscount the very prefix it certifies.
+    // The size-≤ 0 prefix is EMPTY for every carrier — the language
+    // equation's c₀ = 0 for a nonempty pattern (a pattern consumes at least
+    // one character unless it matches ε, and `NatPat`'s language has no ε),
+    // matching `coefficients(pattern, 0)` (= [0]).
     const h = boolHarness()
-    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
     h.registry.register(natPat)
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
     assertEquals(inhabitantsUpToSize(natPat, 0, eval_), [])
-    assertEquals(inhabitantsUpToSize(natPat, 1, eval_).length, 1, "the token at k = 1")
+    assertEquals(
+        inhabitantsUpToSize(natPat, 1, eval_).length,
+        10,
+        "the ten length-1 digit tokens at k = 1",
+    )
     // An empty pattern set has no inhabitants at any bound.
-    const hollow = new PatternDataType("HollowPat", [])
+    const hollow = createPatternType("HollowPat", [])
     h.registry.register(hollow)
     assertEquals(inhabitantsUpToSize(hollow, 3, eval_), [])
 })
@@ -1267,7 +1274,7 @@ Deno.test("enumerator contract: a negative size bound is a typed rejection", () 
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
     assertThrows(() => inhabitantsUpToSize(h.bool, -1, eval_), RangeError)
     assertThrows(
-        () => inhabitantsUpToSize(new PatternDataType("NatPat", ["[0-9]+"]), -1, eval_),
+        () => inhabitantsUpToSize(createPatternType("NatPat", ["[0-9]+"]), -1, eval_),
         RangeError,
     )
 })
@@ -1455,7 +1462,7 @@ Deno.test("certified screen: a pattern type with NO patterns still declines (no 
     // The empty pattern set has NO inhabitants (the coefficient fallback's
     // zeros) — the certification declines, zero coverage, nothing installed.
     const h = boolHarness()
-    const hollow = new PatternDataType("HollowPat", [])
+    const hollow = createPatternType("HollowPat", [])
     h.registry.register(hollow)
     h.opRegistry.declare(
         new OpSig("hollowTok", [hollow, hollow], hollow, "\\x:HollowPat. \\y:HollowPat. x"),
@@ -1549,3 +1556,323 @@ function impostor_variants_helper(impostor: DataType): void {
         new Variant("Tag", [new Field("n", new DataType("Unused", []))]),
     )
 }
+
+// ── Sub-space discharge (the machineFinite regime) ───────────────
+
+/** A pattern op harness: a NatPat carrier over an op that flips the last digit's parity. */
+function patternHarness() {
+    const h = boolHarness()
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    return { ...h, natPat }
+}
+
+Deno.test("machineFinite: a sub-space-scoped law over a pattern carrier DISCHARGES", () => {
+    // The scoped claim: `tokId`'s involutory axiom (op(op(x)) ≡ x, trivially
+    // true for the identity) over a pattern carrier. The scope makes the
+    // swept space finite and spec-able → the machineFinite regime routes it
+    // to sub-space exhaustion; a full-coverage pass installs `discharged`
+    // SCOPED to the declared range.
+    //
+    // The core's predicate cut: the scope's `where` is a Bool term over the
+    // bound `a`, evaluated by the same total evaluator as the law body. A
+    // literal "token text equals 0" comparison needs a text-exposing op the
+    // core does not have, so this test states a tautology predicate — it
+    // keeps the WHOLE enumerated prefix (the length-≤ 4 sweep = 11110
+    // strings, within the exhaustion ceiling of 2¹⁶), which is exactly the
+    // honesty this test pins: the discharge covers the enumerated sub-space
+    // (and the certificate's `subSpaceSweep` records the length bound and
+    // the admitted count). For a REAL filter and a falsified axiom, see the
+    // tests below (unscoped-stays-residual, falsification-inside-scope).
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    const { law, instances, regime, subSpaceSweep } = declareCheckedLaw(
+        {
+            kind: "involutory",
+            target: "tokId",
+            subSpace: [{
+                position: 0,
+                where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+            }],
+        },
+        h.opRegistry,
+        h.laws,
+        eval_,
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "machineFinite", "a scoped pattern carrier routes machineFinite")
+    assertEquals(instances, 11110, "the length-≤ 4 sweep (10+100+1000+10000) was exhausted")
+    assertEquals(law.provenance, "discharged", "a passing scoped sweep discharges")
+    assertEquals(law.subSpace?.length, 1, "the scope rides on the declaration")
+    assertEquals(
+        subSpaceSweep,
+        {
+            maxLength: 4,
+            positions: [{
+                position: 0,
+                where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                admitted: 11110,
+            }],
+        },
+        "the sweep certificate states the length bound and the admitted count",
+    )
+    assertEquals(h.laws.lookup("tokId").length, 1)
+})
+
+Deno.test("machineFinite: the same law UNSCOPED stays residual — asserted, not discharged", () => {
+    // §2.3 bars full-domain exhaustion for pattern carriers permanently: an
+    // unscoped claim has no discharge route — the certified screen applies
+    // (`asserted`, evidence only).
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig(
+            "tokConst",
+            [h.natPat, h.natPat],
+            h.natPat,
+            "\\x:NatPat. \\y:NatPat. x",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    const { law, regime } = declareCheckedLaw(
+        { kind: "idempotent", target: "tokConst" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "residual", "an unscoped pattern carrier routes residual")
+    assertEquals(law.provenance, "asserted")
+})
+
+Deno.test("machineFinite: a scope predicate that is not Bool rejects", () => {
+    // The predicate must type as Bool: a non-boolean predicate would
+    // evaluate to sentinels inside the filter and silently under-cover.
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    // `NatPat` with the checker's registry resolves as the PATTERN type
+    // (not Bool) — typed rejection at declaration.
+    assertThrows(
+        () =>
+            h.laws.declareLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{ position: 0, where: "NatPat" }],
+                },
+                h.opRegistry,
+                "asserted",
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "not Bool",
+    )
+})
+
+Deno.test("machineFinite: an out-of-range scope position rejects", () => {
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            h.laws.declareLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{
+                        position: 5,
+                        where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                    }],
+                },
+                h.opRegistry,
+            ),
+        LawDeclarationError,
+        "out of range",
+    )
+})
+
+Deno.test("machineFinite: a scope on an unswept position rejects (decoration)", () => {
+    // commutative's schema has TWO variables over a unary op — arity check
+    // fires first; over a BINARY op, position 1 IS swept, so use a unary
+    // op with position 1: involutory sweeps only position 0.
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokTwo", [h.natPat, h.natPat], h.natPat, "\\x:NatPat. \\y:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            h.laws.declareLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{
+                        position: 1,
+                        where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                    }],
+                },
+                h.opRegistry,
+            ),
+        LawDeclarationError,
+    )
+})
+
+Deno.test("machineFinite: a repeated scope position rejects (spell the conjunction)", () => {
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            h.laws.declareLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [
+                        {
+                            position: 0,
+                            where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                        },
+                        {
+                            position: 0,
+                            where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                        },
+                    ],
+                },
+                h.opRegistry,
+            ),
+        LawDeclarationError,
+        "repeated",
+    )
+})
+
+Deno.test("machineFinite: the sub-space is genuinely filtered — falsification inside the scope rejects", () => {
+    // The scope is honest: a counterexample INSIDE the filtered space
+    // falsifies the declaration (a scope is not a blanket pass).
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig(
+            "tokSwap",
+            [h.natPat, h.natPat],
+            h.natPat,
+            "\\x:NatPat. \\y:NatPat. y",
+        ),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                {
+                    kind: "commutative",
+                    target: "tokSwap",
+                    subSpace: [{
+                        position: 0,
+                        where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                    }],
+                },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawError,
+        "commutative",
+    )
+    assertEquals(h.laws.lookup("tokSwap").length, 0)
+})
+
+Deno.test("machineFinite: a sub-space sweep past the exhaustion budget routes residual", () => {
+    // The budgeted sweep: a scope whose filtered space exceeds
+    // MAX_EXHAUSTION_INSTANCES is not exhaustible — the certified screen
+    // applies (loud, evidence-only), never a silent oversized sweep.
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    // The unfiltered space is NOT routed to machineFinite — pattern carriers
+    // need the scope; without one the regime is residual (the certified
+    // screen's size-≤ 2 prefix: 110 token samples).
+    const { regime } = declareCheckedLaw(
+        { kind: "involutory", target: "tokId" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "residual")
+})
+
+Deno.test("machineFinite: predicate errors on a sample reject the declaration (no silent holes)", () => {
+    // The filter is total evaluation: a predicate error on ANY sample is an
+    // evaluation hole — the filter cannot decide membership, and a hole
+    // inside the certified space would shrink it silently. Rejected loudly.
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    // The checker does not see this source as ill-typed (the checker is
+    // absent), so validation passes and the FILTER is where the hole
+    // surfaces.
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{ position: 0, where: "NoSuchOp(a)" }],
+                },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "did not evaluate to a single verdict",
+    )
+})
+
+Deno.test("machineFinite: an EMPTY filtered sub-space rejects (no vacuous discharge)", () => {
+    // A scope whose predicate admits NO string within the enumeration's
+    // length reach filters the sweep space to ∅ — the claim would
+    // "discharge" vacuously, which is almost never the scoped claim the
+    // author meant. Rejected loudly (state the intended range inside the
+    // predicate instead).
+    const h = patternHarness()
+    h.opRegistry.declare(
+        new OpSig("tokId", [h.natPat], h.natPat, "\\x:NatPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    // A predicate no string of length ≤ 4 satisfies: the language's
+    // members all start with a digit; the fold matches the token text, so
+    // a "digit ≠ digit" shape admits nothing... the concrete no-member
+    // filter: a fold that returns False for the matched case.
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{
+                        position: 0,
+                        where: "fold [Bool] False() { True() -> False(), False() -> False() }",
+                    }],
+                },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "admits NO string",
+    )
+})

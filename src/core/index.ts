@@ -50,22 +50,27 @@ export {
     type LawTypeChecker,
     SCHEMA_ARITY,
     screenableDomain,
+    type SubSpaceSpec,
 } from "./laws.ts"
 
 // Law checking (semantics.md §5.4 — regime-based: finite → exhaustion →
-// discharged; residual → certified screen → asserted)
+// discharged; machineFinite → sub-space exhaustion → discharged scoped;
+// residual → certified screen → asserted)
 export {
     type CertifiedCoverage,
     type CertifiedPosition,
     declareCheckedLaw,
+    declareCheckedLawWithRegistry,
     type EvalTerm,
     finiteInhabitants,
     inhabitantsUpToSize,
+    installPatternLookup,
     makeEvalTerm,
     type ScreeningRegime,
     screeningRegime,
     screenLaw,
     type ScreenOutcome,
+    type SubSpaceSweep,
 } from "./law_checking.ts"
 
 // Subtyping (lc.md §4)
@@ -120,7 +125,24 @@ export {
     type ContextSpec,
     derivative,
     MAX_COEFFICIENT,
+    setPatternLookup,
 } from "./type_algebra.ts"
+
+// The pattern language (the AST, parser, and language-equation
+// counting of pattern constructors; the token universe is ASCII by fiat)
+export {
+    CHARACTER_UNIVERSE_SIZE,
+    enumeratePattern,
+    makePatternCountEnv,
+    MAX_PATTERN_COUNT,
+    parsePattern,
+    type PatternAST,
+    patternCoefficients,
+    type PatternCountEnv,
+    patternCounts,
+    PatternParseError,
+    patternToString,
+} from "./pattern_lang.ts"
 
 // Law testing (law-testing.md — the property-based harness with ∂T-based
 // structural shrinking; the promotion of the test-local law harness)

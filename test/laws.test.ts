@@ -54,19 +54,26 @@ const evalOf = makeEvalTerm(evalGrammar)
 
 /** The law checker: LCTypeCheck's parseWith under an empty Γ (declared terms). */
 const checker = {
-    checkSource: (source: string) => {
-        const results = [
-            // Bound to Ω as well as the type registry: an op-referencing
-            // argument term (`identity: add(a, b)`-style) type-checks its op
-            // application against Ω — a checker without it yields zero
-            // results and silently rejects the valid term.
-            ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry).parseWith(
-                source,
-                new TypeEnv(),
-            ),
-        ]
-        return results.length === 1 ? results[0] : undefined
-    },
+    checkSource: (source: string) => checkSourceIn(source, new TypeEnv()),
+    // Context-aware: a sub-space predicate type-checks under a Γ binding
+    // `a` to the operand carrier (the same Γ the evaluator binds per
+    // sample) — the standalone check would reject every operand-dependent
+    // predicate as unbound.
+    checkSourceIn: checkSourceIn,
+}
+
+function checkSourceIn(source: string, gamma: TypeEnv) {
+    const results = [
+        // Bound to Ω as well as the type registry: an op-referencing
+        // argument term (`identity: add(a, b)`-style) type-checks its op
+        // application against Ω — a checker without it yields zero
+        // results and silently rejects the valid term.
+        ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry).parseWith(
+            source,
+            gamma,
+        ),
+    ]
+    return results.length === 1 ? results[0] : undefined
 }
 
 /** A fresh law environment per test (registries are mutable append-only). */

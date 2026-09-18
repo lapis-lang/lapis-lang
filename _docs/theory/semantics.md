@@ -472,21 +472,33 @@ declaration loudly: an enumeration hole would otherwise masquerade as full-prefi
 provenance ladder is unchanged — a certified screen still installs `asserted` (the prefix is partial
 for unbounded types; only exhaustion discharges).
 
-**machineFinite design note (not yet implemented).** The regime needs the encodings themselves
-declared in the type system — the exhaustion bound must be spec-able, not an implementation
-accident. Concretely, three declaration forms are missing:
+**machineFinite: sub-space specifications (implemented; semantics of the scope).** The regime is
+implemented for pattern carriers (`law_checking.ts`): a law declaration may carry a **sub-space
+specification** per swept operand position — a predicate over the carrier, type-checked against the
+operand's type and evaluated by the same total evaluator as the law body. The sweep enumerates the
+carrier's strings (length-bounded, count-capped) and keeps exactly the members the predicate admits,
+so the exhaustion contract ("all instances checked") holds **for the certified sub-space ∩ length
+bound**: `discharged` scoped to it, `asserted` beyond it. Structural exhaustion stays permanently
+unavailable to pattern carriers (type-algebra.md §2.3); the sub-space sweep is the honest
+alternative.
 
-1. **Encoding declarations on data types** — a `data` type states its encoding family (`binary64`,
-   `char-unicode`, `int-two-complement`), fixing the inhabitant count as part of the language
-   definition (binary64 = exactly 2⁶⁴, `Inf`/`NaN` as in-domain values). The classifier reads the
-   declared count; it never infers an encoding from the runtime representation.
-2. **Sub-space specifications** — a law declaration may scope its claim ("all Floats in [-1, 1]"),
-   so bounded enumeration certifies the checked sub-space rather than silently under-covering the
-   full domain. The certification is the claim: `discharged` for the sub-space, `asserted` beyond
-   it.
-3. **Alphabet declarations for Char-like types** — a fixed, finite alphabet bound makes exhaustive
-   enumeration over strings of bounded length well-posed (the length bound itself rides on sized
-   types, already a design decision for termination).
+**The sweep's visible extent is part of the certificate.** The predicate is the claim's domain, but
+the sweep certifies only the strings the length-bounded enumeration reached, so the declaration's
+result carries the extent (`SubSpaceSweep`: the length bound reached and each scoped position's
+admitted cardinality) — a consumer sees "discharged on strings of length ≤ N matching the scope",
+not an unqualified `discharged`. An EMPTY filtered space **rejects** the declaration: a scope whose
+predicate admits no string within the length reach discharges vacuously, which is almost never the
+scoped claim its author meant — the honest reading of a filtered-away scope is a rejected claim, not
+a vacuous proof (state the intended range inside the predicate).
+
+The original design note's **encoding-family declarations** on `data` (`binary64`, `char-unicode`,
+…) are **dropped** (the #62 rescope): they contradict the token-value architecture — a
+pattern-matched type is a lexeme space whose patterns constrain raw token text only; interpretation
+belongs to the fold layer, and machine-numerics trust is the `primitive` tier's business. The
+**alphabet declaration** form is dropped with it: the character universe for `.` and classes is a
+one-line language fiat — code points 0–127 (ASCII) for now; Unicode widening is a later, separate
+decision (surface-syntax.md §1.3). The length bound for enumerations rides on sized types, as
+already decided for termination.
 
 The property-based form of this screening — a law as a `forAll` over a grammar-rooted
 `ValueGenerator`, with grammar-aware shrinking of counterexamples — is specified in
@@ -803,7 +815,10 @@ domain-aware axiom schemas and is an open question (§9.6).
    explicit in the type system so exhaustion is spec-able; and the live-observation channel
    (continuous re-screening, runtime withdrawal of falsified axioms) needs design — for `asserted`
    laws it is the only additional evidence channel that exists. Package-boundary trust policy (which
-   tiers a build may exploit from dependencies) remains a separate, later decision.
+   tiers a build may exploit from dependencies) remains a separate, later decision. **Update:** the
+   machine-finite regime's sub-space specifications are implemented (`law_checking.ts`; §5.4 above);
+   encoding-family declarations were dropped from the design — they contradict the token-value
+   architecture (a pattern constrains lexemes only; interpretation belongs to the fold layer).
 
 9. **Quotient types and observing declared laws.** Data equality (§7.1) is purely structural — there
    is no quotient mechanism `T // ≈` (a type whose elements are equivalence classes of a

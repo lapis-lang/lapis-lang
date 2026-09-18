@@ -550,16 +550,56 @@ with the current status, milestone, and dependencies.
   constants (`MAX_SCREEN_SIZE = 3`, `PREFIX_BUDGET = 2⁸`, `SWEEP_BUDGET = 2¹⁶`); construction holes
   reject while instance-evaluation holes still skip (completeness is the certified contract);
   pattern types certify their declared singleton fallback (language equations deferred to #62);
-  provenance UNCHANGED — a certified screen still installs `asserted`.
-- **Files:** `src/core/type_algebra.ts` (`coefficients`), `src/core/law_checking.ts`
-  (`inhabitantsUpToSize`, `certifyPosition`/`certifyCoverage`, `ScreenOutcome.coverage`),
-  `src/core/values.ts` (`valueSize` moved here — the size measure shared by the shrinker and the
-  certificates), `src/core/law_testing.ts` (re-export), `src/core/index.ts`,
-  `test/type_algebra.test.ts`, `test/discharge.test.ts`, `test/laws.test.ts`,
-  `_docs/theory/type-algebra.md` (§3 + §7), `_docs/theory/semantics.md` (§5.4),
-  `_docs/theory/law-testing.md` (§2), this document.
+  provenance UNCHANGED — a certified screen still installs `asserted`.- **Files:**
+  `src/core/type_algebra.ts` (`coefficients`), `src/core/law_checking.ts` (`inhabitantsUpToSize`,
+  `certifyPosition`/`certifyCoverage`, `ScreenOutcome.coverage`), `src/core/values.ts` (`valueSize`
+  moved here — the size measure shared by the shrinker and the certificates),
+  `src/core/law_testing.ts` (re-export), `src/core/index.ts`, `test/type_algebra.test.ts`,
+  `test/discharge.test.ts`, `test/laws.test.ts`, `_docs/theory/type-algebra.md` (§3 + §7),
+  `_docs/theory/semantics.md` (§5.4), `_docs/theory/law-testing.md` (§2), this document.
 - **Depends on:** #64 (the type-equation reading lands with ∂T — one module, three readings).
-  #62/#63 consume the module next (declared encodings / the derivable regime).
+  #62/#63 consume the module next (the pattern language equations / the derivable regime).
+
+#### PBI #62: Pattern-carrier discharge — pattern language equations + sub-space law scopes
+
+- **Status:** Implemented (2026-09-18) — plan `_docs/issue62-plan.md` (rescoped: the original
+  encoding-family declarations are dropped; see the issue body's rescope rationale). 375 tests green
+  (`deno check` / `test` / `lint` / `fmt` clean). The sub-space **surface syntax** remains open — it
+  lands with the pattern-surface PBI (core: structured `subSpace` field only).
+- **Assignee:** @mlhaufe
+- **Goal:** Give pattern carriers (`Nat`, `Int`, `String`, user-declared pattern types) their honest
+  discharge routes. Two mechanisms: (1) the **pattern language-equation reading** — `coefficients`
+  computes exact size-class counts from each pattern's language equation (concatenation multiplies,
+  alternation sums, Kleene star inverts $(1-P)$), replacing #65's declared singleton fallback; the
+  certificate is derived, not asserted. (2) **Sub-space specifications on law declarations** — a law
+  scopes its claim ("all Ints with $|x| \le 2^{31}$"), so bounded enumeration certifies the checked
+  sub-space: `discharged` scoped to the declared range, `asserted` beyond it. Structural exhaustion
+  stays permanently unavailable to pattern carriers (§2.3); the sub-space sweep is the honest
+  alternative.
+- **Design decisions:** the language-equation reading parses each pattern into a small AST
+  (`src/core/pattern_lang.ts`, new) whose counting is convolution-based; token size becomes text
+  length (the singleton fallback is REPLACED, per #65 D6's own note); sub-space specs live on
+  `LawDecl` (a typed predicate per operand position, evaluated by the same total evaluator — never
+  on the type, which stays the pure lexeme space); `screeningRegime` gains the `machineFinite` arm
+  (pattern carrier + total sub-space spec + sweep within budget → `exhaustLaw` with filtered spaces,
+  full-coverage contract unchanged); provenance ladder UNCHANGED (the scope is recorded authority
+  metadata, like `argument`). The character universe for `.`/classes is a one-line language fiat
+  (ASCII — code points 0–127 — for now; Unicode widening is a later, separate decision), not a
+  per-type declaration. The original body's encoding-family declarations on `data` (`binary64`,
+  `char-unicode`, …) are DROPPED — they contradict the token-value architecture (a pattern
+  constrains lexemes only; interpretation belongs to the fold layer; machine numerics trust is the
+  `primitive` tier's business).
+- **Files:** `src/core/pattern_lang.ts` (new), `src/core/types.ts` (patterns → AST),
+  `src/core/type_algebra.ts` (the pattern arm of `coefficients`), `src/core/values.ts` (`valueSize`
+  token arm), `src/core/law_checking.ts` (`inhabitantsUpToSize` pattern arm, `screeningRegime`
+  machineFinite arm, sub-space filtering in `exhaustLaw`/`screenLaw`), `src/core/laws.ts`
+  (`LawDecl.subSpace` + validation), `src/core/index.ts`, `test/pattern_lang.test.ts` (new),
+  `test/type_algebra.test.ts`, `test/discharge.test.ts`, `_docs/theory/type-algebra.md`
+  (§2.3/§5/§7), `_docs/theory/semantics.md` (§5.4), `_docs/theory/surface-syntax.md` (§1.3
+  character-universe fiat), `_docs/issue65-plan.md` (D6 pointer), this document.
+- **Depends on:** Nothing structural (the regime machinery is in place; #65's certified-prefix
+  machinery composes directly). The language-equation reading consumes the first-class pattern AST
+  from v0.4.0's pattern work for its _surface_; the core accepts the structured spec now.
 
 ### Milestone v0.4.0 — Patterns & surface
 
