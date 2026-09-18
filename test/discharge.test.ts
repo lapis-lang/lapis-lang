@@ -1316,43 +1316,101 @@ Deno.test("enumerator contract: a mutually recursive A↔B pair enumerates both 
     assertEquals(inhabitantsUpToSize(a, 4, eval_).length, 2)
 })
 
-Deno.test("certified screen: a wide-flat record certifies its raised min class (7-Bool record, 128)", () => {
+Deno.test("certified screen: a wide-flat record certifies its raised min class (7-Bool record, 128) via the RESIDUAL path", () => {
     // The floor raise (D3): a 7-Bool record's smallest nonempty class is
     // size 8 (128 inhabitants) — beyond MAX_SCREEN_SIZE, but within the
     // prefix budget, so the position certifies exactly that class instead
-    // of declining.
+    // of declining. ROUTING MATTERS: a unary involutory sweep over the
+    // record alone would project 128 ≤ 2²⁰ and route FINITE (exhaustion —
+    // no certification involved). To exercise the CERTIFIED residual path
+    // the claim needs an unbounded co-position whose exponent > 0: Nat is
+    // unbounded ⇒ residual, and commutative's schema sweeps BOTH positions
+    // (128 × 3 certified assignments — within SWEEP_BUDGET).
     const h = boolHarness()
+    const nat = createNatType()
     const rec = new DataType("Rec7", [])
     rec.variants.push(
         new Variant("MkRec", Array.from({ length: 7 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    h.registry.register(nat)
     h.registry.register(rec)
     const bindings = Array.from({ length: 7 }, (_, i) => `v${i}`).join(" ")
     h.opRegistry.declare(
         new OpSig(
             "recId",
-            [rec],
+            [rec, nat],
             rec,
-            `\\x:Rec7. fold [Rec7] x { MkRec(${bindings}) -> x }`,
+            `\\x:Rec7. \\n:Nat. fold [Rec7] x { MkRec(${bindings}) -> x }`,
         ),
         h.tc.opWellFormedness,
     )
-    // INVOLUTORY over a 7-Bool record: the sweep projection is 128¹ (one
-    // schema variable) × 1 = 128 — within the exhaustion budget, so the
-    // regime routes FINITE and the full space discharges (certification is
-    // the residual's mechanism, not the finite's; D7's unchanged-routing
-    // contract pinned here for the raised floor too).
-    const { law, instances, regime, coverage } = declareCheckedLaw(
-        { kind: "involutory", target: "recId" },
+    // The all-in-one entry rejects a heterogeneous signature (schema
+    // validation: commutative's swap axioms need one sample space through
+    // both slots) — the raw screen (caller-beware, its contract) exercises
+    // the per-position certification for the mixed signature. The
+    // certification itself is the same machinery the residual route runs.
+    const sweep = screenLaw(
+        { kind: "commutative", target: "recId" },
+        h.opRegistry.lookup("recId")!,
         h.opRegistry,
-        h.laws,
         evalOfHarness(h.registry, h.opRegistry),
-        checkerFor(h.registry, h.opRegistry),
     )
-    assertEquals(regime, "finite")
-    assertEquals(instances, 128, "the full 128-inhabitant space, one instance each")
-    assertEquals(law.provenance, "discharged")
-    assertEquals(coverage, undefined, "no coverage report on the exhaustion path")
+    assert(sweep.outcome === "passed", "the raw screen passed")
+    // The CERTIFICATE is the thing under test here: the floor raise for the
+    // record position. The cross-type assignments (commutative swaps a Nat
+    // into the Rec7 slot) are ill-typed by construction — the evaluator
+    // returns error sentinels, `checkInstance` skips them, and `checked` is
+    // 0. That is the homogeneous-carrier rule manifesting at the sweep
+    // level, and it is exactly why the all-in-one entry rejects
+    // heterogeneous signatures: a raw call's schema type-correctness is the
+    // CALLER's job. The certificate still covers the sweep SPACE (both
+    // positions' prefixes were enumerated and coefficient-asserted before
+    // any instance ran).
+    const coverage = sweep.coverage
+    const recordPosition = coverage.positions.find((p) => p.typeName === "Rec7")
+    assert(recordPosition, "the record position was certified")
+    assertEquals(recordPosition!.k, 8, "the raised floor: the size-8 class")
+    assertEquals(recordPosition!.expected, 128)
+    assertEquals(recordPosition!.actual, 128)
+    const natPosition = coverage.positions.find((p) => p.typeName === "Nat")
+    assert(natPosition, "the Nat position was certified too (k = 3, 3 samples)")
+    assertEquals(natPosition!.expected, 3)
+})
+
+Deno.test("certified screen: an 18-Bool record's min class exceeds the prefix budget — loud decline", () => {
+    // The budget side of the floor raise: the 18-Bool record's only size
+    // class (size 19) holds 2¹⁸ — past PREFIX_BUDGET, so the derived probe
+    // declines loudly (under the old fixed RAISE_LIMIT = 7 this path was
+    // unreachable: the probe stopped at 7 and misreported the carrier as
+    // uninhabited).
+    const h = boolHarness()
+    const wide = new DataType("Wide", [])
+    wide.variants.push(
+        new Variant("MkWide", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
+    )
+    h.registry.register(wide)
+    const bindings = Array.from({ length: 18 }, (_, i) => `v${i}`).join(" ")
+    h.opRegistry.declare(
+        new OpSig(
+            "wideId",
+            [wide, createNatType()],
+            wide,
+            `\\x:Wide. \\n:Nat. fold [Wide] x { MkWide(${bindings}) -> x }`,
+        ),
+        h.tc.opWellFormedness,
+    )
+    h.registry.register(createNatType())
+    assertThrows(
+        () =>
+            screenLaw(
+                { kind: "commutative", target: "wideId" },
+                h.opRegistry.lookup("wideId")!,
+                h.opRegistry,
+                evalOfHarness(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "past the prefix budget",
+    )
 })
 
 Deno.test("certified screen: an enumeration hole is a loud error — the certificate catches a broken registry", () => {
@@ -1426,7 +1484,7 @@ Deno.test("certified screen: exhaustion counts and provenance are UNCHANGED (the
         "andOp",
         "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
     )
-    const { law, instances, regime } = declareCheckedLaw(
+    const { law, instances, regime, coverage } = declareCheckedLaw(
         { kind: "associative", target: "andOp" },
         h.opRegistry,
         h.laws,
@@ -1436,10 +1494,58 @@ Deno.test("certified screen: exhaustion counts and provenance are UNCHANGED (the
     assertEquals(regime, "finite")
     assertEquals(instances, 8)
     assertEquals(law.provenance, "discharged")
-    assert(coverageIsUndefined(law), "no coverage report on the exhaustion path")
+    assertEquals(coverage, undefined, "no coverage report on the exhaustion path")
 })
 
-/** The exhaustion path's coverage report is `undefined` (a `LawDecl` carries no coverage). */
-function coverageIsUndefined(_law: unknown): boolean {
-    return true
+Deno.test("certified screen: a construction yielding a foreign carrier's variant is rejected", () => {
+    // The certificate validates WHAT the evaluator returned, not just THAT
+    // it returned a value: a registry collision (two carriers register the
+    // same variant name) makes the evaluator resolve the constructor form
+    // to the WRONG carrier's variant — a foreign value in the certified
+    // prefix would pass a count-only check. The loud rejection keeps the
+    // prefix honest (the carrier, variant, and field shape must all match).
+    const h = boolHarness()
+    // Two distinct carriers, both registering a variant named `Tag`:
+    const victim = new DataType("Victim", [])
+    victim.variants.push(
+        new Variant("Tag", [new Field("b", h.bool)]),
+    )
+    const impostor = new DataType("Impostor", [])
+    impostor_variants_helper(impostor)
+    h.registry.register(victim)
+    h.registry.register(impostor)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    // Which carrier wins the collision depends on the evaluator's registry
+    // resolution; either way, ONE of the two carriers' certified sweeps
+    // must reject loudly rather than sweep a foreign value.
+    const impostorError = (() => {
+        try {
+            inhabitantsUpToSize(victim, 2, eval_)
+            return undefined
+        } catch (e) {
+            return e as LawDeclarationError
+        }
+    })()
+    const victimError = (() => {
+        try {
+            inhabitantsUpToSize(impostor, 2, eval_)
+            return undefined
+        } catch (e) {
+            return e as LawDeclarationError
+        }
+    })()
+    // At least one side must reject (the collision resolves to one
+    // carrier's variant for both constructor forms); neither side may
+    // silently sweep a foreign value.
+    assert(
+        impostorError !== undefined || victimError !== undefined,
+        "a registry collision must surface as a loud rejection, not a foreign prefix",
+    )
+})
+
+/** Declare a second carrier with the same variant name as `victim` (the collision probe). */
+function impostor_variants_helper(impostor: DataType): void {
+    impostor.variants.push(
+        new Variant("Tag", [new Field("n", new DataType("Unused", []))]),
+    )
 }

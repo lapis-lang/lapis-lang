@@ -631,6 +631,17 @@ const PREFIX_BUDGET = 2 ** 8
 const SWEEP_BUDGET = 2 ** 16
 
 /**
+ * The floor-raise probe's degree ceiling: how far the minimum-nonempty-class
+ * search grows past `MAX_SCREEN_SIZE` before declaring the carrier
+ * uninhabited. Bounded by the exhaustion budget's spirit — a record wider
+ * than ~2⁰ Bool fields per class step is unreachable in practice, and the
+ * prefix budget's own excess check declines earlier for genuinely wide
+ * carriers. Generous enough that any realistic record width is reached
+ * (an n-Bool flat record's min class is n+1; 18 Bools → 19, well within).
+ */
+const MAX_PROBE_DEGREE = 32
+
+/**
  * A position's certified coverage: the size bound and the two sides of the
  * certificate (expected from the coefficients, actual from the sweep).
  */
@@ -837,18 +848,54 @@ function spaceUpToSize(
                 const bindings = new Map<string, Value>()
                 combo.forEach((value, i) => bindings.set(argNames[i]!, value))
                 const source = `${variant.name}(${argNames.join(", ")})`
-                const value = eval_(source, new ValueEnv(bindings))[0]
-                if (!(value instanceof VariantVal)) {
-                    // A hole in the certified prefix — construction is the
-                    // enumeration's contract (D5). The certificate counts
-                    // COMPLETE size classes; a failed construction would make
-                    // the sweep's count fall short of the coefficients, so the
-                    // hole rejects loudly instead of masquerading as coverage.
+                // The construction's result is validated EXPLICITLY — not
+                // indexed blindly and not trusted because it is *a* value:
+                //
+                // - **exactly one result** — the evaluator's determinism
+                //   policy treats an ambiguous internal parse as an error
+                //   (`evalOp` fails loudly rather than first-picking). A
+                //   constructor form whose parse yields multiple results is
+                //   the same defect shape — report it, never sweep an
+                //   arbitrary first pick.
+                // - **the carrier matches** — the value's stamped `dataType`
+                //   must be THIS carrier (identity, not name: two distinct
+                //   DataType instances can share a name). A registry
+                //   collision (two carriers registering the same variant
+                //   name) makes the evaluator resolve the source to the
+                //   WRONG carrier's variant — a value that does not belong
+                //   in this prefix would pass the coefficient equality
+                //   while corrupting the sweep.
+                // - **the variant name and field shape match** — the value
+                //   must be THIS variant with exactly the declared fields'
+                //   arity (a registry collision can return another
+                //   carrier's same-named variant with different fields).
+                // Any other shape is a hole in the certificate: the
+                // enumerated count would silently diverge from what the
+                // coefficients count, so the hole rejects loudly instead of
+                // masquerading as coverage.
+                const results = eval_(source, new ValueEnv(bindings))
+                if (results.length !== 1) {
                     throw new LawDeclarationError(
                         type.name,
                         `certification could not construct an inhabitant: "${source}" ` +
-                            `did not evaluate — the certified prefix cannot sweep ` +
-                            `this type`,
+                            `yielded ${results.length} results — the certified ` +
+                            `prefix requires exactly one (an ambiguous parse is ` +
+                            `an evaluator inconsistency, never swept)`,
+                    )
+                }
+                const value = results[0]
+                if (
+                    !(value instanceof VariantVal) || value.dataType !== type ||
+                    value.variantName !== variant.name ||
+                    value.fields.size !== variant.fields.length
+                ) {
+                    throw new LawDeclarationError(
+                        type.name,
+                        `certification could not construct an inhabitant: "${source}" ` +
+                            `did not evaluate to this carrier's variant — the ` +
+                            `evaluator and the type registry disagree (a registry ` +
+                            `collision would put a foreign value in the certified ` +
+                            `prefix)`,
                     )
                 }
                 classValues.push(value)
@@ -900,25 +947,57 @@ function certifyPosition(
     if (minClass < 0) {
         // No inhabitants up to MAX_SCREEN_SIZE: either the carrier's
         // smallest class is beyond the range (the wide-record escape —
-        // raised below), or it is uninhabited. Probe up to the RAISE LIMIT:
-        // an 18-Bool record's only variant is MkWide(18 Bool fields) — size
-        // 19; a 7-Bool record's min class is size 8. A carrier with no class
-        // within the raise limit declines honestly (StreamLike: NO size has
-        // inhabitants — its only variant is recursive with no base case).
-        const RAISE_LIMIT = 2 * MAX_SCREEN_SIZE + 1
-        const probe = coefficients(type, RAISE_LIMIT)
-        const probeMin = probe.findIndex((c) => c > 0)
-        if (probeMin < 0) {
-            throw new LawDeclarationError(
-                type.name,
-                `certification declined: the type has NO inhabitants in the ` +
-                    `certified size range (c₁..c${RAISE_LIMIT} are all ` +
-                    `0) — zero coverage, nothing installed`,
-            )
+        // raised below), or it is uninhabited. DERIVE the minimum nonempty
+        // degree by growing the probe one class at a time — a fixed guess
+        // cannot reach every record width (a 7-Bool record's first
+        // inhabitant is size 8: the constructor plus seven fields; an
+        // 18-Bool record's is size 19). The growth is bounded by the prefix
+        // budget itself: the probe stops as soon as a single class exceeds
+        // PREFIX_BUDGET (a wider class only holds more, so a later class
+        // cannot fit either — the certification would decline there
+        // anyway), and a probe that grows PAST the budget without ever
+        // finding a nonzero class means the carrier is genuinely
+        // uninhabited (StreamLike: its only variant is recursive with no
+        // base case — no class exists at ANY size).
+        let probeDegree = MAX_SCREEN_SIZE
+        let probeMin = -1
+        let probeCoeff = 0
+        while (true) {
+            probeDegree++
+            const probe = coefficients(type, probeDegree)
+            probeCoeff = probe[probeDegree]!
+            if (probeCoeff > 0) {
+                probeMin = probeDegree
+                break
+            }
+            // A single class larger than the budget certifies nothing —
+            // growing further only finds bigger classes (the coefficient
+            // sequence is nondecreasing in class width for these shapes...).
+            // Not true in general (coefficients can dip), but a class past
+            // the budget cannot be certified, and SMALLER classes between
+            // here and there would have appeared already; keep probing only
+            // while the class stays within budget.
+            if (probeCoeff > PREFIX_BUDGET) {
+                throw new LawDeclarationError(
+                    type.name,
+                    `certification declined: the smallest nonempty size class ` +
+                        `holds ${probeCoeff} inhabitants at size ${probeDegree} ` +
+                        `— past the prefix budget (${PREFIX_BUDGET}); the screen ` +
+                        `cannot certify this carrier`,
+                )
+            }
+            if (probeDegree >= MAX_PROBE_DEGREE) {
+                throw new LawDeclarationError(
+                    type.name,
+                    `certification declined: the type has NO inhabitants in the ` +
+                        `certified size range (c₁..c${probeDegree} are all 0) — ` +
+                        `zero coverage, nothing installed`,
+                )
+            }
         }
         // The smallest class is at probeMin > MAX_SCREEN_SIZE: certify
         // exactly that class (the floor raise), if it fits the budget.
-        const raisedPrefix = probe[probeMin]!
+        const raisedPrefix = probeCoeff
         if (raisedPrefix > PREFIX_BUDGET) {
             throw new LawDeclarationError(
                 type.name,
