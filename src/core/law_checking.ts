@@ -72,6 +72,8 @@ import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./patte
 
 import { setPatternLookup } from "./type_algebra.ts"
 
+import { derivableFragment, type DerivationCertificate, deriveLaw } from "./derivation.ts"
+
 // ── Sampling ──────────────────────────────────────────────────────────────────
 
 /**
@@ -700,7 +702,7 @@ export function declareCheckedLawWithRegistry(
     const priorLawChecking = installPatternLookup(lookup)
     const priorTypeAlgebra = setPatternLookup(patternTypeLookup)
     try {
-        return declareCheckedLaw(law, omega, laws, eval_, checker)
+        return declareCheckedLaw(law, omega, laws, eval_, checker, { registry })
     } finally {
         installPatternLookup(priorLawChecking)
         setPatternLookup(priorTypeAlgebra)
@@ -1384,11 +1386,17 @@ function certifyCoverage(
  * - **`residual`** — everything else (unbounded-depth μ-types, pattern
  *   carriers without a total sub-space spec, or a space beyond the budget):
  *   the certified screen applies, falsifying only — `asserted` provenance.
- *
- * `derivable` (fold-induction from primitive laws) awaits a characterization
- * of the derivable handler fragment.
+ * - **`derivable`** — a residual-shaped claim whose target operation's
+ *   definition is in the derivable handler fragment (a fold-built lambda
+ *   chain over a parameter — the recursion axis; `derivation.ts`'s
+ *   characterization): the BMF derivation engine attempts a bounded,
+ *   search-free induction over the fold schema from the called ops'
+ *   primitive/discharged laws. A closing derivation is a PROOF
+ *   (`discharged` provenance, with the derivation certificate); a claim
+ *   the engine cannot close falls back to the residual screen (falsifying
+ *   only — the honest residual, unchanged).
  */
-export type ScreeningRegime = "finite" | "machineFinite" | "residual"
+export type ScreeningRegime = "finite" | "machineFinite" | "residual" | "derivable"
 
 /**
  * The inhabitant ceiling for the `finite` regime (semantics.md §5.4: "Bool,
@@ -1572,6 +1580,30 @@ export function screeningRegime(
 }
 
 /**
+ * Upgrade a residual-routed claim to `derivable` when the target operation's
+ * definition passes the derivable fragment's cheap syntactic gate
+ * (semantics.md §5.4's `derivable` row: "Any type, if the fold's handler
+ * bodies fall in the primitive-law derivation fragment").
+ *
+ * The gate is budget-free and syntactic (a lambda chain over the declared
+ * parameters whose body is a fold over one of the parameters — the
+ * recursion axis — one handler per axis variant): it admits nothing about
+ * CLOSURE (the derivation's own outcome); it only decides whether the
+ * derivable regime's engine gets its attempt. A gate failure routes
+ * residual exactly as before this arm existed — the additive-union
+ * discipline: every pre-existing routing outcome is preserved verbatim when
+ * the gate declines.
+ */
+function upgradeToDerivable(
+    law: Omit<LawDecl, "provenance">,
+    op: CheckedOpSig,
+    registry: TypeRegistry,
+    omega: OpRegistry,
+): ScreeningRegime {
+    return derivableFragment(law, op, registry, omega) ? "derivable" : "residual"
+}
+
+/**
  * The screen's all-in-one entry (elaboration.md §6.1 steps 1–4): validate
  * the claim structurally against `Ω` (`LawRegistry.validateLaw` — vocabulary,
  * argument shape, relational arity, schema typing), then run the
@@ -1603,17 +1635,19 @@ export function screeningRegime(
  * honest: there the count 0 records a *complete* sweep over ∅, a real
  * proof shape.)
  *
- * Returns `{ law, instances, regime, coverage, subSpaceSweep }` — the
- * installed declaration, the number of instances checked, the regime that
- * produced it, and the COVERAGE certificate: for the residual regime the
- * screen's certified-coverage report; for the machineFinite regime the
+ * Returns `{ law, instances, regime, coverage, subSpaceSweep, derivation }`
+ * — the installed declaration, the number of instances checked, the regime
+ * that produced it, and the COVERAGE certificate: for the residual regime
+ * the screen's certified-coverage report; for the machineFinite regime the
  * sub-space sweep's shape (`subSpaceSweep` — the length bound the sweep
  * reached and each scoped position's admitted cardinality; the visible
  * extent of what `discharged` covers, since the scope's predicate is the
  * claim's domain but the sweep certifies only the strings the
- * length-bounded enumeration reached). Undefined for the plain finite
- * regime (a discharged law's coverage is the full space, which the regime
- * itself already certifies).
+ * length-bounded enumeration reached); for the derivable regime the
+ * derivation certificate (`derivation` — which cases closed how and which
+ * axioms the proof consumed). Undefined for the plain finite regime (a
+ * discharged law's coverage is the full space, which the regime itself
+ * already certifies).
  *
  * @throws LawError when the check falsifies the law (nothing is installed).
  * @throws LawDeclarationError when the claim is not in the closed vocabulary,
@@ -1631,6 +1665,7 @@ export function declareCheckedLaw(
     laws: LawRegistry,
     eval_: EvalTerm,
     checker?: LawTypeChecker,
+    registries?: { readonly registry: TypeRegistry },
 ): {
     law: LawDecl
     instances: number
@@ -1638,6 +1673,8 @@ export function declareCheckedLaw(
     coverage: CertifiedCoverage | undefined
     /** The machineFinite sweep's visible extent (undefined off that regime). */
     subSpaceSweep: SubSpaceSweep | undefined
+    /** The derivation certificate (defined only on the derivable regime). */
+    derivation: DerivationCertificate | undefined
 } {
     const op = omega.lookup(law.target)
     if (!op) {
@@ -1650,15 +1687,80 @@ export function declareCheckedLaw(
     }
     // Regime dispatch (semantics.md §5.4): finite/machineFinite → exhaustive
     // discharge (the latter over the sub-space); residual → the certified
-    // screen. The check runs BEFORE installing: a falsified claim never
-    // enters E.
-    const regime = screeningRegime(law, op)
-    const screen: ScreenOutcome | undefined = regime === "residual"
+    // screen. A residual-shaped claim whose definition passes the derivable
+    // fragment's gate upgrades to `derivable` (the registries threaded from
+    // the registry-carrying entry; a registry-free caller — tests that
+    // pre-install hooks — routes residual as always). The check runs BEFORE
+    // installing: a falsified claim never enters E.
+    let regime = screeningRegime(law, op)
+    if (regime === "residual" && registries !== undefined) {
+        regime = upgradeToDerivable(law, op, registries.registry, omega)
+    }
+
+    // The derivable arm: attempt the derivation. A closing derivation is a
+    // PROOF (discharged, with the certificate); the belt-and-braces screen
+    // (D7) runs before installation — an engine bug that fabricates a bogus
+    // proof becomes a loud LawError on concrete instances. A non-closing
+    // derivation is a DECLINE, not a falsification: the claim falls through
+    // to the residual screen exactly as before this arm existed, and the
+    // returned regime names the mechanism that produced the outcome
+    // ("residual" — the screen established the provenance).
+    let derivation: DerivationCertificate | undefined
+    if (regime === "derivable") {
+        if (registries === undefined) {
+            // A registry-free caller cannot reach the gate (the upgrade above
+            // needs it); this arm is unreachable through the public entries.
+            regime = "residual"
+        } else {
+            const result = deriveLaw(law, op, registries.registry, omega, laws)
+            if ("derivable" in result) {
+                // Not-derivable: fall back to the residual screen (the
+                // claim proceeds to screening exactly as before this PBI).
+                regime = "residual"
+            } else {
+                // The belt-and-braces screen: the certified prefix sweep
+                // runs exactly as for the residual. A falsifying sample
+                // throws — nothing installs (the screen wins over a bogus
+                // proof). A DECLINING screen (no sample vocabulary) skips
+                // the guard: decline is not falsification.
+                const guardScreen = screenLaw(law, op, omega, eval_)
+                const screened = guardScreen.outcome === "passed" ? guardScreen.checked : undefined
+                if (guardScreen.outcome === "passed" && guardScreen.checked === 0) {
+                    throw new LawDeclarationError(
+                        law.target,
+                        "the belt-and-braces screen exercised zero instances: the " +
+                            "derivation's claim never evaluated on concrete samples " +
+                            "— a derivation whose claim the evaluator cannot exercise " +
+                            "is not installable (check the operation's definition/evaluator)",
+                    )
+                }
+                derivation = { ...result, screened }
+            }
+        }
+    }
+
+    // By here a derivable-routed claim is either discharged (with the
+    // certificate — the belt-and-braces screen already ran inside the arm)
+    // or downgraded to residual for the screen below.
+    const screen: ScreenOutcome | undefined = regime === "residual" && derivation === undefined
         ? screenLaw(law, op, omega, eval_)
         : undefined
-    const exhaustion = screen ? undefined : exhaustLaw(law, op, eval_)
+    // Exhaustion is the FINITE/MACHINE-FINITE regimes' evidence — the whole
+    // inhabitant space is checked. A derivable-routed claim's evidence is
+    // the derivation plus the belt-and-braces screen (a sweep here would
+    // enumerate an UNBOUNDED carrier — the gate routes residual precisely
+    // when the space is not finite), and a residual claim's evidence is the
+    // screen — neither runs exhaustion.
+    const exhaustion = (screen !== undefined || derivation !== undefined)
+        ? undefined
+        : exhaustLaw(law, op, eval_)
     const instances = screen
         ? screen.outcome === "passed" ? screen.checked : 0
+        : derivation !== undefined
+        // The derivable regime's instance count: the belt-and-braces
+        // screen's checked count (the concrete redundancy), or 0 when the
+        // guard screen declined (the proof is the evidence).
+        ? (derivation.screened ?? 0)
         : exhaustion!.checked
     // Zero-coverage honesty — BOTH zero-coverage shapes reject:
     //
@@ -1691,17 +1793,19 @@ export function declareCheckedLaw(
                 "nothing installed (check the operation's definition/evaluator)",
         )
     }
-    const provenance: LawProvenance = regime === "finite" || regime === "machineFinite"
-        ? "discharged"
-        : "asserted"
+    const provenance: LawProvenance =
+        regime === "finite" || regime === "machineFinite" || derivation !== undefined
+            ? "discharged"
+            : "asserted"
     laws.declareLaw(law, omega, provenance, checker)
     const decl: LawDecl = { ...law, provenance }
     return {
         law: decl,
         instances,
-        regime,
+        regime: derivation !== undefined ? "derivable" : regime,
         coverage: screen?.outcome === "passed" ? screen.coverage : undefined,
         subSpaceSweep: exhaustion?.sweep,
+        derivation,
     }
 }
 

@@ -601,6 +601,21 @@ with the current status, milestone, and dependencies.
   machinery composes directly). The language-equation reading consumes the first-class pattern AST
   from v0.4.0's pattern work for its _surface_; the core accepts the structured spec now.
 
+#### PBI #63: BMF derivation engine — the derivable regime
+
+- **Status:** Implemented (2026-09-18) — plan `_docs/issue63-plan.md` (no split: the fragment is
+  _defined_ by what the bounded engine closes). 396 tests green (`deno check` / `test` / `lint` /
+  `fmt` clean). The characterization, the skeleton generation, the bounded search-free discharger
+  (`src/core/derivation.ts`), the `screeningRegime` `derivable` arm with the honest residual
+  fallback, the belt-and-braces screen, and the routing tests (`test/derivable.test.ts`, 18 tests)
+  are all in place; the theory docs' status rows are updated.
+- **Goal:** Route `residual`-shaped claims whose target op is fold-built to the derivable regime:
+  prove the claim by induction over the fold schema from `E`'s `primitive`/`discharged` laws — the
+  only route to `discharged` for unbounded μ-carriers besides exhaustion (unavailable for unbounded
+  types). Sound by construction (every move is a computation rule, the structural IH, congruence, or
+  an installed axiom); deliberately incomplete (budget-bounded, syntactic axiom matching,
+  single-axis induction) — a claim that does not close routes residual, falsifying only.
+
 ### Milestone v0.4.0 — Patterns & surface
 
 #### PBI #23: T-FoldMatch + E-FoldMatch — pattern-matched fold (elimination)

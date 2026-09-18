@@ -122,7 +122,9 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
        inhabitants, including `Inf`/`NaN` as in-domain values). Full-domain enumeration is possible
        in principle; sub-space enumeration **certifies the checked space**.
     3. _Derivation_: law schemas proved from primitive laws + fold-induction skeletons (the BMF
-       calculus as the discharge engine).
+       calculus as the discharge engine). **Implemented** — `src/core/derivation.ts`: the bounded,
+       search-free discharger; the derivable fragment is defined by what the engine closes (the
+       characterization), and an `asserted` law is never an axiom step (no laundering).
   - **`asserted`** — programmer declaration, screened (falsifies, never establishes). The honest
     residual: laws on unbounded-depth types (List/Tree-shaped μ-types) whose handler bodies call
     non-primitive, non-discharged operations in semantically essential ways.
