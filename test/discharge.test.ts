@@ -74,14 +74,16 @@ function evalOfHarness(
  * rejecting valid terms (mirroring the evaluator's binding of both).
  */
 function checkerFor(registry: TypeRegistry, opRegistry: OpRegistry) {
+    const check = (source: string, gamma: TypeEnv) => {
+        const results = [
+            ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(source, gamma),
+        ]
+        return results.length === 1 ? results[0] : undefined
+    }
     return {
-        checkSource: (source: string) => {
-            const results = [
-                ...new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
-                    .parseWith(source, new TypeEnv()),
-            ]
-            return results.length === 1 ? results[0] : undefined
-        },
+        checkSource: (source: string) => check(source, new TypeEnv()),
+        checkSourceIn: (source: string, gamma: TypeEnv) => check(source, gamma),
     }
 }
 

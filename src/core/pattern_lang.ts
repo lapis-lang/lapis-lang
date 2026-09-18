@@ -327,6 +327,7 @@ class PatternParser {
                     `\\${escaped} is not a valid escape — type references are <Ident>, never escaped literals`,
                 )
             }
+            this.checkUniverse(escaped)
             return { kind: "char", char: escaped }
         }
         if (ch === ".") {
@@ -342,7 +343,24 @@ class PatternParser {
             return this.parseTypeRef()
         }
         this.pos++
+        this.checkUniverse(ch)
         return { kind: "char", char: ch }
+    }
+
+    /**
+     * The character universe gate (the ASCII fiat): a pattern character
+     * outside code points 0–127 cannot be matched by any pattern — the
+     * same rejection the class arms apply to their members.
+     */
+    private checkUniverse(ch: string): void {
+        if (ch.charCodeAt(0) > 127) {
+            throw new PatternParseError(
+                this.source,
+                `${
+                    JSON.stringify(ch)
+                } is outside the character universe — ASCII (code points 0–127) only`,
+            )
+        }
     }
 
     private parseClass(): PatternAST {
@@ -746,7 +764,10 @@ function enumerateNode(
 ): Set<string> | undefined {
     switch (ast.kind) {
         case "char":
-            return new Set([ast.char])
+            // A literal matches exactly one string of length 1: the
+            // size-0 class holds nothing (same contract as the class/any
+            // arms — the enumeration is size-bounded, never size-blind).
+            return k === 0 ? new Set() : new Set([ast.char])
         case "any":
             // `.` matches the whole universe — its size-≤ k class holds 0
             // strings at k = 0 and 128 at k ≥ 1: past the budget, decline

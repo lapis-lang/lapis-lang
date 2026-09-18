@@ -60,6 +60,7 @@ export {
     type CertifiedCoverage,
     type CertifiedPosition,
     declareCheckedLaw,
+    declareCheckedLawWithRegistry,
     type EvalTerm,
     finiteInhabitants,
     inhabitantsUpToSize,

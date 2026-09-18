@@ -42,7 +42,7 @@ import { type OpRegistry, type OpSig } from "./ops.ts"
 
 import { isSubtype } from "./subtyping.ts"
 
-import { DataType, PatternDataType, type Type } from "./types.ts"
+import { DataType, PatternDataType, type Type, TypeEnv } from "./types.ts"
 
 /**
  * The evaluation-free type-checking entry the law declarations need
@@ -52,6 +52,16 @@ import { DataType, PatternDataType, type Type } from "./types.ts"
 export interface LawTypeChecker {
     /** Type-check an LC source fragment; `undefined` when it does not check. */
     checkSource(source: string): Type | undefined
+    /**
+     * Type-check an LC source fragment under a TERM CONTEXT (`Γ`) — the
+     * sub-space predicate's reading: the bound variable `a` is pre-bound
+     * to the operand's carrier, so a predicate over the operand type-checks
+     * against the SAME type environment the evaluator later evaluates it
+     * under. Optional — a checker that does not implement it degrades to
+     * the standalone fragment check (a predicate naming `a` then fails at
+     * declaration time rather than evaluating to sentinels).
+     */
+    checkSourceIn?(source: string, gamma: TypeEnv): Type | undefined
 }
 
 // ── The closed vocabulary ─────────────────────────────────────────────────────
@@ -342,7 +352,7 @@ export class LawRegistry {
                     return `sub-space position ${spec.position} is never swept by "${kind}"'s schema — the scope would be decoration`
                 }
                 if (checker) {
-                    const predReason = checkSubSpaceWellTyped(spec, checker)
+                    const predReason = checkSubSpaceWellTyped(spec, targetOp, checker)
                     if (predReason !== undefined) {
                         return predReason
                     }
@@ -545,9 +555,21 @@ function checkSchemaWellTyped(
  */
 function checkSubSpaceWellTyped(
     spec: SubSpaceSpec,
+    op: OpSig,
     checker: LawTypeChecker,
 ): string | undefined {
-    const predType = checker.checkSource(spec.where)
+    // The predicate type-checks under a Γ binding `a` to the operand's
+    // CARRIER — the same environment the evaluator binds when it runs the
+    // predicate per sample (`filterSubSpace`/`filterTokenSubSpace` bind
+    // `a` to each VALUE of exactly this type). Checking against the empty
+    // context would reject every operand-dependent scope at declaration
+    // time (`a` unbound ⇒ ill-typed) — a false negative the evaluation
+    // would not have produced.
+    const carrier = op.paramTypes[spec.position]!
+    const gamma = new TypeEnv(new Map([["a", carrier]]))
+    const predType = checker.checkSourceIn !== undefined
+        ? checker.checkSourceIn(spec.where, gamma)
+        : checker.checkSource(spec.where)
     if (predType === undefined) {
         return `sub-space predicate "${spec.where}" (position ${spec.position}) does not type-check`
     }

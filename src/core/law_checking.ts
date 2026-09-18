@@ -56,6 +56,8 @@ import {
 
 import { type CheckedOpSig, type OpRegistry } from "./ops.ts"
 
+import { TypeRegistry } from "./grammar.ts"
+
 import { TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
 
 import { EvalErrorValue } from "./eval_grammar.ts"
@@ -67,6 +69,8 @@ import { valueSize } from "./values.ts"
 import { AnyType, DataType, PatternDataType, type Type, Variant } from "./types.ts"
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
+
+import { setPatternLookup } from "./type_algebra.ts"
 
 // ── Sampling ──────────────────────────────────────────────────────────────────
 
@@ -666,6 +670,44 @@ export function installPatternLookup(
 }
 
 /**
+ * The registry-driven law-check entry: installs BOTH pattern-counting hooks
+ * (this module's registry lookup and `type_algebra.ts`'s `setPatternLookup`)
+ * from the caller's `TypeRegistry` — the SAME registry the evaluator and the
+ * checker are bound to — runs `declareCheckedLaw`, and restores the prior
+ * hooks after (a check must not leak its registry into a later, differently-
+ * bound check).
+ *
+ * Without this wiring, a pattern containing `<T>` reaches the DEFAULT
+ * throwing hooks during `coefficients`/enumeration — screening a referenced
+ * pattern type would reject with a `TypeError` instead of resolving the
+ * registered type. This is the ONLY entry a checker-carrying declaration
+ * needs; `declareCheckedLaw` stays hook-free for callers that pre-install
+ * (tests) or never touch type references.
+ *
+ * @param registry the language's type registry (the one the evaluator and
+ *                 the checker carry — the same object identity the token
+ *                 gate consults).
+ */
+export function declareCheckedLawWithRegistry(
+    law: Omit<LawDecl, "provenance">,
+    omega: OpRegistry,
+    laws: LawRegistry,
+    registry: TypeRegistry,
+    eval_: EvalTerm,
+    checker?: LawTypeChecker,
+): ReturnType<typeof declareCheckedLaw> {
+    const lookup = (name: string): Type | undefined => registry.lookup(name)
+    const priorLawChecking = installPatternLookup(lookup)
+    const priorTypeAlgebra = setPatternLookup(patternTypeLookup)
+    try {
+        return declareCheckedLaw(law, omega, laws, eval_, checker)
+    } finally {
+        installPatternLookup(priorLawChecking)
+        setPatternLookup(priorTypeAlgebra)
+    }
+}
+
+/**
  * A pattern type's sub-space sweep space: the matched strings' tokens, up to
  * the length bound, optionally filtered by the sub-space predicate.
  *
@@ -1038,23 +1080,21 @@ function spaceUpToSize(
                 }
                 if (fieldType instanceof PatternDataType) {
                     // The pattern field's space at this size: the TRUE
-                    // size-EXACT (size−1) token set from the language
-                    // equation — the size measure is TEXT LENGTH
+                    // size-EXACT (size−1) token set from the field type's
+                    // UNION (`typeUnionStrings` — the field's language is
+                    // the union of ALL its declared variants; enumerating
+                    // `patterns[0]` alone would drop every later variant's
+                    // strings and silently shrink a With(p) carrier's
+                    // space) — the size measure is TEXT LENGTH
                     // (`valueSize`'s token arm), so the field's space and
-                    // the coefficients agree: a size-n With(p) needs a token
-                    // of EXACTLY length n−1 (the class filter below enforces
-                    // the total, so the field space must be per-length, not
-                    // per-prefix). Budget-capped; an over-budget pattern
-                    // field contributes nothing (the variant is dropped, and
-                    // the certificate's mismatch check surfaces the hole
-                    // loudly if it mattered).
-                    const env = makePatternCountEnv(patternTypeLookup)
-                    const strings = enumeratePattern(
-                        fieldType.patterns[0]!,
-                        size - 1,
-                        env,
-                        PREFIX_BUDGET,
-                    )
+                    // the coefficients agree: a size-n With(p) needs a
+                    // token of EXACTLY length n−1 (the class filter below
+                    // enforces the total, so the field space must be
+                    // per-length, not per-prefix). Budget-capped; an
+                    // over-budget pattern field contributes nothing (the
+                    // variant is dropped, and the certificate's mismatch
+                    // check surfaces the hole loudly if it mattered).
+                    const strings = typeUnionStrings(fieldType, size - 1, PREFIX_BUDGET)
                     const tokenLen = size - 1
                     return strings === undefined ? [] : [...strings]
                         .filter((text) => text.length === tokenLen)
