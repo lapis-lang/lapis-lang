@@ -503,4 +503,8 @@ The routing tests live in `test/derivable.test.ts` (the registry-free caller, th
 residual, the lawless-axiom-base decline, the derivable installation) — `discharge.test.ts` was left
 untouched; the boundaries the plan assigned it are pinned by the derivable suite's routing tests.
 
-Step 6 (the theory docs' status updates) remains open.
+Step 6 (the theory docs' status updates) is complete: `type-algebra.md` §6 (the implemented header +
+the operational characterization paragraph) and §7 (the roadmap row), `semantics.md` §5.4 (the
+regime table's `derivable` row), `design-decisions.md` (the provenance ladder's derivation
+mechanism), `lc.md` (the law-authority paragraph), and `lc-core-implementation-plan.md` (the PBI #63
+entry).

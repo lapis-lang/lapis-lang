@@ -922,20 +922,27 @@ function unfoldOpOne(
 
 /**
  * Whether a term is a constructor-pattern VALUE — the symbolic counterpart
- * of an argument value: a constructor application over constructor-pattern
- * values (variables ARE admitted: a case pattern's variables stand for the
- * subvalues the case binds — E-Op applies definitions to VALUES, and the
- * symbolic level represents a value's shape; the recursion continues when
- * the fold's recursive-field rule re-applies the fold to the subterm).
+ * of an argument value. The admitted shapes:
  *
- * A fold term over a constructor-pattern scrutinee is ALSO a pattern value:
- * it is the symbolic shape of a value the fold produces (the evaluator
- * would evaluate the fold to a value; the symbolic level keeps the shape).
- * This is what lets the engine's E-Op rule unfold
- * `add(Zero(), fold [Nat] b {…})` in the `associative` Zero case — the
- * right side's second operand is the fold continuation the case
- * substituted, a shape, and E-Op's substitution (which binds the handler's
- * field variables) does not evaluate it.
+ * - **Constructor spines** over pattern values: a case pattern's variables
+ *   stand for the subvalues the case binds (E-Op applies definitions to
+ *   VALUES; the symbolic level represents a value's shape).
+ * - **Variables** — always (a case variable is the symbolic shape of the
+ *   subvalue the case bound).
+ * - **Op applications** — the definition's body with the operands
+ *   substituted keeps the operands symbolic (they are values at evaluation
+ *   time; the E-Fold scrutinee-first rule unfolds them when the fold
+ *   fires). Without this, an outer op whose operand is an inner op
+ *   application stays stuck while the mirrored side unfolds — the
+ *   normalization loses symmetry.
+ *
+ * A FOLD term is deliberately NOT a pattern value: its value depends on
+ * the scrutinee's future value (the evaluator evaluates the scrutinee
+ * first; with an open scrutinee the value is not known). Blocking here
+ * keeps op applications over stuck folds visible as op applications — the
+ * axiom move then fires on the op shape itself (and treating a stuck fold
+ * as a value would re-embed it into fold scrutinees, producing
+ * fold-over-fold terms that can never step).
  */
 function isPatternValue(term: Term): boolean {
     switch (term.k) {

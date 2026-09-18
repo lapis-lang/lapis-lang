@@ -116,10 +116,11 @@ condition is a side condition on `Ω`'s construction rather than a rule in §5.
 `primitive` (pinned by the language definition — builtin operations with fixed law sets, authority
 by fiat), `discharged` (established by the compiler — finite-domain exhaustion for finite types,
 bounded-domain exhaustion for machine-finite types like binary64 Float, or derivation from primitive
-laws via fold-induction schemata), or `asserted` (programmer declaration, screened). No tier
-requires proof to declare. Soundness of law-directed rewriting is **relative to E**; the
-`discharged` and `primitive` tiers are established by their mechanisms, so only `asserted` laws
-carry declaration risk. See [`design-decisions.md`](../design-decisions.md) (Laws).
+laws via fold-induction schemata — implemented, `src/core/derivation.ts`: the move set is the
+machine-checked skeleton), or `asserted` (programmer declaration, screened). No tier requires proof
+to declare. Soundness of law-directed rewriting is **relative to E**; the `discharged` and
+`primitive` tiers are established by their mechanisms, so only `asserted` laws carry declaration
+risk. See [`design-decisions.md`](../design-decisions.md) (Laws).
 
 ### 2.5 Notation
 

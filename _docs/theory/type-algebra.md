@@ -243,7 +243,7 @@ because it enumerated it. This is the discharge route for machine-finite _patter
 `Int`, `Char`, user-declared pattern types) — the only route besides §6's derivation, since §2.3
 bars them from structural exhaustion forever.
 
-## 6. Derivation: the BMF engine (design)
+## 6. Derivation: the BMF engine (implemented — `src/core/derivation.ts`)
 
 The `derivable` regime proves laws from primitive laws via fold-induction skeletons. The key
 structural fact: **the induction motive is fixed by the functor** — the fold schema determines the
@@ -255,6 +255,17 @@ BMF's calculational rules are the same move — reading the type equation pointw
 structurally. A characterized handler fragment (handlers whose bodies call only primitive,
 discharged operations in semantically essential ways) makes "derivable" decidable: the skeleton
 generates the proof obligation, the primitive law set discharges it.
+
+**The characterization, operationally** (`derivation.ts`'s module doc is the record): a claim is
+derivable iff the bounded engine closes every schema instance's every variant case — the fragment is
+_defined_ by what the engine closes. The admitted definition shape: a lambda chain over the declared
+parameters whose body is a fold over one of the parameters (the recursion axis), one handler per
+axis variant, over a μ-type carrier. The move set: fold-computation unfolding (E-Fold at the
+symbolic level), congruence, the induction hypothesis at recursion positions, and one-step axiom
+instantiation from `primitive`/`discharged` laws — all bounded, no search, no backtracking. Scope
+boundaries (first cut): intrinsic kinds only (`distributive` routes residual), pattern carriers
+outside, one induction axis (`commutative` on Nat's `add` is the honest edge), and no type-level
+rewrites (the caution below, honored structurally).
 
 **Caution (Fiore–Leinster).** Algebraic manipulations that use subtraction/division (seven trees in
 one) are only semiring-valid under specific conditions. Never auto-adopt a type-isomorphism rewrite
@@ -288,7 +299,10 @@ total maps (`from`/`to`) checked against the calculus.
 | Encoding declarations (§5)                               | **rejected** — contradicts the token architecture (§5)    |
 | Sub-space surface syntax                                 | pending (core: structured `subSpace` field; the surface   |
 |                                                          | form lands with the pattern-surface PBI)                  |
-| BMF derivation engine (§6)                               | pending (awaits the handler-fragment characterization)    |
+| BMF derivation engine (§6)                               | **implemented** (`derivation.ts` — the bounded,           |
+|                                                          | search-free discharger; the fragment is defined by what   |
+|                                                          | the engine closes; `commutative` on Nat's `add` stays     |
+|                                                          | the honest edge)                                          |
 
 Ordering rationale: counting and routing landed first because they are the **decision procedures**
 everything else consults; pattern-value support next (it unblocks the largest unserved universe);

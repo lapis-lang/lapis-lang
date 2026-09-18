@@ -142,11 +142,15 @@ const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
  * scan) — until then, every reported name is a genuine op reference.
  *
  * **Consumers:** `OpRegistry.declare`'s acyclicity check (the declaration-
- * order stratification) and the derivation engine's axiom-base scan
- * (`derivation.ts` — the ops a claim's handler bodies call, whose
- * primitive/discharged laws the derivation may consume). One scanner, two
- * consumers — the fragment gate and the acyclicity check cannot disagree
- * about what an operation references.
+ * order stratification). The derivation engine's axiom-base scan does NOT
+ * use this function: it scans PARSED handler bodies at the term level
+ * (`derivation.ts`'s `freeOps` — the ops an obligation's `op` applications
+ * name), so the two scans operate at different levels (lexical source vs.
+ * parsed terms). They agree in practice because the reader parses exactly
+ * the concrete syntax this lexical scan approximates, but neither is the
+ * other's implementation — this scanner is the acyclicity check's
+ * grammar-independent source-level scan, needed because it runs before
+ * parsing infrastructure exists.
  *
  * **Over-approximation risk:** none today. If an exclusion is missed or a
  * new construct appears, the failure mode is a rejected declaration
