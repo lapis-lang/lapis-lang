@@ -104,6 +104,31 @@ export type LawProvenance = "primitive" | "discharged" | "asserted"
 // ── Law declaration ───────────────────────────────────────────────────────────
 
 /**
+ * A sub-space specification: one operand position's restriction on a law's
+ * claim ("all Ints with |x| ≤ 2³¹") — the scoped claim that makes bounded
+ * enumeration CERTIFY the checked sub-space (`discharged` for the sweep ∩
+ * sub-space, `asserted` beyond it). The scope lives on the LAW, not the
+ * type: the claim is about the law's domain, the type stays the pure lexeme
+ * space, and the predicate's interpretation (what `|x|` means) is the fold
+ * layer's business — evaluated by the same total evaluator every check
+ * uses.
+ */
+export interface SubSpaceSpec {
+    /**
+     * The operand position the spec restricts — the schema-variable index
+     * (operand position = index % paramCount in `assignments`).
+     */
+    readonly position: number
+    /**
+     * The restriction as an LC predicate over the schema variable `a` (LC
+     * source, like `OpSig.definition`): a unary boolean term over the
+     * bound, evaluated against each sample. `match` is bound to the sample
+     * (the token) when the carrier is a pattern type.
+     */
+    readonly where: string
+}
+
+/**
  * A declared law: one operation's claim to an axiom schema from the closed
  * vocabulary.
  *
@@ -113,7 +138,11 @@ export type LawProvenance = "primitive" | "discharged" | "asserted"
  * the surface form `properties: (distributive: #sum)` on the distributing
  * fold). `argument` is the law's argument term as LC source
  * (`identity: e`, `absorbing: z`), in the same concrete-syntax form as
- * `OpSig.definition`.
+ * `OpSig.definition`. `subSpace` scopes the claim (see `SubSpaceSpec`) —
+ * recorded authority metadata, like `argument`: nothing consults it, the
+ * checkers read it (the machineFinite regime filters the swept spaces by
+ * it) and the declaration carries it as the visible provenance of what
+ * "discharged" means for this claim.
  */
 export interface LawDecl {
     readonly kind: LawKind
@@ -121,6 +150,8 @@ export interface LawDecl {
     readonly target: string
     /** The law's argument term as LC source, for kinds that take one. */
     readonly argument?: string
+    /** The law's sub-space scopes (optional — an unscoped claim is the full carrier). */
+    readonly subSpace?: readonly SubSpaceSpec[]
     readonly provenance: LawProvenance
 }
 
@@ -285,6 +316,48 @@ export class LawRegistry {
             }
         }
 
+        // 7. Sub-space scopes: each spec's position must be a swept operand
+        //    position (a schema variable lands on it) and in range; the
+        //    predicate must type as Bool over the bound (checker injected —
+        //    an unbound/ill-typed predicate would evaluate to sentinels and
+        //    silently under-cover the sweep). Unscoped laws are the full
+        //    carrier (the historical shape, unchanged).
+        if (law.subSpace) {
+            const paramCount = targetOp.paramTypes.length
+            for (const spec of law.subSpace) {
+                if (
+                    !Number.isInteger(spec.position) || spec.position < 0 ||
+                    spec.position >= paramCount
+                ) {
+                    return `sub-space position ${spec.position} is out of range — "${target}" has ${paramCount} parameter(s)`
+                }
+                // A position no schema variable lands on would filter a
+                // space the check never sweeps — the scope would be
+                // invisible decoration. Rejected (loud, not silent).
+                const swept = Array.from(
+                    { length: SCHEMA_VARIABLE_COUNT[kind] },
+                    (_, i) => i % paramCount,
+                ).includes(spec.position)
+                if (!swept) {
+                    return `sub-space position ${spec.position} is never swept by "${kind}"'s schema — the scope would be decoration`
+                }
+                if (checker) {
+                    const predReason = checkSubSpaceWellTyped(spec, checker)
+                    if (predReason !== undefined) {
+                        return predReason
+                    }
+                }
+            }
+            // A scoped position must not be repeated (two predicates on one
+            // position are a conjunction in disguise — spell the conjunction
+            // in ONE predicate instead; the single-predicate shape keeps the
+            // filtered space's certificate honest).
+            const positions = law.subSpace.map((s) => s.position)
+            if (new Set(positions).size !== positions.length) {
+                return `sub-space positions are repeated — scope each position once (spell conjunctions inside one predicate)`
+            }
+        }
+
         return undefined
     }
 
@@ -341,6 +414,26 @@ export const SCHEMA_ARITY: Record<LawKind, number> = {
     involutory: 1,
     absorbing: 2,
     distributive: 2,
+}
+
+/**
+ * The number of schema variables per kind (lc.md §7.2): how many bindings
+ * the schema instantiates. Schema variable i maps to operand position
+ * `i % paramCount` (law_checking.ts `assignments`), so a position is SWEPT
+ * by a schema iff some variable lands on it — the test a sub-space spec's
+ * position must pass (a spec on an unswept position would filter a space
+ * the check never reads: invisible decoration, rejected at validation).
+ * Kept in sync with law_checking.ts's `SCHEMA_NAMES` (the names themselves
+ * are the checker's concern; here only the COUNTS matter).
+ */
+export const SCHEMA_VARIABLE_COUNT: Record<LawKind, number> = {
+    associative: 3,
+    commutative: 2,
+    identity: 1,
+    idempotent: 1,
+    involutory: 1,
+    absorbing: 1,
+    distributive: 3,
 }
 
 /**
@@ -433,6 +526,43 @@ function checkSchemaWellTyped(
     }
 
     return undefined
+}
+
+/**
+ * The sub-space predicate's typing check (`validateLaw` step 7): the
+ * predicate must type-check AND its result must be Bool — an ill-typed or
+ * non-boolean predicate would evaluate to sentinels inside the filter and
+ * silently under-cover the sweep (the machineFinite regime treats a
+ * predicate error as an evaluation hole — the exhaustion contract rejects
+ * the declaration, but rejecting at declaration time is louder).
+ *
+ * The predicate is LC source over the FIRST schema variable's binding name
+ * (`a` for all current schemas' first variable). Checked evaluation-free:
+ * the checker type-checks the source as a standalone fragment.
+ *
+ * @returns the failure reason, or `undefined` when the predicate is
+ *          well-formed.
+ */
+function checkSubSpaceWellTyped(
+    spec: SubSpaceSpec,
+    checker: LawTypeChecker,
+): string | undefined {
+    const predType = checker.checkSource(spec.where)
+    if (predType === undefined) {
+        return `sub-space predicate "${spec.where}" (position ${spec.position}) does not type-check`
+    }
+    if (!isBoolType(predType)) {
+        return `sub-space predicate "${spec.where}" (position ${spec.position}) types as ${predType}, not Bool`
+    }
+    return undefined
+}
+
+/**
+ * Whether a type is (a subtype of) the `Bool` data type — the predicate
+ * shape a sub-space spec's `where` must have.
+ */
+function isBoolType(t: Type): boolean {
+    return t instanceof DataType && t.name === "Bool"
 }
 
 /**

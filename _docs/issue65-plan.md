@@ -156,6 +156,12 @@ solve" discipline `derivative` established.
 
 ### D6 — Pattern carriers: the declared fallback, language equations deferred
 
+> **Superseded by the pattern language-equation reading (#62, implemented).** The singleton-token
+> fallback below was a stopgap; pattern types now get their coefficients from their language
+> equations (`pattern_lang.ts` — concatenation multiplies, alternation sums, Kleene star inverts
+> $(1-P)$), and token size is the text length. The rest of this PBI's machinery (certified prefix,
+> saturation, budget declines) is unchanged.
+
 A pattern type's certified prefix is its **declared fallback**: the singleton name-token
 (`patternSamples` already produces exactly this), so $c_1 = 1$ when the pattern set is nonempty and
 all coefficients are 0 otherwise (empty pattern set ⇒ the existing decline path). The
@@ -266,19 +272,21 @@ claim.
 
 ## 6. Acceptance mapping (issue #65)
 
-| Acceptance item                                                          | Covered by      |
-| ------------------------------------------------------------------------ | --------------- |
-| `coefficients(T, k)` — c₀..cₖ from the type equation for regular μ-types | Steps 1–2 (D4)  |
-| Pattern-type coefficients (declared fallback)                            | D6              |
-| The screen's coverage report states the certified prefix                 | Steps 3, 5 (D8) |
-| A sweep/coefficient mismatch is a loud error                             | Steps 3, 5 (D5) |
-| Tests: Bool exact count, record exact count, pattern-carrier prefix      | §5              |
+| Acceptance item                                                                                     | Covered by      |
+| --------------------------------------------------------------------------------------------------- | --------------- |
+| `coefficients(T, k)` — c₀..cₖ from the type equation for regular μ-types                            | Steps 1–2 (D4)  |
+| Pattern-type coefficients (declared fallback; later replaced by the language-equation reading, #62) | D6              |
+| The screen's coverage report states the certified prefix                                            | Steps 3, 5 (D8) |
+| A sweep/coefficient mismatch is a loud error                                                        | Steps 3, 5 (D5) |
+| Tests: Bool exact count, record exact count, pattern-carrier prefix                                 | §5              |
 
 ## 7. Deferred items — with reasons
 
 - **Pattern language-equation coefficients.** Requires the pattern as a first-class surface (v0.4.0)
   and, for bounded sub-space sweeps, #62's declared encodings/alphabets. The declared fallback
-  (singleton token) is exact for what the evaluator can exercise today.
+  (singleton token) is exact for what the evaluator can exercise today. **Landed in #62** — the
+  language-equation reading is implemented (`pattern_lang.ts`) and replaced the fallback; sub-space
+  scopes (the encoding/alphabet declarations as originally imagined were dropped in #62's rescope).
 - **`forAll` certification.** The random-sample harness keeps its regeneration/∂T profile — its
   value is _deep_ falsification, not prefix completeness (`law-testing.md` §2: different coverage
   profile, same falsify-never-establish contract).

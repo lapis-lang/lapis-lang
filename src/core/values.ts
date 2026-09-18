@@ -179,19 +179,32 @@ function fieldsEqual(a: Map<string, Value>, b: Map<string, Value>): boolean {
 
 /**
  * The structural size of a value: its node count (one per variant
- * constructor; tokens and atoms count as nodes at their position).
+ * constructor; tokens count as their TEXT LENGTH — the language-equation
+ * reading counts per-length strings, so a token's size is the length of its
+ * raw matched text).
  *
  * This is the monotone measure the ∂T shrinker minimizes (a filler is a
  * candidate only when STRICTLY smaller than the subtree it replaces) and
  * the size the certified screen's prefix is stated in (size-≤ k classes).
  * One definition keeps the two mechanisms agreeing on what "smaller" and
  * "the prefix" mean.
+ *
+ * The token arm: a token's size is `text.length`. The language
+ * equation counts strings of exactly length n (`Nat = [0-9]+` gives
+ * cₙ = 10ⁿ — 10 strings of length 1), so the certificate's c₁ counts
+ * single-CHARACTER tokens; the size measure must agree or the enumeration
+ * and the coefficients disagree. (The empty string matches `[^"]*`-style
+ * patterns — size 0, honest.) The shrinker's contract is unaffected: a
+ * shorter token is still strictly smaller than a longer one.
  */
 export function valueSize(value: Value): number {
     if (value instanceof VariantVal) {
         let size = 1
         for (const field of value.fields.values()) size += valueSize(field)
         return size
+    }
+    if (value instanceof TokenVal) {
+        return value.text.length
     }
     return 1
 }

@@ -10,6 +10,7 @@
 import { assertEquals, assertThrows } from "@std/assert"
 
 import { coefficients, type ContextSpec, derivative } from "../src/core/type_algebra.ts"
+import { createPatternType } from "./fixtures.ts"
 import {
     Any,
     DataType,
@@ -17,7 +18,6 @@ import {
     FunType,
     IntersectionType,
     NothingType,
-    PatternDataType,
     TokenType,
     Type,
     Variant,
@@ -152,7 +152,7 @@ Deno.test("derivative: function-typed, Token, pattern, Nothing, and Any fields c
             [
                 new Field("fn", new FunType(bool(), nat()), false),
                 new Field("tok", new TokenType(), false),
-                new Field("pat", new PatternDataType("Pat", ["a+b"]), false),
+                new Field("pat", createPatternType("Pat", ["a+b"]), false),
                 new Field("none", new NothingType(), false),
                 new Field("any", Any, false),
                 new Field("rec", weird, true),
@@ -305,13 +305,16 @@ Deno.test("coefficients: comb inheritance — the parent chain's variants are su
     assertEquals(coefficients(p, 4), [0, 2, 2, 2, 2])
 })
 
-Deno.test("coefficients: a pattern type — the declared singleton fallback c₁ = 1", () => {
-    const pat = new PatternDataType("NatPat", ["[0-9]+"])
-    assertEquals(coefficients(pat, 3), [0, 1, 0, 0])
+Deno.test("coefficients: a pattern type — the language equation (NatPat: cₙ = 10ⁿ)", () => {
+    // The language-equation reading: `NatPat = [0-9]+` reads
+    // L = P·P* — per length n there are 10ⁿ digit strings. The coefficient
+    // is DERIVED from the pattern, not declared.
+    const pat = createPatternType("NatPat", ["[0-9]+"])
+    assertEquals(coefficients(pat, 3), [0, 10, 100, 1000])
 })
 
 Deno.test("coefficients: an empty pattern set has no inhabitants — all zeros", () => {
-    const hollow = new PatternDataType("HollowPat", [])
+    const hollow = createPatternType("HollowPat", [])
     assertEquals(coefficients(hollow, 2), [0, 0, 0])
 })
 

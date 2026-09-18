@@ -51,6 +51,7 @@ import {
     type LawTypeChecker,
     RELATIONAL_KINDS,
     screenableDomain,
+    type SubSpaceSpec,
 } from "./laws.ts"
 
 import { type CheckedOpSig, type OpRegistry } from "./ops.ts"
@@ -63,7 +64,9 @@ import { coefficients } from "./type_algebra.ts"
 
 import { valueSize } from "./values.ts"
 
-import { AnyType, DataType, PatternDataType, type Type } from "./types.ts"
+import { AnyType, DataType, PatternDataType, type Type, Variant } from "./types.ts"
+
+import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
 
 // ── Sampling ──────────────────────────────────────────────────────────────────
 
@@ -309,6 +312,27 @@ function renderValue(value: Value): string {
 // ── The screen ────────────────────────────────────────────────────────────────
 
 /**
+ * The machineFinite sweep's VISIBLE EXTENT — the certificate of what the
+ * `discharged` tag covers for a scoped claim. The scope's predicate is the
+ * claim's domain, but the sweep certifies only the strings the
+ * length-bounded enumeration reached: the certificate states that extent
+ * (the length bound) and each scoped position's admitted cardinality, so
+ * a consumer of the declaration sees "discharged on strings of length ≤ N
+ * matching the scope" rather than an unqualified `discharged`.
+ */
+export interface SubSpaceSweep {
+    /** The string-length bound the enumeration reached (MAX_PATTERN_LENGTH). */
+    readonly maxLength: number
+    /** Per scoped position: the predicate's source and the admitted count. */
+    readonly positions: readonly {
+        readonly position: number
+        readonly where: string
+        /** The admitted tokens' count (the sweep's space at this position). */
+        readonly admitted: number
+    }[]
+}
+
+/**
  * The screen's outcome: `"declined"` (the screen has no sample vocabulary
  * for this claim — coverage 0 is a HOLE, not evidence) or `"passed"` with
  * the number of instances actually checked and the **certified coverage**
@@ -540,20 +564,22 @@ export function makeEvalTerm(
 // ── The screening regime (semantics.md §5.4) ─────────────────────────────────
 
 /**
- * Sample values for a pattern-matched type: bounded representatives,
- * evaluated through the evaluator so they become real `TokenVal`s (the same
- * construction path evaluation uses).
+ * Sample values for a pattern-matched type: the pattern language's
+ * enumerated tokens, evaluated through the evaluator so they become real
+ * `TokenVal`s (the same construction path evaluation uses).
  *
  * The pattern universe is unbounded IN TOTAL (type-algebra.md §2.3: a
  * pattern type's generating function is rational, never polynomial) — but a
- * **certified prefix** is checkable. In this grammar-based evaluator the
- * token's source form is the pattern type's NAME (the atom production is
- * name-lexed, matching LC's identifier rule), so the representative set is
- * the singleton per pattern type: the name itself, whose `TokenVal` carries
- * it as the raw text. That is the size-1 prefix of the type's space — the
- * smallest honest sweep a term-grammar evaluator can exercise. A type with
- * no declared patterns has NO inhabitants — the empty space declines the
+ * **certified prefix** is checkable, and with the language-equation reading
+ * the certified prefix is the TRUE size-≤ MAX_SCREEN_SIZE
+ * token set: each matched string of length ≤ MAX_SCREEN_SIZE becomes a
+ * token via the evaluator (`TokenVal(text)` — the token is an axiom of the
+ * operational semantics, its text is carried directly). A type with no
+ * declared patterns has NO inhabitants — the empty space declines the
  * screen (zero-coverage honesty, `declareCheckedLaw`).
+ *
+ * (The size measure is TEXT LENGTH — `valueSize`'s token arm — so the
+ * prefix and the coefficients agree.)
  */
 function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
     if (type.patterns.length === 0) return []
@@ -601,6 +627,163 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
         )
     }
     return tokens
+}
+
+/**
+ * The pattern language's registry hook: a type reference `<T>` in a pattern
+ * resolves through the type registry (the same registry the evaluator and
+ * the token gate consult). The hook reads only `PatternDataType`s (a `<T>`
+ * naming a data type is a parse error inside the counting environment).
+ *
+ * The hook is installed by `LawTypeChecker`-carrying check entries: the
+ * checker's registry is the language's type registry, and the law checker
+ * wires it in once per registry identity (memoized — the hook follows the
+ * LAST installed registry, which is correct because a check consults only
+ * the registry its own law's checker carries).
+ */
+let typeRegistryLookup: (name: string) => Type | undefined = () => undefined
+
+/**
+ * The pattern language's counting lookup: resolves a type reference name
+ * through the installed registry hook (only `PatternDataType`s — a `<T>`
+ * naming a data type is a parse error inside the counting environment).
+ */
+function patternTypeLookup(name: string): PatternDataType | undefined {
+    const resolved = typeRegistryLookup(name)
+    return resolved instanceof PatternDataType ? resolved : undefined
+}
+
+/**
+ * Install the type registry for pattern-language type references. Idempotent
+ * per registry identity; returns the prior hook for restoration in tests.
+ */
+export function installPatternLookup(
+    lookup: (name: string) => Type | undefined,
+): (name: string) => Type | undefined {
+    const prior = typeRegistryLookup
+    typeRegistryLookup = lookup
+    return prior
+}
+
+/**
+ * A pattern type's sub-space sweep space: the matched strings' tokens, up to
+ * the length bound, optionally filtered by the sub-space predicate.
+ *
+ * The machineFinite arm's sweep space: each string in the
+ * language's enumeration becomes a `TokenVal(text)` — the token is an axiom
+ * of the operational semantics, so construction is DIRECT (no evaluator
+ * round-trip: the token has no evaluation rule; the evaluator's
+ * `matchedToken` is itself this constructor). The enumeration is bounded by
+ * `MAX_FINITE_INHABITANTS` (the exhaustion ceiling) and by
+ * `MAX_PATTERN_LENGTH` (the string-length reach — the claim the sweep
+ * actually certifies is the sub-space ∩ {length ≤ MAX_PATTERN_LENGTH}, so
+ * the bound is RECORDED on the returned sweep and carried to the
+ * declaration's certificate: a scope whose predicate admits only strings
+ * longer than the bound discharges vacuously, and the certificate says so
+ * loudly rather than letting the scope masquerade as full sub-space
+ * coverage).
+ *
+ * A sub-space spec filters the enumerated tokens by the predicate (the
+ * same `filterSubSpace` contract: a predicate error rejects loudly — a
+ * hole cannot shrink a certified space silently). The filter runs BEFORE
+ * the budget check: a huge full language with a tiny sub-space is still
+ * exhaustible (the scope is the point), so the enumeration materializes
+ * per-length up to the exhaustion budget and the FILTERED result must fit
+ * `MAX_FINITE_INHABITANTS`.
+ *
+ * @returns the filtered token space (each element a `TokenVal` of
+ *          `type`) WITH the length bound the sweep reached — the
+ *          certificate states the sub-space's visible extent, not just
+ *          its cardinality.
+ *
+ * @throws LawDeclarationError when the filtered space is EMPTY (a ∅
+ *         sub-space discharge is almost never what the scope's author
+ *         meant — the honest reading of a filtered-away scope is a
+ *         rejected claim, not a vacuous proof).
+ */
+function patternSpaceOf(
+    type: PatternDataType,
+    law: Omit<LawDecl, "provenance">,
+    spec: SubSpaceSpec | undefined,
+    eval_: EvalTerm,
+): readonly TokenVal[] {
+    if (type.patterns.length === 0) return []
+    const env = makePatternCountEnv(patternTypeLookup)
+    // The sweep space: the enumeration's COUNT must fit the exhaustion
+    // ceiling — with a scope, the FILTERED result must fit (a huge full
+    // language with a tiny sub-space is still exhaustible: the scope is
+    // the point).
+    const budget = MAX_FINITE_INHABITANTS
+    const seen = new Set<string>()
+    for (const ast of type.patterns) {
+        const strings = enumeratePattern(ast, MAX_PATTERN_LENGTH, env, budget)
+        if (strings === undefined) {
+            throw new LawDeclarationError(
+                law.target,
+                `pattern type ${type.name}: the sub-space enumeration exceeds the exhaustion budget — the scope cannot certify the space`,
+            )
+        }
+        for (const text of strings) seen.add(text)
+        if (seen.size > budget) {
+            throw new LawDeclarationError(
+                law.target,
+                `pattern type ${type.name}: the sub-space enumeration exceeds the exhaustion budget — the scope cannot certify the space`,
+            )
+        }
+    }
+    let enumerated: readonly TokenVal[] = [...seen].map((text) => new TokenVal(type.name, text))
+    if (spec) {
+        enumerated = filterTokenSubSpace(enumerated, spec, law.target, type.name, eval_)
+        if (enumerated.length === 0) {
+            throw new LawDeclarationError(
+                law.target,
+                `pattern type ${type.name}: the sub-space predicate "${spec.where}" (position ${spec.position}) admits NO string of length ≤ ${MAX_PATTERN_LENGTH} — an empty sub-space discharges vacuously, which is almost never the scoped claim the author meant; the declaration is rejected (state the intended range in the scope predicate)`,
+            )
+        }
+    }
+    return enumerated
+}
+
+/*
+ * The string-length bound for the machineFinite arm's enumeration: the
+ * sub-space sweep is a DECIDABLE-BOUNDED space — the scope's predicate
+ * restricts membership, and the enumeration materializes strings up to this
+ * length (the length bound rides on sized types; the exhaustion ceiling
+ * bounds the COUNT). A scope whose filtered space fits the ceiling is
+ * exhaustible even over a huge language (e.g. a length predicate on
+ * `[0-9]+`): the enumeration walks per-length classes and declines only
+ * when the length reach itself is past the budget.
+ */
+const MAX_PATTERN_LENGTH = 4
+
+/**
+ * Filter enumerated tokens by a sub-space predicate (the token-carried
+ * variant of `filterSubSpace` — the predicate binds `a` to the token).
+ */
+function filterTokenSubSpace(
+    tokens: readonly TokenVal[],
+    spec: SubSpaceSpec,
+    opName: string,
+    typeName: string,
+    eval_: EvalTerm,
+): readonly TokenVal[] {
+    const kept: TokenVal[] = []
+    for (const token of tokens) {
+        const rho = new ValueEnv(new Map([["a", token as Value]]))
+        const results = [...eval_(spec.where, rho)]
+        const verdict = results[0]
+        if (
+            results.length !== 1 || verdict === undefined ||
+            verdict instanceof EvalErrorValue
+        ) {
+            throw new LawDeclarationError(
+                opName,
+                `sub-space predicate "${spec.where}" on ${typeName} did not evaluate to a single verdict — the scope cannot certify the space`,
+            )
+        }
+        if (valueEquals(verdict, TRUE_VALUE)) kept.push(token)
+    }
+    return kept
 }
 
 // ── The certified prefix (the size-bounded enumerator) ───────────────────────
@@ -724,14 +907,31 @@ export function inhabitantsUpToSize(
         throw new RangeError(`inhabitantsUpToSize(${type.name}): the size bound k must be ≥ 0`)
     }
     if (type instanceof PatternDataType) {
-        // The declared fallback: the singleton name-token — the same
-        // vocabulary `patternSamples` produces. The token is a SIZE-1
-        // inhabitant, so it enters the prefix only when k ≥ 1: a size-≤ 0
-        // prefix is empty, exactly what `coefficients(type, 0)` counts
-        // (c₀ = 0). Skipping the bound here would make the enumerator
-        // return a sample the certificate itself does not count — a
-        // mismatch masquerading as full coverage.
-        return k >= 1 && type.patterns.length > 0 ? patternSamples(type, eval_) : []
+        // The language-equation enumeration: the TRUE size-≤ k token set
+        // from the pattern's language — every matched string of length ≤ k
+        // becomes a token (`TokenVal(type, text)`; the token is an axiom of
+        // the operational semantics, its text carried directly), INCLUDING
+        // the ε string when the language is nullable (`a*`, `a?`): its size
+        // is 0, so it is the size-0 class's sole member — c₀ counts it, and
+        // the size-≤ k prefix must hold it or the enumerator under-reports
+        // the coefficient count. The read goes through the type's UNION
+        // (`typeUnionStrings` — variants may overlap; one merged set), so
+        // the enumerator and the coefficients read the same language.
+        // A prefix past the budget is a DECLINE (the caller rejects loudly
+        // — an enumeration hole must not masquerade as coverage),
+        // consistent with the data-carrier arm's behavior.
+        if (type.patterns.length === 0) return []
+        const strings = typeUnionStrings(type, k, PREFIX_BUDGET)
+        if (strings === undefined) {
+            throw new LawDeclarationError(
+                type.name,
+                `the size-≤ ${k} enumeration exceeds the prefix budget — the certificate declines (an enumeration hole must not masquerade as coverage)`,
+            )
+        }
+        const deduped: Value[] = [...strings]
+            .map((text) => new TokenVal(type.name, text))
+            .sort((a, b) => valueSize(a) - valueSize(b))
+        return deduped
     }
     const spaces = new Map<DataType, readonly VariantVal[]>()
     const degrees = new Map<DataType, number>()
@@ -837,7 +1037,28 @@ function spaceUpToSize(
                     return spaceUpToSize(fieldType, size - 1, eval_, spaces, degrees)
                 }
                 if (fieldType instanceof PatternDataType) {
-                    return fieldType.patterns.length > 0 ? patternSamples(fieldType, eval_) : []
+                    // The pattern field's space at this size: the TRUE
+                    // size-EXACT (size−1) token set from the language
+                    // equation — the size measure is TEXT LENGTH
+                    // (`valueSize`'s token arm), so the field's space and
+                    // the coefficients agree: a size-n With(p) needs a token
+                    // of EXACTLY length n−1 (the class filter below enforces
+                    // the total, so the field space must be per-length, not
+                    // per-prefix). Budget-capped; an over-budget pattern
+                    // field contributes nothing (the variant is dropped, and
+                    // the certificate's mismatch check surfaces the hole
+                    // loudly if it mattered).
+                    const env = makePatternCountEnv(patternTypeLookup)
+                    const strings = enumeratePattern(
+                        fieldType.patterns[0]!,
+                        size - 1,
+                        env,
+                        PREFIX_BUDGET,
+                    )
+                    const tokenLen = size - 1
+                    return strings === undefined ? [] : [...strings]
+                        .filter((text) => text.length === tokenLen)
+                        .map((text) => new TokenVal(fieldType.name, text))
                 }
                 return [] as readonly Value[]
             })
@@ -1110,17 +1331,24 @@ function certifyCoverage(
  *   (≤ `MAX_FINITE_INHABITANTS`) and the law's schema sweep over it stays
  *   within budget, so the law can be checked exhaustively — a passing
  *   exhaustion establishes it (`discharged` provenance).
- * - **`residual`** — everything else (unbounded-depth μ-types, or a space
- *   beyond the budget): the certified screen applies, falsifying only —
- *   `asserted` provenance.
+ * - **`machineFinite`** — a pattern carrier (or a data carrier over
+ *   pattern-typed fields) WITH a sub-space spec on every swept position:
+ *   structural exhaustion is permanently unavailable to pattern types
+ *   (type-algebra.md §2.3 — their generating functions are rational), but a
+ *   law scoped to a decidable sub-space ("all Ints with |x| ≤ 2³¹") can be
+ *   exhausted WITHIN it — a passing scoped sweep establishes the SCOPED claim
+ *   (`discharged` provenance; the scope rides on the declaration as visible
+ *   provenance, and the claim is `asserted` beyond the range by the same
+ *   honesty that scoped any claim). The restricted sweep must fit
+ *   `MAX_EXHAUSTION_INSTANCES`.
+ * - **`residual`** — everything else (unbounded-depth μ-types, pattern
+ *   carriers without a total sub-space spec, or a space beyond the budget):
+ *   the certified screen applies, falsifying only — `asserted` provenance.
  *
- * `machineFinite` (fixed encodings — binary64, Char alphabets) is not yet
- * a regime: those encodings are not declared in the type system, so the
- * exhaustion bound would be an implementation accident, not spec-able
- * (semantics.md §5.4). `derivable` (fold-induction from primitive laws)
- * likewise awaits a characterization of the derivable handler fragment.
+ * `derivable` (fold-induction from primitive laws) awaits a characterization
+ * of the derivable handler fragment.
  */
-export type ScreeningRegime = "finite" | "residual"
+export type ScreeningRegime = "finite" | "machineFinite" | "residual"
 
 /**
  * The inhabitant ceiling for the `finite` regime (semantics.md §5.4: "Bool,
@@ -1262,16 +1490,27 @@ export function screeningRegime(
     const instancesPerAssignment = ARGUMENT_KINDS.includes(law.kind) ? 2 : 1
 
     let sweep = instancesPerAssignment
+    let patternCarrierPositions = 0
     for (let position = 0; position < op.paramTypes.length; position++) {
         // A position no variable lands on is never swept: its carrier's
         // size is irrelevant (this is what keeps an identity claim over
         // (Bool, 2¹⁸) exhaustible — only position 0 is ever enumerated).
         if (exponents[position] === 0) continue
+        if (op.paramTypes[position]! instanceof PatternDataType) {
+            // A pattern carrier routes machineFinite ONLY when the law
+            // scopes it: structural exhaustion is never honest for one
+            // (type-algebra.md §2.3 — a pattern type's generating function
+            // is rational, unbounded in total), but a sub-space spec makes
+            // the SWEPT space finite and spec-able. An unscoped pattern
+            // carrier routes residual (the certified screen's token
+            // samples cover a certified prefix instead).
+            if (law.subSpace?.some((spec) => spec.position === position)) {
+                patternCarrierPositions++
+                continue
+            }
+            return "residual"
+        }
         if (!(op.paramTypes[position]! instanceof DataType)) {
-            // Pattern types route residual ALWAYS (type-algebra.md §2.3: a
-            // pattern type's generating function is rational — unbounded in
-            // total — so exhaustion is never honest for one; the screen's
-            // token samples cover a certified size-1 prefix instead).
             return "residual"
         }
         const inhabitants = finiteInhabitants(op.paramTypes[position]! as DataType)
@@ -1288,6 +1527,7 @@ export function screeningRegime(
         sweep *= inhabitants ** exponents[position]!
         if (sweep > MAX_EXHAUSTION_INSTANCES) return "residual"
     }
+    if (patternCarrierPositions > 0) return "machineFinite"
     return "finite"
 }
 
@@ -1302,6 +1542,11 @@ export function screeningRegime(
  *   installed **`discharged`** on a full-coverage pass.
  * - `residual` regime → `screenLaw` (certified size prefixes) → installed
  *   **`asserted`** on a passing screen (evidence, not proof).
+ * - `machineFinite` regime → `exhaustLaw` (the sub-space-scoped sweep) →
+ *   installed **`discharged`** on a full-coverage pass over the
+ *   certified sub-space; the scope rides on the declaration as the visible
+ *   provenance of what the tag covers (`asserted` beyond the range is the
+ *   honest reading of any scoped claim).
  *
  * Validation runs BEFORE the check: a vocabulary/argument/arity/typing
  * error surfaces as `LawDeclarationError` — never as a screen artifact (a
@@ -1318,11 +1563,17 @@ export function screeningRegime(
  * honest: there the count 0 records a *complete* sweep over ∅, a real
  * proof shape.)
  *
- * Returns `{ law, instances, regime, coverage }` — the installed
- * declaration, the number of instances checked, the regime that produced
- * it, and — for the residual regime — the screen's certified-coverage
- * report (undefined for exhaustion: a discharged law's coverage is the
- * full space, which the regime itself already certifies).
+ * Returns `{ law, instances, regime, coverage, subSpaceSweep }` — the
+ * installed declaration, the number of instances checked, the regime that
+ * produced it, and the COVERAGE certificate: for the residual regime the
+ * screen's certified-coverage report; for the machineFinite regime the
+ * sub-space sweep's shape (`subSpaceSweep` — the length bound the sweep
+ * reached and each scoped position's admitted cardinality; the visible
+ * extent of what `discharged` covers, since the scope's predicate is the
+ * claim's domain but the sweep certifies only the strings the
+ * length-bounded enumeration reached). Undefined for the plain finite
+ * regime (a discharged law's coverage is the full space, which the regime
+ * itself already certifies).
  *
  * @throws LawError when the check falsifies the law (nothing is installed).
  * @throws LawDeclarationError when the claim is not in the closed vocabulary,
@@ -1345,6 +1596,8 @@ export function declareCheckedLaw(
     instances: number
     regime: ScreeningRegime
     coverage: CertifiedCoverage | undefined
+    /** The machineFinite sweep's visible extent (undefined off that regime). */
+    subSpaceSweep: SubSpaceSweep | undefined
 } {
     const op = omega.lookup(law.target)
     if (!op) {
@@ -1355,16 +1608,18 @@ export function declareCheckedLaw(
     if (structuralReason !== undefined) {
         throw new LawDeclarationError(law.target, structuralReason)
     }
-    // Regime dispatch (semantics.md §5.4): finite → exhaustive discharge;
-    // residual → the certified screen. The check runs BEFORE installing:
-    // a falsified claim never enters E.
+    // Regime dispatch (semantics.md §5.4): finite/machineFinite → exhaustive
+    // discharge (the latter over the sub-space); residual → the certified
+    // screen. The check runs BEFORE installing: a falsified claim never
+    // enters E.
     const regime = screeningRegime(law, op)
     const screen: ScreenOutcome | undefined = regime === "residual"
         ? screenLaw(law, op, omega, eval_)
         : undefined
+    const exhaustion = screen ? undefined : exhaustLaw(law, op, eval_)
     const instances = screen
         ? screen.outcome === "passed" ? screen.checked : 0
-        : exhaustLaw(law, op, eval_)
+        : exhaustion!.checked
     // Zero-coverage honesty — BOTH zero-coverage shapes reject:
     //
     // - **Declined** (unscreenable domain, empty sample space, unscreenable
@@ -1396,7 +1651,9 @@ export function declareCheckedLaw(
                 "nothing installed (check the operation's definition/evaluator)",
         )
     }
-    const provenance: LawProvenance = regime === "finite" ? "discharged" : "asserted"
+    const provenance: LawProvenance = regime === "finite" || regime === "machineFinite"
+        ? "discharged"
+        : "asserted"
     laws.declareLaw(law, omega, provenance, checker)
     const decl: LawDecl = { ...law, provenance }
     return {
@@ -1404,6 +1661,7 @@ export function declareCheckedLaw(
         instances,
         regime,
         coverage: screen?.outcome === "passed" ? screen.coverage : undefined,
+        subSpaceSweep: exhaustion?.sweep,
     }
 }
 
@@ -1468,13 +1726,15 @@ function evalArgument(
  * argument does not evaluate.
  * @throws LawDeclarationError when an axiom instance over real inhabitants
  * fails to evaluate (a hole in the sweep — the claim is not checkable on
- * this signature to proof standard).
+ * this signature to proof standard), or when a scoped pattern position's
+ * sub-space is empty (a vacuous discharge is rejected — see
+ * `patternSpaceOf`).
  */
 function exhaustLaw(
     law: Omit<LawDecl, "provenance">,
     op: CheckedOpSig,
     eval_: EvalTerm,
-): number {
+): { checked: number; sweep: SubSpaceSweep | undefined } {
     // The argument value for argument-taking kinds (shared with the screen).
     const argumentValue = ARGUMENT_KINDS.includes(law.kind)
         ? evalArgument(law, op, eval_)
@@ -1500,17 +1760,47 @@ function exhaustLaw(
     for (let i = 0; i < SCHEMA_NAMES[law.kind]!.length; i++) {
         exponents[i % op.paramTypes.length]!++
     }
-    const positionSamples: readonly (readonly VariantVal[])[] = op.paramTypes
-        .map((type, position) => {
-            if (exponents[position] === 0) return [] as readonly VariantVal[]
-            return spaceOf(type as DataType, eval_, spaces)
+    // The machineFinite arm: a scoped position's space is
+    // FILTERED by its sub-space predicate BEFORE the product — the sweep is
+    // over the sub-space, so the full-coverage contract (every instance
+    // must evaluate; a hole rejects) carries over untouched, now over the
+    // scoped space. The predicate is user code evaluated by the same total
+    // evaluator: a predicate error on a sample is an EVALUATION HOLE (the
+    // filter cannot decide membership) — the declaration is rejected, not
+    // the sample silently dropped (a silent drop would shrink the certified
+    // space the discharge claims).
+    const predicates = new Map<number, SubSpaceSpec>(
+        (law.subSpace ?? []).map((spec) => [spec.position, spec]),
+    )
+    // Per-position admitted cardinalities (the sweep certificate's data —
+    // the space each scoped position contributes AFTER filtering).
+    const sweepSpaces = new Map<number, number>()
+    const positionSamples: Array<ReadonlyArray<VariantVal | TokenVal>> = op.paramTypes
+        .map((type, position): ReadonlyArray<VariantVal | TokenVal> => {
+            if (exponents[position] === 0) return []
+            const spec = predicates.get(position)
+            if (type instanceof PatternDataType) {
+                // The pattern carrier's sub-space: enumerate the matched
+                // strings' tokens (the true size-≤ bound space from the
+                // language equation) — this is the sub-space exhaustion's
+                // sweep space; `MAX_FINITE_INHABITANTS` bounds it (the
+                // regime's routing already guaranteed the fit).
+                const space = patternSpaceOf(type, law, spec, eval_)
+                if (spec) sweepSpaces.set(position, space.length)
+                return space
+            }
+            const full = spaceOf(type as DataType, eval_, spaces)
+            if (!spec) return full
+            const filtered = filterSubSpace(full, spec, eval_, op.name, position)
+            sweepSpaces.set(position, filtered.length)
+            return filtered
         })
 
     let checked = 0
     for (
         const bindings of assignments(
             SCHEMA_NAMES[law.kind]!,
-            positionSamples,
+            positionSamples as unknown as readonly (readonly Value[])[],
             op.paramTypes.length,
         )
     ) {
@@ -1531,7 +1821,73 @@ function exhaustLaw(
             checked++
         }
     }
-    return checked
+    // The sweep's visible extent (the machineFinite certificate): scoped
+    // positions state their admitted cardinality, and the length bound
+    // states how far the enumeration reached. Recorded ONLY for the
+    // pattern-typed scoped positions (a finite data carrier's full space
+    // needs no extent note — the regime itself certifies it).
+    const sweepPositions = (law.subSpace ?? [])
+        .filter((spec) => op.paramTypes[spec.position] instanceof PatternDataType)
+        .map((spec) => ({
+            position: spec.position,
+            where: spec.where,
+            admitted: sweepSpaces.get(spec.position) ?? 0,
+        }))
+    const sweep: SubSpaceSweep | undefined = sweepPositions.length > 0
+        ? { maxLength: MAX_PATTERN_LENGTH, positions: sweepPositions }
+        : undefined
+    return { checked, sweep }
+}
+
+/**
+ * A scoped position's filtered space: the samples satisfying the sub-space
+ * predicate. The predicate is evaluated per sample through the evaluator
+ * (`where` is an LC boolean term over the bound variable `a`); a sample the
+ * predicate rejects is OUT of the sub-space — excluded from the sweep (the
+ * claim is scoped, so exclusion is the honest certification, not under-
+ * coverage).
+ *
+ * A predicate ERROR on a sample is an evaluation hole: the filter cannot
+ * decide membership, and a hole inside the certified space would shrink it
+ * silently. Rejected loudly (the same completeness contract exhaustion
+ * applies to constructions).
+ */
+function filterSubSpace(
+    samples: readonly VariantVal[],
+    spec: SubSpaceSpec,
+    eval_: EvalTerm,
+    opName: string,
+    position: number,
+): readonly VariantVal[] {
+    const kept: VariantVal[] = []
+    for (const sample of samples) {
+        const rho = new ValueEnv(new Map([["a", sample as Value]]))
+        const results = [...eval_(spec.where, rho)]
+        const verdict = results[0]
+        if (
+            results.length !== 1 || verdict === undefined ||
+            verdict instanceof EvalErrorValue
+        ) {
+            throw new LawDeclarationError(
+                opName,
+                `sub-space predicate "${spec.where}" (position ${position}) did not evaluate to a single verdict — the scope cannot certify the space`,
+            )
+        }
+        if (valueEquals(verdict, TRUE_VALUE)) kept.push(sample)
+    }
+    return kept
+}
+
+/** The `True` variant value (predicate verdicts compare against it). */
+const TRUE_VALUE: VariantVal = makeTrueValue()
+
+function makeTrueValue(): VariantVal {
+    // `True()` — the Bool variant, constructed without the evaluator (the
+    // verdict comparison is a structural equality against the known shape;
+    // the evaluator is for CONSTRUCTION of samples, and predicate verdicts
+    // come back as values from `eval_`, already resolved).
+    const boolType = new DataType("Bool", [new Variant("True", []), new Variant("False", [])])
+    return new VariantVal("True", boolType, new Map())
 }
 
 /**

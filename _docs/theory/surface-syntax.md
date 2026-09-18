@@ -54,6 +54,14 @@ The lexer is driven by `data` declarations: each pattern constructor is a lexica
 patterns compile to a DFA; type references (`<TypeName>`) make the pattern language context-free
 (handled by the lang-forma engine's lazy `DelayedExp` recursion).
 
+**Character universe:** `.` and character classes range over **code points 0–127 (ASCII)**. This is
+a one-line language fiat, not a per-type declaration: the universe fixes what `.` matches and what a
+negated class excludes, which in turn fixes the counting equations for pattern types (e.g. `.`
+counts exactly 128 single-character strings; `[^"]` counts 127). Unicode widening is a later,
+separate decision — widening changes every such count, so it must be made consciously, once, in one
+place. Patterns may still mention code points above 127 only via escape sequences if widening lands;
+today a non-ASCII literal inside a pattern is rejected loudly.
+
 **Whitespace and patterns:** patterns match contiguous characters. A pattern may consume whitespace
 if its structure includes it (via `.`, `[^...]`, classes containing space, or delimited regions like
 `"..."`). Whitespace that no pattern consumes is a token boundary. Undelimited patterns (like

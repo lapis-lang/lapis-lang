@@ -69,6 +69,42 @@
  */
 
 import { CodataType, DataType, IntersectionType, PatternDataType, type Type } from "./types.ts"
+import { setRegistryHook, typeUnionCounts } from "./pattern_lang.ts"
+
+/**
+ * The type-reference environment's lookup hook, set by the caller (the law
+ * checker wires it to the type registry). `coefficients` is pure w.r.t. this
+ * module — the hook is process-global because the counting needs the FULL
+ * registry (a `<T>` reference may name any declared pattern type, not just
+ * the carrier), and threading the registry through every `coefficients` call
+ * site would change their signatures for one consumer (the pattern arm).
+ *
+ * The DEFAULT hook reads the pattern arm self-consistently: a type reference
+ * `<T>` with no installed registry is a typed rejection — but a pattern
+ * FIELD inside a data carrier needs its own type's counting, which requires
+ * NO registry (the field's pattern ASTs are on the field type itself). The
+ * hook only matters for type REFERENCES inside patterns (`<T>`); a pattern
+ * language without references works without any hook.
+ */
+let patternLookup: (name: string) => PatternDataType | undefined = () => {
+    throw new TypeError(
+        "a pattern language type reference <T> requires the registry hook — " +
+            "install it via setPatternLookup (the law checker wires the type registry)",
+    )
+}
+
+/**
+ * Install the type-reference lookup hook (called once at law-checking setup).
+ * The prior hook is returned for restoration in tests.
+ */
+export function setPatternLookup(
+    lookup: (name: string) => PatternDataType | undefined,
+): (name: string) => PatternDataType | undefined {
+    const prior = patternLookup
+    patternLookup = lookup
+    setRegistryHook(lookup)
+    return prior
+}
 
 // ── Context specifications ───────────────────────────────────────────────────
 
@@ -277,13 +313,14 @@ function fieldGF(
     const fieldType = field.type
     if (fieldType instanceof DataType) return current.currentFor(fieldType, k)
     if (fieldType instanceof PatternDataType) {
-        // The declared fallback: the singleton name-token is the size-1
-        // prefix — c₁ = 1 when the pattern set is nonempty; an empty
-        // pattern set has NO inhabitants (zeros — the variant dies, matching
-        // `patternSamples`' empty decline).
-        const unit = zeroUpTo(k)
-        if (fieldType.patterns.length > 0 && k >= 1) unit[1] = 1
-        return unit
+        // The language-equation reading: the field's GF is the
+        // pattern type's own counting — the UNION of its variants'
+        // languages (variants may overlap — `a` and `a?` both hold "a" —
+        // so the counts read off the merged string set, not the per-
+        // variant sum). With tokens sized by TEXT LENGTH (`valueSize`'s
+        // token arm), this matches the enumeration's per-length classes
+        // exactly.
+        return typeUnionCounts(fieldType, k)
     }
     return zeroUpTo(k)
 }
@@ -429,13 +466,14 @@ export function coefficients(
         )
     }
     if (type instanceof PatternDataType) {
-        // The declared fallback: the singleton name-token per pattern type.
-        // The language-equation reading (concatenation multiplies,
-        // alternation sums, Kleene star inverts (1−P)) rides on the
-        // declared-encodings machinery — a follow-up.
-        const out = zeroUpTo(k)
-        if (type.patterns.length > 0 && k >= 1) out[1] = 1
-        return out
+        // The language-equation reading: a pattern type's language
+        // is the UNION of its variants' languages — variants may overlap
+        // (`a` and `a?` both hold "a"), so the counts read off the merged
+        // STRING SET (the same dedup the certified enumerator runs), not
+        // the per-variant sum. Cycles through type references reject
+        // loudly inside the environment (an ill-founded equation has no
+        // reading).
+        return typeUnionCounts(type, k)
     }
     if (type instanceof CodataType) {
         throw new TypeError(
