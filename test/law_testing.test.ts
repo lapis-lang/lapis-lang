@@ -2,10 +2,10 @@
  * Law testing (∂T shrinking) tests — the property-based harness's value
  * layer: context paths, plugging, fillers, and the shrink quality contract.
  *
- * See _docs/theory/law-testing.md (the harness spec), _docs/theory/
- * type-algebra.md §4 (one-hole contexts), and issue #64's acceptance item:
- * "structural shrinking wired into the property harness — minimal-
- * counterexample quality improves measurably on the existing anchor laws".
+ * See _docs/theory/law-testing.md (the harness spec) and _docs/theory/
+ * type-algebra.md §4 (one-hole contexts). The quality contract: structural
+ * shrinking wired into the property harness — minimal-counterexample quality
+ * improves measurably on the existing anchor laws.
  */
 
 import { assert, assertEquals } from "@std/assert"

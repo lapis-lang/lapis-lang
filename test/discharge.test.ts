@@ -18,6 +18,7 @@
 import {
     declareCheckedLaw,
     finiteInhabitants,
+    inhabitantsUpToSize,
     LawDeclarationError,
     LawError,
     LawRegistry,
@@ -36,6 +37,8 @@ import {
 } from "../src/index.ts"
 
 import { DataType, Field, FunType, PatternDataType, TypeEnv, Variant } from "../src/core/types.ts"
+
+import { coefficients } from "../src/core/type_algebra.ts"
 
 import { createBoolType, createNatType } from "./fixtures.ts"
 
@@ -339,15 +342,16 @@ Deno.test("discharge: Nat add stays residual — associative provenance is asser
 // ── The residual sampler (typed field samples) ───────────────────────────────
 
 Deno.test("screen: typed field samples — residual folds over field variants evaluate as real values", () => {
-    // The residual SAMPLER (samplesFor/construct) generates typed
-    // non-recursive field samples: variant fields carry real values of their
-    // declared type, so a fold with an arm per variant — including
+    // The certified ENUMERATOR (inhabitantsUpToSize/spaceUpToSize) builds
+    // typed non-recursive field samples: variant fields carry real values of
+    // their declared type, so a fold with an arm per variant — including
     // field-carrying arms — evaluates honestly through the screen. This is
     // the RESIDUAL path (an NS carrier is recursive ⇒ unbounded ⇒ residual):
-    // distinct from exhaustion's enumerator above, and it is why a fold like
-    // nsOr's `One(b) -> y` arm can evaluate at all. (Exhaustion enumerates;
-    // the screen samples — both must produce typed field values, and this
-    // test pins the sampler's.)
+    // distinct from exhaustion's full-space sweep above, and it is why a
+    // fold like nsOr's `One(b) -> y` arm can evaluate at all. (Exhaustion
+    // enumerates the whole space; the screen sweeps the certified prefix —
+    // both must produce typed field values, and this test pins the
+    // enumerator's.)
     const h = boolHarness()
     const ns = new DataType("NS", [])
     ns.variants.push(
@@ -399,10 +403,12 @@ Deno.test("screen: typed field samples — residual folds over field variants ev
         evalOfHarness(h.registry, h.opRegistry),
     )
     assertEquals(
-        sweep,
-        { outcome: "passed", checked: instances },
+        sweep.outcome === "passed" ? sweep.checked : -1,
+        instances,
         "the all-in-one entry reports the same coverage as the raw screen",
     )
+    assert(sweep.outcome === "passed", "the raw screen passed")
+    assert(sweep.coverage.positions.length === 2)
 })
 
 // ── Coverage honesty (the discharge contract) ────────────────────────────────
@@ -433,10 +439,15 @@ Deno.test("discharge: an instance that fails to evaluate rejects the declaration
     assertEquals(h.laws.lookup("idLike").length, 0)
 })
 
-Deno.test("discharge: the residual screen still skips non-evaluating instances", () => {
-    // The two regimes disagree on holes BY DESIGN: the screen's skip keeps
-    // the honest evidence claim (checked = instances actually evaluated);
-    // exhaustion's reject keeps the discharged tag meaning full coverage.
+Deno.test("discharge: the certified screen rejects a dead evaluator — construction is the contract", () => {
+    // The certified contract: the screen's samples are a CERTIFIED prefix —
+    // a variant construction is part of the enumeration, so a dead evaluator
+    // is a HOLE in the certificate, not a skippable artifact. A silent drop
+    // for this shape (sample construction could fail) would masquerade as
+    // full coverage; the loud rejection keeps the certificate honest. The
+    // passed-with-0-coverage shape (a running sweep whose every INSTANCE is
+    // a hole) still skips — the heterogeneous-commutative case in
+    // laws.test.ts pins it.
     const h = boolHarness()
     declareBoolOp(
         h,
@@ -444,20 +455,16 @@ Deno.test("discharge: the residual screen still skips non-evaluating instances",
         "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
     )
     const blindEval = (_source: string, _rho: ValueEnv): readonly VariantVal[] => []
-    // Raw screenLaw (caller-beware) with a dead evaluator: the sampler
-    // itself cannot construct any sample (variant construction is an
-    // evaluation), so the screen has NO sample vocabulary — declined. The
-    // passed-with-0-coverage shape (a running sweep whose every instance is
-    // a hole) needs a live sampler and a blind instance evaluator, which is
-    // the heterogeneous-commutative case in laws.test.ts.
-    assertEquals(
-        screenLaw(
-            { kind: "associative", target: "andOp" },
-            h.opRegistry.lookup("andOp")!,
-            h.opRegistry,
-            blindEval,
-        ),
-        { outcome: "declined" },
+    assertThrows(
+        () =>
+            screenLaw(
+                { kind: "associative", target: "andOp" },
+                h.opRegistry.lookup("andOp")!,
+                h.opRegistry,
+                blindEval,
+            ),
+        LawDeclarationError,
+        "certification could not construct",
     )
 })
 
@@ -483,14 +490,16 @@ Deno.test("finiteInhabitants: an 18-Bool record (2¹⁸) exceeds the ceiling; 17
     assertEquals(finiteInhabitants(narrow), 2 ** 17)
 })
 
-Deno.test("discharge: an over-ceiling type routes residual — the saturated space is screened, not exhausted", () => {
+Deno.test("discharge: an over-ceiling type routes residual — certification DECLINES past the prefix budget", () => {
     // The ROUTING side of the ceiling: an involutory claim on an identity-like
     // fold over the 18-Bool record (2¹⁸ inhabitants > 2¹⁷) classifies as
     // finite-but-unexhaustible, so declareCheckedLaw routes it to the residual
-    // screen — the screen's depth-capped sample, `asserted`, never
-    // `discharged`. (The router rejects SATURATED classifier counts outright:
-    // the reported 2¹⁷+1 is a floor on the true count, so trusting it in the
-    // sweep formula would route a 2¹⁸-space to exhaustion.)
+    // screen. Under the certified screen, the record's ONLY size class
+    // (size 19, 2¹⁸ inhabitants) is past the prefix budget — the certification
+    // declines loudly instead of sweeping a masquerading depth-capped sample.
+    // (Under the old sampler this installed `asserted` on ONE instance that
+    // was neither a size prefix nor complete within a class.) The exhausting
+    // route for such a carrier is a heap-headroom story, not a screen one.
     const h = boolHarness()
     const wide = new DataType("Wide", [])
     wide.variants.push(
@@ -502,16 +511,19 @@ Deno.test("discharge: an over-ceiling type routes residual — the saturated spa
         new OpSig("wideId", [wide], wide, `\\x:Wide. fold [Wide] x { MkWide(${bindings}) -> x }`),
         h.tc.opWellFormedness,
     )
-    const { law, instances, regime } = declareCheckedLaw(
-        { kind: "involutory", target: "wideId" },
-        h.opRegistry,
-        h.laws,
-        evalOfHarness(h.registry, h.opRegistry),
-        checkerFor(h.registry, h.opRegistry),
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                { kind: "involutory", target: "wideId" },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "certification declined",
     )
-    assertEquals(regime, "residual")
-    assertEquals(law.provenance, "asserted")
-    assertEquals(instances, 1, "the screen's depth-capped sample, not the full 2¹⁸ space")
+    assertEquals(h.laws.lookup("wideId").length, 0, "nothing installed")
 })
 
 // ── Completeness of the enumeration (finding: silent construction holes) ─────
@@ -789,7 +801,7 @@ Deno.test("discharge: a residual law whose screen declines is REJECTED — zero 
                 checkerFor(h.registry, h.opRegistry),
             ),
         LawDeclarationError,
-        "the screen declined",
+        "certification declined",
     )
     assertEquals(h.laws.lookup("wrapOp").length, 0, "a zero-coverage law never enters E")
 })
@@ -931,7 +943,7 @@ Deno.test("discharge: a pattern type with NO patterns has no vocabulary — the 
                 checkerFor(h.registry, h.opRegistry),
             ),
         LawDeclarationError,
-        "the screen declined",
+        "certification declined",
     )
     assertEquals(h.laws.lookup("hollowTok").length, 0)
 })
@@ -1111,3 +1123,429 @@ Deno.test("discharge: a passed screen with 0 checked instances is REJECTED — a
     )
     assertEquals(h.laws.lookup("ghostNat").length, 0)
 })
+
+// ── Coefficient-certified coverage ──────────────────────────────────────────
+
+Deno.test("certified screen: a Nat op's coverage states the certified prefix — exactly 3, verified", () => {
+    // The certificate: the residual screen's sweep space for Nat is the
+    // COMPLETE size-≤ 3 class set (Zero, Succ(Zero), Succ(Succ(Zero))) —
+    // counted independently by the type equation's coefficients, and the
+    // enumerated count asserts equal. Provenance is UNCHANGED (D7): still
+    // `asserted` — certification upgrades the evidence claim, not authority.
+    const h = boolHarness()
+    const nat = createNatType()
+    h.registry.register(nat)
+    h.opRegistry.declare(
+        new OpSig(
+            "add",
+            [nat, nat],
+            nat,
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> y, Succ(p) -> Succ(p) }",
+        ),
+        h.tc.opWellFormedness,
+    )
+    const { law, regime, coverage } = declareCheckedLaw(
+        { kind: "commutative", target: "add" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "residual")
+    assertEquals(law.provenance, "asserted")
+    assert(coverage, "the residual regime reports coverage")
+    assertEquals(coverage!.positions.length, 2)
+    for (const position of coverage!.positions) {
+        assertEquals(position.typeName, "Nat")
+        assertEquals(position.k, 3)
+        assertEquals(position.expected, 3)
+        assertEquals(position.actual, 3)
+    }
+    assert(coverage!.claim.includes("exactly"), "the claim renders")
+})
+
+Deno.test("certified screen: per-position coverage via the raw screen over (Bool, Nat)", () => {
+    // Each position certifies ITS OWN type's prefix. Schema validation
+    // requires homogeneous operand carriers (the all-in-one entry rejects
+    // a heterogeneous signature — the swap axioms would be ill-typed), so
+    // the per-position certification is exercised through the RAW screen
+    // (its contract is caller-beware): position 0 = Bool (k=1, 2
+    // inhabitants), position 1 = Nat (k=3, 3 inhabitants). The commutative
+    // sweep over the certified prefixes is 2 × 3 = 6 assignments.
+    const h = boolHarness()
+    const nat = createNatType()
+    h.registry.register(nat)
+    h.opRegistry.declare(
+        new OpSig(
+            "truncBoolNat",
+            [h.bool, nat],
+            h.bool,
+            "\\a:Bool. \\x:Nat. fold [Bool] a { True() -> True(), False() -> False() }",
+        ),
+        h.tc.opWellFormedness,
+    )
+    const sweep = screenLaw(
+        { kind: "commutative", target: "truncBoolNat" },
+        h.opRegistry.lookup("truncBoolNat")!,
+        h.opRegistry,
+        evalOfHarness(h.registry, h.opRegistry),
+    )
+    assert(sweep.outcome === "passed", "the raw screen passed")
+    assertEquals(sweep.coverage.positions.length, 2)
+    assertEquals(sweep.coverage.positions[0]!.typeName, "Bool")
+    // k extends through the EMPTY classes past the populated one (Bool has
+    // no size-2/3 inhabitants; the certificate's COUNT is the theorem).
+    assertEquals(sweep.coverage.positions[0]!.k, 3)
+    assertEquals(sweep.coverage.positions[0]!.expected, 2)
+    assertEquals(sweep.coverage.positions[1]!.typeName, "Nat")
+    assertEquals(sweep.coverage.positions[1]!.k, 3)
+    assertEquals(sweep.coverage.positions[1]!.expected, 3)
+    assert(sweep.coverage.claim.includes("exactly 5"), "the claim sums both positions")
+})
+
+Deno.test("certified screen: a pattern carrier certifies its declared fallback (k=1, exactly 1)", () => {
+    // The declared fallback: a pattern type's certified prefix is the
+    // singleton name-token — the same vocabulary `patternSamples` produces.
+    // The language-equation reading rides on the declared-encodings
+    // machinery (a follow-up).
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    h.opRegistry.declare(
+        new OpSig("tokOr", [natPat, natPat], natPat, "\\x:NatPat. \\y:NatPat. y"),
+        { checkDefinition: () => undefined },
+    )
+    const { coverage } = declareCheckedLaw(
+        { kind: "commutative", target: "tokOr" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(coverage!.positions.length, 2)
+    // k extends through the EMPTY classes (c₂ = c₃ = 0 — the declared
+    // fallback's prefix is exactly {the token}); the COUNT is the theorem.
+    assertEquals(coverage!.positions[0]!.k, 3)
+    assertEquals(coverage!.positions[0]!.expected, 1)
+    assertEquals(coverage!.positions[0]!.actual, 1)
+})
+
+Deno.test("enumerator contract: a pattern type at k = 0 yields NO samples (c₀ = 0)", () => {
+    // The size-≤ 0 prefix is EMPTY for every carrier — the token is a
+    // SIZE-1 inhabitant, so it enters the prefix only when k ≥ 1. Returning
+    // it at k = 0 would disagree with `coefficients(pattern, 0)` (= [0]) and
+    // make the exported enumerator miscount the very prefix it certifies.
+    const h = boolHarness()
+    const natPat = new PatternDataType("NatPat", ["[0-9]+"])
+    h.registry.register(natPat)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(inhabitantsUpToSize(natPat, 0, eval_), [])
+    assertEquals(inhabitantsUpToSize(natPat, 1, eval_).length, 1, "the token at k = 1")
+    // An empty pattern set has no inhabitants at any bound.
+    const hollow = new PatternDataType("HollowPat", [])
+    h.registry.register(hollow)
+    assertEquals(inhabitantsUpToSize(hollow, 3, eval_), [])
+})
+
+Deno.test("enumerator contract: a data type at k = 0 yields NO samples (c₀ = 0)", () => {
+    // The data branch's walk runs sizes 1..k — at k = 0 no class exists, so
+    // the prefix is empty, matching `coefficients(type, 0)` (= [0]). Both
+    // branches agree on the empty size-≤ 0 prefix.
+    const h = boolHarness()
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(inhabitantsUpToSize(h.bool, 0, eval_), [])
+    assertEquals(inhabitantsUpToSize(createNatType(), 0, eval_), [])
+    // And the populated classes at k ≥ 1 are unchanged.
+    assertEquals(inhabitantsUpToSize(h.bool, 1, eval_).length, 2)
+})
+
+Deno.test("enumerator contract: a negative size bound is a typed rejection", () => {
+    // Consistent bound validation with the coefficients reading (which
+    // throws RangeError for k < 0): the enumerator rejects it too — a
+    // negative bound is a caller bug, not a silent empty result.
+    const h = boolHarness()
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertThrows(() => inhabitantsUpToSize(h.bool, -1, eval_), RangeError)
+    assertThrows(
+        () => inhabitantsUpToSize(new PatternDataType("NatPat", ["[0-9]+"]), -1, eval_),
+        RangeError,
+    )
+})
+
+Deno.test("enumerator contract: a self-typed non-recursive data field re-enters without losing the prefix", () => {
+    // The re-entrancy shape: a field names its own carrier WITHOUT the
+    // recursive flag. `coefficients` reads it as a fixpoint self-reference
+    // (Nat-like); the enumerator's walk must handle the re-entrant request
+    // mid-build by serving the PARTIAL prefix — clearing the memo would
+    // drop the already-enumerated classes and the certificate would
+    // miscount the loss as an enumeration hole. Self(A) = A-typed field:
+    // the GF is T = x + x·T (self-wrap like Nat), so cₙ = 1 per size.
+    const h = boolHarness()
+    const self = new DataType("Self", [])
+    self.variants.push(
+        new Variant("Base", []),
+        new Variant("Wrap", [new Field("inner", self, false)]),
+    )
+    h.registry.register(self)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    const space = inhabitantsUpToSize(self, 3, eval_)
+    // Size 1: base. Size 2: wrap(base). Size 3: wrap(wrap(base)).
+    assertEquals(space.length, 3)
+    // The certificate agrees — the enumerator's count IS the prefix count.
+    assertEquals(coefficients(self, 3), [0, 1, 1, 1])
+})
+
+Deno.test("enumerator contract: a mutually recursive A↔B pair enumerates both sides fully", () => {
+    // The second re-entrancy shape: A's field references B, B's references
+    // A — the walk re-enters mid-build for the other side. Each request
+    // must serve the partial prefix (or a completed one) WITHOUT resetting
+    // it: A = baseA() | mkA(B), B = mkB(A) alternates, so sizes advance one
+    // per round and every size ≥ 1 holds exactly one value on each side.
+    const h = boolHarness()
+    const a = new DataType("A", [])
+    const b = new DataType("B", [])
+    a.variants.push(new Variant("BaseA", []), new Variant("MkA", [new Field("b", b, false)]))
+    b.variants.push(new Variant("MkB", [new Field("a", a, false)]))
+    h.registry.register(a)
+    h.registry.register(b)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(inhabitantsUpToSize(a, 4, eval_).length, 2, "baseA, mkA(mkB(baseA))")
+    assertEquals(inhabitantsUpToSize(b, 4, eval_).length, 2, "mkB(baseA), mkB(mkA(mkB(baseA)))")
+    // A fresh walk (a second certification) still gets the full space —
+    // the per-certification memo starts clean and rebuilds correctly.
+    assertEquals(inhabitantsUpToSize(a, 4, eval_).length, 2)
+})
+
+Deno.test("certified screen: a wide-flat record certifies its raised min class (7-Bool record, 128) via the RESIDUAL path", () => {
+    // The floor raise (D3): a 7-Bool record's smallest nonempty class is
+    // size 8 (128 inhabitants) — beyond MAX_SCREEN_SIZE, but within the
+    // prefix budget, so the position certifies exactly that class instead
+    // of declining. ROUTING MATTERS: a unary involutory sweep over the
+    // record alone would project 128 ≤ 2²⁰ and route FINITE (exhaustion —
+    // no certification involved). To exercise the CERTIFIED residual path
+    // the claim needs an unbounded co-position whose exponent > 0: Nat is
+    // unbounded ⇒ residual, and commutative's schema sweeps BOTH positions
+    // (128 × 3 certified assignments — within SWEEP_BUDGET).
+    const h = boolHarness()
+    const nat = createNatType()
+    const rec = new DataType("Rec7", [])
+    rec.variants.push(
+        new Variant("MkRec", Array.from({ length: 7 }, (_, i) => new Field(`f${i}`, h.bool))),
+    )
+    h.registry.register(nat)
+    h.registry.register(rec)
+    const bindings = Array.from({ length: 7 }, (_, i) => `v${i}`).join(" ")
+    h.opRegistry.declare(
+        new OpSig(
+            "recId",
+            [rec, nat],
+            rec,
+            `\\x:Rec7. \\n:Nat. fold [Rec7] x { MkRec(${bindings}) -> x }`,
+        ),
+        h.tc.opWellFormedness,
+    )
+    // The all-in-one entry rejects a heterogeneous signature (schema
+    // validation: commutative's swap axioms need one sample space through
+    // both slots) — the raw screen (caller-beware, its contract) exercises
+    // the per-position certification for the mixed signature. The
+    // certification itself is the same machinery the residual route runs.
+    const sweep = screenLaw(
+        { kind: "commutative", target: "recId" },
+        h.opRegistry.lookup("recId")!,
+        h.opRegistry,
+        evalOfHarness(h.registry, h.opRegistry),
+    )
+    assert(sweep.outcome === "passed", "the raw screen passed")
+    // The CERTIFICATE is the thing under test here: the floor raise for the
+    // record position. The cross-type assignments (commutative swaps a Nat
+    // into the Rec7 slot) are ill-typed by construction — the evaluator
+    // returns error sentinels, `checkInstance` skips them, and `checked` is
+    // 0. That is the homogeneous-carrier rule manifesting at the sweep
+    // level, and it is exactly why the all-in-one entry rejects
+    // heterogeneous signatures: a raw call's schema type-correctness is the
+    // CALLER's job. The certificate still covers the sweep SPACE (both
+    // positions' prefixes were enumerated and coefficient-asserted before
+    // any instance ran).
+    const coverage = sweep.coverage
+    const recordPosition = coverage.positions.find((p) => p.typeName === "Rec7")
+    assert(recordPosition, "the record position was certified")
+    assertEquals(recordPosition!.k, 8, "the raised floor: the size-8 class")
+    assertEquals(recordPosition!.expected, 128)
+    assertEquals(recordPosition!.actual, 128)
+    const natPosition = coverage.positions.find((p) => p.typeName === "Nat")
+    assert(natPosition, "the Nat position was certified too (k = 3, 3 samples)")
+    assertEquals(natPosition!.expected, 3)
+})
+
+Deno.test("certified screen: an 18-Bool record's min class exceeds the prefix budget — loud decline", () => {
+    // The budget side of the floor raise: the 18-Bool record's only size
+    // class (size 19) holds 2¹⁸ — past PREFIX_BUDGET, so the derived probe
+    // declines loudly (under the old fixed RAISE_LIMIT = 7 this path was
+    // unreachable: the probe stopped at 7 and misreported the carrier as
+    // uninhabited).
+    const h = boolHarness()
+    const wide = new DataType("Wide", [])
+    wide.variants.push(
+        new Variant("MkWide", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
+    )
+    h.registry.register(wide)
+    const bindings = Array.from({ length: 18 }, (_, i) => `v${i}`).join(" ")
+    h.opRegistry.declare(
+        new OpSig(
+            "wideId",
+            [wide, createNatType()],
+            wide,
+            `\\x:Wide. \\n:Nat. fold [Wide] x { MkWide(${bindings}) -> x }`,
+        ),
+        h.tc.opWellFormedness,
+    )
+    h.registry.register(createNatType())
+    assertThrows(
+        () =>
+            screenLaw(
+                { kind: "commutative", target: "wideId" },
+                h.opRegistry.lookup("wideId")!,
+                h.opRegistry,
+                evalOfHarness(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "past the prefix budget",
+    )
+})
+
+Deno.test("certified screen: an enumeration hole is a loud error — the certificate catches a broken registry", () => {
+    // The ACCEPTANCE test: a registry/evaluator inconsistency that makes one
+    // variant unconstructible ⇒ the enumerated count (N−1) mismatches the
+    // coefficient count (N) ⇒ loud LawDeclarationError. Concretely: the
+    // carrier's `Succ` variant is REGISTERED (so the coefficients count it)
+    // but the evaluator's registry lacks it, so the sweep cannot construct
+    // size-2/3 values. Under the old screen this was a silent drop; the
+    // certificate makes it a hole that rejects the declaration.
+    const h = boolHarness()
+    // The type knows the recursive variant; a SECOND evaluator registry
+    // without it breaks construction of size ≥ 2 samples.
+    const nat = new DataType("Nat", [])
+    nat.variants.push(
+        new Variant("Zero", []),
+        new Variant("Succ", [new Field("pred", nat, true)]),
+    )
+    h.registry.register(nat)
+    // A restricted evaluator: Succ-containing sources return [] (the hole).
+    const realEval = evalOfHarness(h.registry, h.opRegistry)
+    const holeyEval: typeof realEval = (source, rho) =>
+        source.includes("Succ") ? [] : realEval(source, rho)
+    h.opRegistry.declare(
+        new OpSig("natProj", [nat, nat], nat, "\\x:Nat. \\y:Nat. y"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            screenLaw(
+                { kind: "commutative", target: "natProj" },
+                h.opRegistry.lookup("natProj")!,
+                h.opRegistry,
+                holeyEval,
+            ),
+        LawDeclarationError,
+        "certification",
+    )
+})
+
+Deno.test("certified screen: a pattern type with NO patterns still declines (no inhabitants)", () => {
+    // The empty pattern set has NO inhabitants (the coefficient fallback's
+    // zeros) — the certification declines, zero coverage, nothing installed.
+    const h = boolHarness()
+    const hollow = new PatternDataType("HollowPat", [])
+    h.registry.register(hollow)
+    h.opRegistry.declare(
+        new OpSig("hollowTok", [hollow, hollow], hollow, "\\x:HollowPat. \\y:HollowPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            screenLaw(
+                { kind: "associative", target: "hollowTok" },
+                h.opRegistry.lookup("hollowTok")!,
+                h.opRegistry,
+                evalOfHarness(h.registry, h.opRegistry),
+            ),
+        LawDeclarationError,
+        "certification declined",
+    )
+})
+
+Deno.test("certified screen: exhaustion counts and provenance are UNCHANGED (the finite regime untouched)", () => {
+    // D7: certification upgrades the residual's evidence claim only — the
+    // finite regime's exhaustion (full sweep → discharged) is untouched, and
+    // its exact instance counts hold (8 = 2³ for associative over Bool).
+    const h = boolHarness()
+    declareBoolOp(
+        h,
+        "andOp",
+        "\\a:Bool. \\b:Bool. fold [Bool] a { True() -> b, False() -> False() }",
+    )
+    const { law, instances, regime, coverage } = declareCheckedLaw(
+        { kind: "associative", target: "andOp" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(regime, "finite")
+    assertEquals(instances, 8)
+    assertEquals(law.provenance, "discharged")
+    assertEquals(coverage, undefined, "no coverage report on the exhaustion path")
+})
+
+Deno.test("certified screen: a construction yielding a foreign carrier's variant is rejected", () => {
+    // The certificate validates WHAT the evaluator returned, not just THAT
+    // it returned a value: a registry collision (two carriers register the
+    // same variant name) makes the evaluator resolve the constructor form
+    // to the WRONG carrier's variant — a foreign value in the certified
+    // prefix would pass a count-only check. The loud rejection keeps the
+    // prefix honest (the carrier, variant, and field shape must all match).
+    const h = boolHarness()
+    // Two distinct carriers, both registering a variant named `Tag`:
+    const victim = new DataType("Victim", [])
+    victim.variants.push(
+        new Variant("Tag", [new Field("b", h.bool)]),
+    )
+    const impostor = new DataType("Impostor", [])
+    impostor_variants_helper(impostor)
+    h.registry.register(victim)
+    h.registry.register(impostor)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    // Which carrier wins the collision depends on the evaluator's registry
+    // resolution; either way, ONE of the two carriers' certified sweeps
+    // must reject loudly rather than sweep a foreign value.
+    const impostorError = (() => {
+        try {
+            inhabitantsUpToSize(victim, 2, eval_)
+            return undefined
+        } catch (e) {
+            return e as LawDeclarationError
+        }
+    })()
+    const victimError = (() => {
+        try {
+            inhabitantsUpToSize(impostor, 2, eval_)
+            return undefined
+        } catch (e) {
+            return e as LawDeclarationError
+        }
+    })()
+    // At least one side must reject (the collision resolves to one
+    // carrier's variant for both constructor forms); neither side may
+    // silently sweep a foreign value.
+    assert(
+        impostorError !== undefined || victimError !== undefined,
+        "a registry collision must surface as a loud rejection, not a foreign prefix",
+    )
+})
+
+/** Declare a second carrier with the same variant name as `victim` (the collision probe). */
+function impostor_variants_helper(impostor: DataType): void {
+    impostor.variants.push(
+        new Variant("Tag", [new Field("n", new DataType("Unused", []))]),
+    )
+}

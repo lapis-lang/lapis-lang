@@ -457,11 +457,20 @@ screen never diverges — no timeouts.
 **Implementation status.** The `finite` regime is implemented (`law_checking.ts`): a classifier
 counts a μ-type's inhabitants (recursive/function-typed fields ⇒ unbounded), the regime routes
 `finite` claims to full enumeration (`declareCheckedLaw` → `discharged` provenance), and the
-residual keeps the bounded-depth screen (`asserted`). A schema's sweep must also stay within an
-instance budget — an arity-2 schema over an at-ceiling carrier sweeps n² assignments, so the regime
-is `finite` only when the actual sweep fits. A hole in an exhaustion sweep (an instance that does
-not evaluate) **rejects** the declaration: a `discharged` tag must mean full coverage, whereas the
+residual keeps the certified screen (`asserted`). A schema's sweep must also stay within an instance
+budget — an arity-2 schema over an at-ceiling carrier sweeps n² assignments, so the regime is
+`finite` only when the actual sweep fits. A hole in an exhaustion sweep (an instance that does not
+evaluate) **rejects** the declaration: a `discharged` tag must mean full coverage, whereas the
 residual screen honestly skips such instances because it claims evidence, not proof.
+
+**The residual screen is coefficient-certified** (`type-algebra.md` §3; `coefficients` in
+`type_algebra.ts`, `inhabitantsUpToSize` + the certification in `law_checking.ts`): each operand
+position's sweep space is its type's complete size-≤ kᵢ class set, enumerated independently of the
+generating function whose coefficients count it — the certificate asserts the two agree ("all
+inhabitants of size ≤ k per operand position — exactly N, verified"). A mismatch rejects the
+declaration loudly: an enumeration hole would otherwise masquerade as full-prefix coverage. The
+provenance ladder is unchanged — a certified screen still installs `asserted` (the prefix is partial
+for unbounded types; only exhaustion discharges).
 
 **machineFinite design note (not yet implemented).** The regime needs the encodings themselves
 declared in the type system — the exhaustion bound must be spec-able, not an implementation
