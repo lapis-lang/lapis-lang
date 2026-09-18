@@ -113,6 +113,58 @@ const brandChecked = (op: OpSig): CheckedOpSig => Object.assign(op, { checked: t
  */
 const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
 
+/**
+ * Scan concrete-syntax source for named operation applications — the shared
+ * op-reference scanner.
+ *
+ * A camelCase identifier immediately followed by `(` is an op application
+ * (`add(a, b)`); variable application requires whitespace (`f x`) and
+ * variant construction is PascalCase (`Zero()`), so the pattern is
+ * unambiguous in LC concrete syntax.
+ *
+ * The lookbehind guards against mid-identifier matches: without it,
+ * `Zero(` would match at the lowercase `e`, yielding the phantom
+ * reference `ero(`. The identifier must start at a non-identifier
+ * character boundary.
+ *
+ * **Scope of the scan (exactness claim):** this is a lexical scan over
+ * source text, not a token-level one — Ω's acyclicity check runs before
+ * parsing infrastructure exists (`Ω` is populated before grammars are
+ * constructed), so the check must be grammar-independent. It is exact for
+ * the current LC concrete syntax, which has no string literals and no
+ * comments; the language-level call forms (`BUILTIN_CALL_FORMS`, e.g.
+ * `match(pₖ)`) are excluded because they are language constructs, not
+ * operations — sound because `declare` reserves those names from
+ * operations (check 1b), so an occurrence of a reserved name in a
+ * definition is always the language form, never an op application. A
+ * future syntax revision adding string literals, comments, or other
+ * call-shaped constructs must extend the exclusion list (or replace the
+ * scan) — until then, every reported name is a genuine op reference.
+ *
+ * **Consumers:** `OpRegistry.declare`'s acyclicity check (the declaration-
+ * order stratification) and the derivation engine's axiom-base scan
+ * (`derivation.ts` — the ops a claim's handler bodies call, whose
+ * primitive/discharged laws the derivation may consume). One scanner, two
+ * consumers — the fragment gate and the acyclicity check cannot disagree
+ * about what an operation references.
+ *
+ * **Over-approximation risk:** none today. If an exclusion is missed or a
+ * new construct appears, the failure mode is a rejected declaration
+ * (`OpDeclarationError` naming the phantom reference) — loud, not silent.
+ */
+export function scanOpReferences(source: string): Set<string> {
+    const referenced = new Set<string>()
+    // camelCase identifier immediately followed by "(", starting at a
+    // non-identifier boundary
+    const opCall = /(?<![a-zA-Z0-9_])[a-z_][a-zA-Z0-9_]*\(/g
+    for (const match of source.matchAll(opCall)) {
+        const name = match[0].slice(0, -1) // strip the trailing "("
+        if (BUILTIN_CALL_FORMS.includes(name)) continue
+        referenced.add(name)
+    }
+    return referenced
+}
+
 // ── Operation signature ───────────────────────────────────────────────────────
 
 /**
@@ -260,7 +312,7 @@ export class OpRegistry {
         }
 
         // 3. Acyclicity: the definition may only reference earlier operations.
-        for (const referenced of this.referencedOps(op.definition)) {
+        for (const referenced of scanOpReferences(op.definition)) {
             if (referenced === op.name) {
                 throw new OpDeclarationError(
                     op.name,
@@ -299,49 +351,5 @@ export class OpRegistry {
     /** All declared operations, in declaration order (all checked). */
     all(): CheckedOpSig[] {
         return this.order.map((name) => this.ops.get(name)!)
-    }
-
-    /**
-     * Scan concrete-syntax source for named operation applications.
-     *
-     * A camelCase identifier immediately followed by `(` is an op application
-     * (`add(a, b)`); variable application requires whitespace (`f x`) and
-     * variant construction is PascalCase (`Zero()`), so the pattern is
-     * unambiguous in LC concrete syntax.
-     *
-     * The lookbehind guards against mid-identifier matches: without it,
-     * `Zero(` would match at the lowercase `e`, yielding the phantom
-     * reference `ero(`. The identifier must start at a non-identifier
-     * character boundary.
-     *
-     * **Scope of the scan (exactness claim):** this is a lexical scan over the
-     * definition source, not a token-level one — `declare` runs before parsing
-     * infrastructure exists (`Ω` is populated before grammars are
-     * constructed), so the check must be grammar-independent. It is exact for
-     * the current LC concrete syntax, which has no string literals and no
-     * comments; the language-level call forms (`BUILTIN_CALL_FORMS`, e.g.
-     * `match(pₖ)`) are excluded because they are language constructs, not
-     * operations — sound because `declare` reserves those names from
-     * operations (check 1b), so an occurrence of a reserved name in a
-     * definition is always the language form, never an op application. A
-     * future syntax revision adding string literals, comments, or other
-     * call-shaped constructs must extend the exclusion list (or replace the
-     * scan) — until then, every reported name is a genuine op reference.
-     *
-     * **Over-approximation risk:** none today. If an exclusion is missed or a
-     * new construct appears, the failure mode is a rejected declaration
-     * (`OpDeclarationError` naming the phantom reference) — loud, not silent.
-     */
-    private referencedOps(source: string): Set<string> {
-        const referenced = new Set<string>()
-        // camelCase identifier immediately followed by "(", starting at a
-        // non-identifier boundary
-        const opCall = /(?<![a-zA-Z0-9_])[a-z_][a-zA-Z0-9_]*\(/g
-        for (const match of source.matchAll(opCall)) {
-            const name = match[0].slice(0, -1) // strip the trailing "("
-            if (BUILTIN_CALL_FORMS.includes(name)) continue
-            referenced.add(name)
-        }
-        return referenced
     }
 }

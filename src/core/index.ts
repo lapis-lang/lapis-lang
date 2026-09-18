@@ -77,7 +77,27 @@ export {
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
 // Operation symbols (lc.md §2.2, §2.4 — Ω environment + named application)
-export { OpDeclarationError, OpRegistry, OpSig } from "./ops.ts"
+export { OpDeclarationError, OpRegistry, OpSig, scanOpReferences } from "./ops.ts"
+
+// Law derivation (type-algebra.md §6 — the derivable regime: the BMF
+// derivation engine; fold-induction from primitive/discharged laws →
+// discharged, with the certificate; not-derivable → residual screen)
+export {
+    DefinitionShapeError,
+    type DefShape,
+    derivableFragment,
+    type DerivationCertificate,
+    type DerivationInstance,
+    type DerivationResult,
+    deriveLaw,
+    MAX_STEPS_PER_CASE,
+    MAX_UNFOLDS_PER_CASE,
+    type NotDerivable,
+    readDefShape,
+    renderTerm,
+    SCHEMA_VARIABLE_NAMES,
+    type Term,
+} from "./derivation.ts"
 
 // Grammar — concrete syntax for LC (parse, don't validate)
 export { AbstractLC, LC_RESERVED_WORDS, type LCShape, TypeRegistry } from "./grammar.ts"
