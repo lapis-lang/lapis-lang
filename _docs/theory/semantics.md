@@ -585,6 +585,37 @@ made honest by visible flagging and runtime observation (`asserted`/`flagged` �
 withdrawal-style alerting). The cage does not make analysis decidable in general; it carves out the
 decidable fragment and names the residual.
 
+**Implementation status (v0.3.0).** The algebra computes: `src/core/cost.ts` implements the
+polynomial-form size/cost expressions (saturating, with the `opaque` marker for function-typed
+values), the max-form depth expressions, the recurrence solver (affine closure — the Hofmann/LFPL
+shape; chain summation — `add`/`mul`/`addZero`; the coarse `exponential (primitive-recursive)` class
+with the recurrence stated beyond), the memoized per-`OpRegistry` op summaries (declaration-order
+stratified), and the classifier/flag payload. Two vehicles share the algebra: `CostEngine` (a
+grammar subclass — the evaluator's architecture, for op definitions and direct terms via
+`analyzeTerm`/`analyzeOp`) and `CostPass extends SemanticPass` (the `DerivationTree` entry — the
+tree supplies structure and op identities; the engine's single parse supplies the semantics, since
+the checker's left-recursive productions duplicate derivations in the tree; a tree whose op names
+are absent from the pass's Ω surfaces them as honest residuals and falls back to the walk's own
+summary). The flag fires iff a size-sensitive position's producer is function-typed (the recursion
+result applied inside its own fold — the Ackermann shape); first-order feedback always certifies.
+
+The recurrence's closing condition is **deliberately narrow**: the recursion variable must appear
+BARE in the step body (exponent 1, no other factors in the monomial, total coefficient ≤ 1) and the
+closure sums over the scrutinee's FULL size expression. A symbolic factor riding alongside the
+recursion variable — `R(n) = 1 + |y|·R(n−1)`, geometric growth through a first-order op — is
+multiplicative feedback, not chain summation: it does not close, and the certificate states the
+recurrence with the coarse class rather than a false linear bound. Additive growth with a symbolic
+R-free remainder (`R(n) = |y|² + R(n−1)`) still closes polynomially. The algebra's symbolic
+quantities (`#foldRec`, `#scrutinee`) carry an untypable `#` prefix so user binders can never
+collide with them under substitution. A `let`-bound name denotes its definition's result size (both
+vehicles substitute the definition's summary at the binder), so literal `let` definitions give exact
+bounds. Codata latency is the stated residual: an observation's cost carries the free `|latency(o)|`
+atom (the classifier reads the result size, so the verdict stays certified) — productivity
+guarantees finite work, not small work. Verified: `add` linear, `mul` quadratic, exact bounds on
+literal scrutinees, no flag on `map` → fold, the Ackermann term flags with the payload, geometric
+growth stays unclosed (`pow2`-shaped, recurrence stated), codata latency. Runtime profiling remains
+the live-image mode's channel (the flag's payload names the observation to attach).
+
 ### 5.6 When to Use Hand-Written Walkers
 
 The grammar-subclass layering works for:

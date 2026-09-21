@@ -199,7 +199,13 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   certification (Hofmann LFPL). The residual — higher-order result-size feedback, the Ackermann
   shape — is undecidable in general (the correctly-stated Rice wall) and is **flagged** statically,
   then observed at runtime (profiling — the same certified/flagged split as law provenance). See
-  `_docs/theory/semantics.md` §5.5.
+  `_docs/theory/semantics.md` §5.5. **Implemented in `src/core/cost.ts`**: the polynomial-form
+  expression algebra, the recurrence solver (the recursion variable must appear BARE in the step — a
+  symbolic factor riding it is multiplicative feedback, which does NOT close: the certificate states
+  the recurrence coarsely rather than a false linear bound), the memoized op summaries, `CostEngine`
+  (the grammar-subclass vehicle) and `CostPass extends SemanticPass` (the derivation-tree entry),
+  with the flag's payload (the feedback edge, the missing bound, the suggested runtime profile) in
+  `test/cost.test.ts`.
 
 ### Quotient types (open — deferred)
 
