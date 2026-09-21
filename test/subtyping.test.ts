@@ -9,7 +9,7 @@ import { isSubtype, join, meet, typeEquals } from "../src/index.ts"
 import { Any, FunType, Nothing, type Type } from "../src/core/types.ts"
 import { createQueueType, createStackType } from "./fixtures.ts"
 
-import { assert, assertEquals } from "@std/assert"
+import { assert, assertEquals, assertThrows } from "@std/assert"
 
 // ── Types for testing ─────────────────────────────────────────────────────────
 
@@ -119,71 +119,52 @@ Deno.test("Nothing propagation: applying Nothing returns Nothing", () => {
     assert(isSubtype(Nothing, Any))
 })
 
-// ── Well-formedness guards ────────────────────────────────────────────────────
+// ── The sentinel contract (the grammar edge, not per-function guards) ────────
 //
 // `undefined` is the failure sentinel of a contracted action (@requires fails
-// gracefully), never a type. Without the guards, `isSubtype(undefined, Any)`
-// held via S-Top and a leaked `undefined` silently satisfied consumer
-// premises (e.g. T-Let's `def : σ ∧ σ <: τ` under an `Any` annotation).
+// gracefully), never a type. The invariant moved from per-function guards to
+// its enforcement point: the grammar edge — every production-path override
+// rejects a failed premise with `empty<Type>()` BEFORE a contracted action
+// runs, so `undefined` cannot reach the lattice as an operand. A leaked
+// sentinel is a caller bug: it crashes loudly (no `.equals` on undefined),
+// never silently satisfies a premise via S-Top.
 
-Deno.test("guards: isSubtype rejects undefined on either side", () => {
-    // Casts simulate a leaked sentinel flowing into the decision procedure.
-    assertEquals(
-        isSubtype(undefined as unknown as Type, Any),
-        false,
-        "an undefined subtype must fail the check, not satisfy S-Top",
+Deno.test("sentinel: a leaked undefined crashes loudly instead of satisfying S-Top", () => {
+    // Casts simulate a caller bug — a sentinel flowing into the decision
+    // procedure past the grammar edge. The OLD guards absorbed it (joining
+    // undefined yielded Any — the failure signal masquerading as a verdict);
+    // now the boundary throws a TypeError naming the non-type operand.
+    assertThrows(
+        () => isSubtype(undefined as unknown as Type, Any),
+        TypeError,
+        "sub operand is not a Type",
     )
-    assertEquals(
-        isSubtype(Any, undefined as unknown as Type),
-        false,
-        "an undefined supertype must fail the check",
-    )
-    assertEquals(
-        isSubtype(undefined as unknown as Type, undefined as unknown as Type),
-        false,
-        "two undefineds must fail the check",
-    )
-    // The sentinel is not even a subtype of itself.
-    assertEquals(
-        isSubtype(Nothing, undefined as unknown as Type),
-        false,
-        "S-Bot must not fire against a non-type",
+    assertThrows(
+        () => isSubtype(Any, undefined as unknown as Type),
+        TypeError,
+        "super operand is not a Type",
     )
 })
 
-Deno.test("guards: join/meet treat undefined as failure", () => {
-    // Join's failure signal is the lattice top; meet's is the bottom.
-    assertEquals(
-        join(undefined as unknown as Type, Any),
-        Any,
-        "joining undefined must yield the failure signal, not the other operand",
+Deno.test("sentinel: join/meet crash on a leaked undefined (no silent failure signal)", () => {
+    // The message names the CALLING API — a bad operand reaching join must
+    // not be misattributed to isSubtype (and vice versa).
+    assertThrows(
+        () => join(undefined as unknown as Type, Any),
+        TypeError,
+        "join: s operand is not a Type",
     )
-    assertEquals(
-        join(Any, undefined as unknown as Type),
-        Any,
-        "joining undefined must yield the failure signal, not the other operand",
-    )
-    assertEquals(
-        meet(undefined as unknown as Type, Nothing),
-        Nothing,
-        "meeting undefined must yield the failure signal, not the other operand",
-    )
-    assertEquals(
-        meet(Nothing, undefined as unknown as Type),
-        Nothing,
-        "meeting undefined must yield the failure signal, not the other operand",
+    assertThrows(
+        () => meet(undefined as unknown as Type, Nothing),
+        TypeError,
+        "meet: s operand is not a Type",
     )
 })
 
-Deno.test("guards: typeEquals rejects undefined", () => {
-    assertEquals(
-        typeEquals(undefined as unknown as Type, Any),
-        false,
-        "an undefined operand must fail structural equality",
-    )
-    assertEquals(
-        typeEquals(Any, undefined as unknown as Type),
-        false,
-        "an undefined operand must fail structural equality",
+Deno.test("sentinel: typeEquals crashes on a leaked undefined", () => {
+    assertThrows(
+        () => typeEquals(undefined as unknown as Type, Any),
+        TypeError,
+        "typeEquals: a operand is not a Type",
     )
 })

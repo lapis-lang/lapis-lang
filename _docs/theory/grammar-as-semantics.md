@@ -544,7 +544,62 @@ a pre-pass (the `@invariant` or a class-level initialization) before parsing ref
   patterns. With `_forward` and tree-consuming passes, even evaluation and tree-walking passes are
   subclasses — no separate recursive functions.
 
-## 10. References
+## 10. The Type Model's Representation Rules (PBI #74)
+
+The passes above consume the `Type` universe (`src/core/types.ts`); four representation rules keep
+the model faithful to the 9-production formal grammar (lc.md §2.1), so the passes never reconcile a
+shadow system against the real one.
+
+### 10.1 The μ-bound is a type (`FamilyType`)
+
+The recursive position of a μ-type is **spelled as a type**: a field whose type is the `Family`
+singleton (`FamilyType`) is an occurrence of the μ-bound — the same binder/occurrence mechanism as a
+∀-bound type variable in a polymorphic body. There is no parallel flag (`Field.isRecursive` is
+gone):
+
+- The type checker binds a `Family` field to the fold's σ (refined by `parseToFixpoint`); the
+  evaluator binds it to the _folded result_ (E-Fold's `vⱼ' = fold [T] vⱼ {…}`); the cost engine
+  binds it to the fold-recursion denotation — each pass resolves the binder against the carrier it
+  is analyzing, exactly as a bound variable resolves against its context.
+- A field typed as a concrete `DataType` instance that happens to name the same carrier is a
+  **genuine data field** (the re-entrancy case the enumerators handle) — the two are now distinct
+  positions in the data, not confusable flag/type pairs.
+
+### 10.2 One traversal (`mapType` / `foldType`)
+
+`types.ts` owns the structural machinery every pass shares:
+
+- **`mapType(t, cases)`** — bottom-up transformation: children mapped first, composites rebuilt when
+  a child moved, handlers defaultable (a substitution spells only the kinds it transforms; a
+  polymorphic-type handler returning the original node expresses shadowing).
+- **`foldType(t, cases)`** — required-case dispatch WITHOUT recursion: the classification-style fold
+  (a tag, a summary, a count). A new `Type` subclass forces every case table to answer for it — the
+  closed-universe assumption is checked by the compiler, not assumed.
+
+`substituteTypeVar` (T-TApp) is `mapType` with two cases; the cost engine's kind classification is
+`foldType` under a `try` (a pass-local marker type outside the core universe classifies `unknown`,
+never crashes — classification is a tag, not a membership test); the lattice's boundary validation
+(`subtyping.ts`'s `requireType`) is `foldType` under a `try` too (an undeclared kind there is a loud
+rejection). No pass hand-rolls an `instanceof` ladder over the universe anymore.
+
+### 10.3 Types are values (sealed two-phase construction)
+
+`DataType`/`CodataType` construct in two phases — create, `addVariant`/`addObserver` (self-reference
+requires the construction phase; a post-`seal()` call throws), then `seal()`: the array freezes at
+runtime and the property is `readonly` in the type, so a post-construction mutation attempt is a
+COMPILE error, not a runtime failure. The factories (`test/fixtures.ts`, the registry constructors)
+seal at the end of construction; consumers see immutable types.
+
+### 10.4 The lattice boundary (`requireType`)
+
+`subtyping.ts` validates its operands ONCE at module entry (`requireType`, via `foldType`) instead
+of carrying silent `undefined` guards per function. The grammar edge enforces the deeper invariant —
+a failed premise is `empty<Type>()`, never a leaked sentinel — so `undefined` cannot reach the
+lattice through the passes; a bypassed edge throws a `TypeError` naming the non-type operand. The
+old guards' failure mode (`isSubtype(undefined, Any)` holding via S-Top) is closed: a leaked
+sentinel can no longer silently satisfy a premise.
+
+## 11. References
 
 - **lang-forma** — [`jsr:@lapis-lang/lang-forma`](https://jsr.io/@lapis-lang/lang-forma): `Grammar`
   base class, `@rule` decorator, `bind`/`chain` combinators, `@requires` / `@ensures` / `@invariant`

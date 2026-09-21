@@ -51,8 +51,10 @@ import {
     AnyType,
     CodataType,
     DataType,
+    FamilyType,
     FunType,
     IntersectionType,
+    mapType,
     Nothing,
     NothingType,
     PatternDataType,
@@ -103,37 +105,33 @@ class TypeCheckCtx {
 
 /**
  * Substitute `replacement` for type variable `varName` in `type`.
- * Used by T-TApp to compute τ[α := T₂].
+ * Used by T-TApp to compute τ[α := T₂]. The binder scopes over its BODY
+ * only: a polymorphic type binding `varName` stops the substitution inside
+ * the body (α is shadowed) — but the BOUND is parsed under the outer
+ * type-variable context (the binder does not scope over its own bound), so
+ * an occurrence of the variable there must still be substituted
+ * (`∀A <: A. A` under `A := Any` becomes `∀A <: Any. A`).
+ *
+ * Routed through `mapType` — the type universe's one structural traversal;
+ * only the kinds that can hold the variable are spelled. The polymorphic
+ * handler composes the shadowing rule explicitly (bound mapped, body
+ * original — identity-reused when nothing moved); the non-shadowing case
+ * returns `undefined`, delegating to mapType's structural default: the
+ * original binder is reused when no child moved (no allocation), rebuilt
+ * only when a child moved.
  */
 function substituteTypeVar(type: Type, varName: string, replacement: Type): Type {
-    if (type instanceof TypeVar) {
-        return type.name === varName ? replacement : type
-    }
-    if (type instanceof FunType) {
-        return new FunType(
-            substituteTypeVar(type.param, varName, replacement),
-            substituteTypeVar(type.result, varName, replacement),
-        )
-    }
-    if (type instanceof PolymorphicType) {
-        // Shadowing: if the polymorphic type binds the same variable name,
-        // don't substitute inside its body (α is shadowed).
-        if (type.typeVarName === varName) return type
-        return new PolymorphicType(
-            type.typeVarName,
-            substituteTypeVar(type.bound, varName, replacement),
-            substituteTypeVar(type.body, varName, replacement),
-        )
-    }
-    if (type instanceof IntersectionType) {
-        return new IntersectionType(
-            substituteTypeVar(type.left, varName, replacement),
-            substituteTypeVar(type.right, varName, replacement),
-        )
-    }
-    // DataType, CodataType, PatternDataType, TokenType, AnyType, NothingType:
-    // no type variables inside (they are ground types)
-    return type
+    return mapType(type, {
+        typeVar: (tv) => (tv.name === varName ? replacement : tv),
+        polymorphic: (pt, bound) => {
+            if (pt.typeVarName !== varName) return undefined
+            // Shadowed body — but the bound still carries the substitution
+            // (it is under the OUTER context): rebuild when the mapped bound
+            // moved, reuse the original binder when it did not.
+            if (bound === pt.bound) return pt
+            return new PolymorphicType(pt.typeVarName, bound, pt.body)
+        },
+    })
 }
 
 /**
@@ -156,7 +154,8 @@ function isWellFormedType(t: Type | undefined): boolean {
             t instanceof TokenType ||
             t instanceof IntersectionType ||
             t instanceof PatternDataType ||
-            t instanceof PolymorphicType)
+            t instanceof PolymorphicType ||
+            t instanceof FamilyType)
 }
 
 // ── The type-checking grammar ─────────────────────────────────────────────────
@@ -214,9 +213,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     }
 
     // NOTE: foldFieldType is NOT overridden here. The foldProd override below
-    // uses spanFoldHandler (which binds fields to field.type directly) and
-    // parseToFixpoint for circular attribute flow. The base foldProd (which
-    // calls foldFieldType) is never reached because foldProd is overridden.
+    // uses spanFoldHandler (which binds Family fields to the carrier and
+    // other fields to field.type) and parseToFixpoint for circular attribute
+    // flow. The base foldProd (which calls foldFieldType) is never reached
+    // because foldProd is overridden.
 
     // ── T-Abs: Γ, x:σ ⊢ t : τ  ⟹  Γ ⊢ λx:σ.t : σ → τ ─────────────────────────
 
@@ -374,7 +374,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         if (args.length !== variant.fields.length) return Any
 
         // Check each arg type is a subtype of the expected field type.
-        // For recursive fields, the expected type is the DataType itself.
+        // A Family-typed field (the μ-bound) expects the DataType itself.
         // (A Nothing arg satisfies the premise via S-Bot; it is tracked and
         // propagated after the loop so a genuine premise violation on a
         // later arg is not silently subsumed by Nothing.)
@@ -384,7 +384,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const argType = args[i]
             if (argType === undefined) return Any
             if (argType instanceof NothingType) hasNothingArg = true
-            const expected = field.isRecursive ? dataType : field.type
+            const expected = field.type instanceof FamilyType ? dataType : field.type
             if (!isSubtype(argType, expected)) return Any
         }
 
@@ -445,7 +445,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const field = variant.fields[i]!
             const argType = args[i]
             if (argType === undefined) return false
-            const expected = field.isRecursive ? dataType : field.type
+            const expected = field.type instanceof FamilyType ? dataType : field.type
             if (!isSubtype(argType, expected)) return false
         }
         return true
@@ -659,14 +659,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                 >()
             }
             const bindingList = (bindings as string[] | undefined) ?? []
-            // Build the handler context with non-recursive fields at their declared types
-            // and recursive fields at σ (initially Any — will be refined by parseToFixpoint)
+            // Build the handler context: non-recursive fields at their declared
+            // types, Family fields at σ (initially the carrier — the fixpoint
+            // rebinds Family fields to the current σ each iteration).
             let handlerCtx = ctx
             for (let i = 0; i < bindingList.length; i++) {
                 const field = variant.fields[i]
                 if (field) {
                     handlerCtx = new TypeCheckCtx(
-                        handlerCtx.gamma.extend(bindingList[i]!, field.type),
+                        handlerCtx.gamma.extend(
+                            bindingList[i]!,
+                            field.type instanceof FamilyType ? dataType : field.type,
+                        ),
                         handlerCtx.delta,
                     )
                 }
@@ -746,8 +750,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                     let handlerCtx = handler.ctx
                     for (let i = 0; i < handler.bindings.length; i++) {
                         const field = variant.fields[i]
-                        if (field && field.isRecursive) {
-                            // Rebind recursive field to currentSigma
+                        if (field && field.type instanceof FamilyType) {
+                            // Rebind Family fields to currentSigma
                             handlerCtx = new TypeCheckCtx(
                                 handlerCtx.gamma.extend(handler.bindings[i]!, currentSigma),
                                 handlerCtx.delta,

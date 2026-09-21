@@ -196,8 +196,8 @@ heterogeneous fields — a hole can sit deep inside a field's own structure.
 ### 4.3 Boundary
 
 - **Rose-shaped recursion** ($R = a \cdot L(R)$ — recursion _under a list field_) differentiates
-  fine ($\partial R = L(R) \cdot L(a \cdot L(R)^2)$), but Lapis's `Field.isRecursive` marks direct
-  `Family` positions only; nested recursion through _other_ types is a separate expressiveness
+  fine ($\partial R = L(R) \cdot L(a \cdot L(R)^2)$), but Lapis's `Family`-typed fields mark direct
+  μ-bound positions only; nested recursion through _other_ types is a separate expressiveness
   decision. The derivative machinery covers exactly what the cage expresses; the chain rule states
   precisely what nested-recursion expressiveness would buy.
 - **Intersections** are not a semiring operation; $\partial$ on `IntersectionType` is undefined here

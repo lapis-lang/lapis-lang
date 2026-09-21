@@ -15,6 +15,7 @@ import {
     Any,
     CodataType,
     DataType,
+    Family,
     Field,
     Observer,
     PatternDataType,
@@ -43,57 +44,57 @@ import {
 /** Constructs a fresh `Stack` data type with `Empty`/`Push` variants. */
 export function createStackType(): DataType {
     const stack = new DataType("Stack", [])
-    stack.variants.push(
+    stack.addVariant(
         new Variant("Empty", []),
         new Variant("Push", [
-            new Field("value", Any, false),
-            new Field("rest", stack, true),
+            new Field("value", Any),
+            new Field("rest", Family),
         ]),
     )
-    return stack
+    return stack.seal()
 }
 
 /** Constructs a fresh `Queue` data type with `Empty`/`Enq` variants. */
 export function createQueueType(): DataType {
     const queue = new DataType("Queue", [])
-    queue.variants.push(
+    queue.addVariant(
         new Variant("Empty", []),
         new Variant("Enq", [
-            new Field("value", Any, false),
-            new Field("rest", queue, true),
+            new Field("value", Any),
+            new Field("rest", Family),
         ]),
     )
-    return queue
+    return queue.seal()
 }
 
 /** Constructs a fresh `Nat` data type with `Zero`/`Succ` variants. */
 export function createNatType(): DataType {
     const nat = new DataType("Nat", [])
-    nat.variants.push(
+    nat.addVariant(
         new Variant("Zero", []),
-        new Variant("Succ", [new Field("pred", nat, true)]),
+        new Variant("Succ", [new Field("pred", Family)]),
     )
-    return nat
+    return nat.seal()
 }
 
 /** Constructs a fresh `Bool` data type with `True`/`False` variants. */
 export function createBoolType(): DataType {
     const bool = new DataType("Bool", [])
-    bool.variants.push(
+    bool.addVariant(
         new Variant("True", []),
         new Variant("False", []),
     )
-    return bool
+    return bool.seal()
 }
 
 /** Constructs a fresh `Stream` codata type with `head`/`tail` observers. */
 export function createStreamType(): CodataType {
     const stream = new CodataType("Stream")
-    stream.observers.push(
+    stream.addObserver(
         new Observer("head", Any, false),
         new Observer("tail", stream, true),
     )
-    return stream
+    return stream.seal()
 }
 
 /**
@@ -107,11 +108,11 @@ export function createStreamType(): CodataType {
 export function createNatStreamType(): CodataType {
     const natStream = new CodataType("NatStream")
     const nat = createNatType()
-    natStream.observers.push(
+    natStream.addObserver(
         new Observer("head", nat, false),
         new Observer("tail", natStream, true),
     )
-    return natStream
+    return natStream.seal()
 }
 
 // ── Registry factory ──────────────────────────────────────────────────────────

@@ -281,10 +281,11 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
 
     /**
      * Hook for the type of a fold handler's field binding.
-     * - AST builder: returns `field.type` (the declared type).
-     * - Type checker: for recursive fields, returns `Any` (the result type σ
-     *   is unknown during one-pass parsing; the fold semantic action checks
-     *   handler body types agree).
+     * - AST builder: returns `field.type` (the declared type; a Family field
+     *   stays Family — the carrier is the consumer's knowledge).
+     * - Type checker: the fixpoint subclass overrides the fold production
+     *   entirely (Family fields rebind to σ); this hook is never reached.
+     * - Cost engine: returns the fold-recursion marker for Family fields.
      */
     protected foldFieldType(field: Field, _dataType: DataType): Type {
         return field.type

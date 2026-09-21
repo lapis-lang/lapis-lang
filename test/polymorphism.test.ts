@@ -3,7 +3,7 @@
  */
 
 import { LCEval, LCTypeCheck, ValueEnv } from "../src/index.ts"
-import { Any, FunType, PolymorphicType, TypeEnv, TypeVar } from "../src/core/types.ts"
+import { Any, FunType, mapType, PolymorphicType, TypeEnv, TypeVar } from "../src/core/types.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -72,14 +72,51 @@ Deno.test("Polymorphism: (^A <: Any. \\x:A. x) [Nat] substitutes A := Nat", () =
     assertEquals(type.result, nat)
 })
 
-Deno.test("Polymorphism: (^A <: Any. \\x:A. x) [Any] substitutes A := Any", () => {
+Deno.test("Polymorphism: shadowing — the binder's body does not substitute (no capture)", () => {
+    // The binder scopes over its BODY only. Substituting A inside a binder
+    // that shadows A must not capture: `(^A <: Any. ^A <: Any. \x:A. x)`
+    // parses as ∀A.(∀A.(A→A)); T-TApp erases the binder it applies to and
+    // substitutes its body — the inner (shadowed) binder is returned whole
+    // by the no-capture rule, its body's A intact (never Nat).
     const tc = new LCTypeCheck().setRegistry(registry)
-    const result = tc.parseWith("(^A <: Any. \\x:A. x) [Any]", new TypeEnv())
+    const result = tc.parseWith("(^A <: Any. ^A <: Any. \\x:A. x) [Nat]", new TypeEnv())
     assert(result.size === 1)
     const [type] = result
-    assert(type instanceof FunType, `expected FunType, got ${type}`)
-    assertEquals(type.param, Any)
-    assertEquals(type.result, Any)
+    assert(type instanceof PolymorphicType, `expected PolymorphicType, got ${type}`)
+    // The result is the inner, shadowed binder — returned whole (its body
+    // was mapped before the shadowing handler discarded it).
+    assertEquals(type.typeVarName, "A")
+    const body = type.body as FunType
+    assert(body.param instanceof TypeVar, "the shadowed body's variable is NOT substituted")
+    assertEquals((body.param as TypeVar).name, "A")
+    assertEquals(body.param, body.result, "the identity shape is preserved")
+})
+
+Deno.test("Polymorphism: substitution — the binder's BOUND still substitutes (outer context)", () => {
+    // The binder does not scope over its own bound (the bound is parsed
+    // under the outer type-variable context), so an occurrence of the
+    // variable in the BOUND must still be substituted even when the binder
+    // shadows: `∀A <: A. A` under `A := Any` is `∀A <: Any. A` — the body
+    // keeps its A, the bound moves. Pinned at the unit level through
+    // `mapType` (the same protocol `substituteTypeVar` routes through; the
+    // grammar cannot express a self-bounded binder because the bound parses
+    // under the outer Δ where the name is unbound).
+    const selfBound = new PolymorphicType("A", new TypeVar("A", Any), new TypeVar("A", Any))
+    const substituted = mapType(selfBound, {
+        typeVar: (tv) => (tv.name === "A" ? Any : tv),
+        polymorphic: (pt, bound) => {
+            if (pt.typeVarName !== "A") return undefined
+            // Shadowed body, substituted bound (the same protocol
+            // substituteTypeVar applies — kept in sync here).
+            if (bound === pt.bound) return pt
+            return new PolymorphicType(pt.typeVarName, bound, pt.body)
+        },
+    }) as PolymorphicType
+    assertEquals(substituted.bound, Any, "the bound (outer context) is substituted")
+    assert(
+        substituted.body instanceof TypeVar && (substituted.body as TypeVar).name === "A",
+        "the body keeps its shadowed variable",
+    )
 })
 
 Deno.test("Polymorphism: lowercase type-variable binder is rejected", () => {
