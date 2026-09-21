@@ -36,7 +36,7 @@ import {
     SizeExpr,
     TypeRegistry,
 } from "../src/index.ts"
-import { DataType, Field, Variant } from "../src/core/types.ts"
+import { DataType, Family, Field, Type, Variant } from "../src/core/types.ts"
 import { createNatStreamType, createNatType, createOpFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -213,13 +213,14 @@ Deno.test("certified: map → fold certifies with no flag (affine constructors)"
     // so the consumer's scrutinee edge carries a bound — no flag.
     const nat = createNatType()
     const list = new DataType("List", [])
-    list.variants.push(
+    list.addVariant(
         new Variant("Nil", []),
         new Variant("Cons", [
-            new Field("head", nat, false),
-            new Field("tail", list, true),
+            new Field("head", nat),
+            new Field("tail", Family),
         ]),
     )
+    list.seal()
     const registry = new TypeRegistry()
     registry.register(nat)
     registry.register(list)
@@ -452,7 +453,60 @@ Deno.test("provenance: the codata constructs keep their own kinds (not fold)", (
     assertEquals(applied.flags.length, 0)
 })
 
-// ── 6. Op summaries: memoization, stratification, the pass ────────────────────
+// ── 6. Robustness: classification degrades, never crashes ────────────────────
+
+Deno.test("typeKind: a pass-local Type subclass classifies unknown, never crashes", () => {
+    // The cost engine's marker types (FoldRecType) are pass-local Type
+    // subclasses outside the core universe — `typeKind`'s contract is a TAG,
+    // not a membership test: an undeclared kind degrades to `unknown` (the
+    // classification route is foldType under a try), never throws (the
+    // analysis never throws). Probed through the public entry with a
+    // synthetic environment carrying a foreign marker: a binder denoted by
+    // a non-universe type keeps the analysis alive — its denotation
+    // classifies unknown and its size stays a named variable.
+    class ForeignMarker extends Type {
+        equals(other: Type): boolean {
+            return other instanceof ForeignMarker
+        }
+        toString(): string {
+            return "⟨foreign⟩"
+        }
+    }
+    const { registry, opRegistry, nat } = createOpFixtures()
+    const report = analyzeTerm(
+        "fold [Nat] x { Zero() -> Zero(), Succ(p) -> Succ(p) }",
+        registry,
+        opRegistry,
+        new Map([["x", new ForeignMarker()]]),
+    )
+    // The binder's denotation holds the foreign marker: an old-style
+    // membership test would have crashed the fold analysis; the
+    // classification degrades to unknown and the fold still runs (the
+    // scrutinee's size is the named variable the denotation assigned).
+    assert(report !== undefined, "the analysis never throws on any input")
+    assertEquals(report!.status, "analyzed")
+    void nat
+})
+
+Deno.test("typeKind: the core universe still classifies exactly (fun/data)", () => {
+    // The try/catch must not weaken the classification itself: every core
+    // kind answers its case, and the tag table is unchanged. A data-typed
+    // binder keeps symbolic sizes (kind "data" — a fold reads |x| as the
+    // recurrence input); a function-typed binder is opaque (kind "function").
+    const { registry, opRegistry, nat } = createOpFixtures()
+    const dataReport = analyzeTerm(
+        "fold [Nat] x { Zero() -> Zero(), Succ(p) -> Succ(p) }",
+        registry,
+        opRegistry,
+        new Map([["x", nat]]),
+    )
+    assert(dataReport !== undefined)
+    assertEquals(dataReport!.status, "analyzed")
+    // The data path closes the chain recurrence — the classification fed it.
+    assertEquals(dataReport!.growth, "linear")
+})
+
+// ── 7. Op summaries: memoization, stratification, the pass ────────────────────
 
 Deno.test("memoization: a shared store serves the same object; a fresh store recomputes", () => {
     const fixtures = createOpFixtures()

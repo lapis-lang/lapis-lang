@@ -16,6 +16,7 @@ import {
     AnyType,
     CodataType,
     DataType,
+    foldType,
     FunType,
     IntersectionType,
     Nothing,
@@ -29,6 +30,65 @@ import {
 } from "./types.ts"
 
 /**
+ * The Type-universe membership test: is this value actually a declared
+ * kind? This is the lattice module's boundary — ONE validation at the
+ * module's entry replaces the three silent `undefined` guards the functions
+ * used to carry: the invariant is enforced at its construction point, not
+ * scattered in prose.
+ *
+ * The grammar edge already enforces the deeper invariant (every
+ * production-path override rejects a failed premise with `empty<Type>()`
+ * BEFORE a contracted action runs, so the failure sentinel cannot flow into
+ * a Type-typed channel); this check is what makes a BYPASSED edge crash
+ * loudly instead of silently satisfying a rule — `isSubtype(undefined, Any)`
+ * used to hold via S-Top (the guard's own report), so a leaked sentinel
+ * silently satisfied consumer premises. Now the leak throws a TypeError
+ * naming the non-type.
+ *
+ * Routed through `foldType` — a new Type subclass must answer here or the
+ * boundary refuses it (the closed-universe assumption is checked, not
+ * assumed).
+ */
+function isTypeValue(t: unknown): t is Type {
+    if (t === undefined || t === null) return false
+    try {
+        foldType(t as Type, {
+            fun: () => true,
+            intersection: () => true,
+            polymorphic: () => true,
+            typeVar: () => true,
+            family: () => true,
+            data: () => true,
+            patternData: () => true,
+            codata: () => true,
+            token: () => true,
+            any: () => true,
+            nothing: () => true,
+        })
+        return true
+    } catch {
+        return false
+    }
+}
+
+/**
+ * Validate a lattice operand; a non-type throws (loud, never absorbed).
+ * `caller` names the public API performing the validation, so the thrown
+ * message points at the failing function (`isSubtype: sub operand …`) —
+ * misattributed diagnostics would send a debugger to the wrong call site.
+ */
+function requireType(operand: Type, side: string, caller: string): Type {
+    if (!isTypeValue(operand)) {
+        throw new TypeError(
+            `${caller}: ${side} operand is not a Type (the failure sentinel ` +
+                `and foreign values cannot enter the lattice — the grammar edge ` +
+                `rejects a failed premise with empty<Type>(), never undefined)`,
+        )
+    }
+    return operand
+}
+
+/**
  * Check if `sub <: super_` in type variable context `delta`.
  *
  * This is the core operation of the type system. It implements the subtyping
@@ -40,13 +100,15 @@ export function isSubtype(
     super_: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): boolean {
-    // Well-formedness guard: a leaked `undefined` (a premise failure flowing
-    // out of a contracted action) must never satisfy a subtype premise. The
-    // S-Bot/S-Top checks below would otherwise absorb it — `isSubtype(
-    // undefined, Any)` holds via S-Top, so an ill-typed let-def silently
-    // satisfies T-Let's premise. `undefined` is not a type; it is the failure
-    // sentinel, and failure is not a subtype of anything.
-    if (sub === undefined || super_ === undefined) return false
+    // The parameters are typed `Type` (strict null checks forbid undefined)
+    // and the grammar edge enforces the invariant: every production-path
+    // override rejects a failed premise with `empty<Type>()` BEFORE any
+    // contracted action runs, so `undefined` (the contract-failure sentinel)
+    // cannot reach the lattice as an operand. A bypassed edge is a caller
+    // bug — `requireType` throws loudly, never silently satisfying a premise
+    // via S-Top (the old guards' failure mode).
+    requireType(sub, "sub", "isSubtype")
+    requireType(super_, "super", "isSubtype")
 
     // S-Bot: Nothing <: σ (for any σ)
     if (sub instanceof NothingType) return true
@@ -61,7 +123,15 @@ export function isSubtype(
     if (sub instanceof TypeVar) {
         const bound = delta.lookup(sub.name)
         if (bound && isSubtype(bound, super_, delta)) return true
-        // Also check if super_ is the same type variable
+        // Same-name variables in the same Δ slot are THE binder: name identity
+        // is the promotion rule, not S-Refl's structural equality. This is
+        // deliberately name-only, unlike `TypeVar.equals` (which includes the
+        // bound): here both operands are being read against the SAME Δ
+        // context, so equal names are guaranteed equal bounds by the context —
+        // the context, not the type, is what makes them the same binder. A
+        // free-standing TypeVar (no Δ) that reaches S-Var falls to the
+        // conservative name-only recovery below, which is the F<: treatment
+        // the calculus's bounded quantification requires (lc.md §4).
         if (super_ instanceof TypeVar && sub.name === super_.name) return true
     }
 
@@ -191,10 +261,15 @@ function isCodataTypeSubtype(
 
 // ── Type equality ─────────────────────────────────────────────────────────────
 
-/** Check if two types are structurally equal. */
+/**
+ * Check if two types are structurally equal — a delegate over the Type
+ * hierarchy's own `.equals`. Kept as a named export because the lattice's
+ * consumers read it as "the equality operator on σ"; the grammar-edge
+ * invariant makes a leaked sentinel a caller bug, not a case to guard.
+ */
 export function typeEquals(a: Type, b: Type): boolean {
-    // `undefined` is the failure sentinel, never a type — not even equal to itself.
-    if (a === undefined || b === undefined) return false
+    requireType(a, "a", "typeEquals")
+    requireType(b, "b", "typeEquals")
     return a.equals(b)
 }
 
@@ -221,13 +296,12 @@ export function join(
     t: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): Type {
-    // Well-formedness guard: `undefined` is the failure sentinel of a
-    // contracted action, never a type. Joining it with anything is a failure,
-    // so the lattice's top is the explicit failure signal — the same one
-    // `join` returns for "no common supertype". Defense in depth: even if a
-    // sentinel slips past a production gate, it never masquerades as a type
-    // operand here.
-    if (s === undefined || t === undefined) return Any
+    // `Type`-typed operands (strict null checks) + the grammar-edge invariant
+    // (a failed premise is `empty<Type>()`, never a leaked sentinel) keep the
+    // lattice's operands types; `requireType` (via `isSubtype`) makes a
+    // bypassed edge loud instead of the old guard's silent failure signal.
+    requireType(s, "s", "join")
+    requireType(t, "t", "join")
 
     if (isSubtype(s, t, delta)) return t
     if (isSubtype(t, s, delta)) return s
@@ -271,10 +345,10 @@ export function meet(
     t: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): Type {
-    // Well-formedness guard: `undefined` is not a type (see `join`). The
-    // lattice's bottom is the failure signal for "no common subtype" — the
-    // dual of join's top.
-    if (s === undefined || t === undefined) return Nothing
+    // The `undefined` guard is gone with the invariant it defended (see
+    // `join`) — `requireType` makes a bypassed edge loud.
+    requireType(s, "s", "meet")
+    requireType(t, "t", "meet")
 
     if (isSubtype(s, t, delta)) return s
     if (isSubtype(t, s, delta)) return t

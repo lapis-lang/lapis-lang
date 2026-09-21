@@ -66,7 +66,7 @@ import { coefficients } from "./type_algebra.ts"
 
 import { valueSize } from "./values.ts"
 
-import { AnyType, DataType, PatternDataType, type Type, Variant } from "./types.ts"
+import { AnyType, DataType, FamilyType, PatternDataType, type Type, Variant } from "./types.ts"
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
 
@@ -96,7 +96,7 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
     const all = type.allVariants()
     if (depth === 0) {
         return all
-            .filter((variant) => !variant.fields.some((field) => field.isRecursive))
+            .filter((variant) => !variant.fields.some((field) => field.type instanceof FamilyType))
             .flatMap((variant) => {
                 const sample = construct(variant, [], eval_, depth)
                 return sample ? [sample] : []
@@ -105,7 +105,9 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
     const shallower = samplesFor(type, depth - 1, eval_)
     const result: VariantVal[] = [...shallower]
     for (const variant of all) {
-        const recursiveCount = variant.fields.filter((field) => field.isRecursive).length
+        const recursiveCount = variant.fields.filter((field) =>
+            field.type instanceof FamilyType
+        ).length
         if (recursiveCount === 0) continue
         // One sample per recursive variant per shallower sample: recursive
         // fields draw from the shallower space (the last recursive position
@@ -141,7 +143,7 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
 function construct(
     variant: {
         name: string
-        fields: readonly { name: string; type: Type; isRecursive: boolean }[]
+        fields: readonly { name: string; type: Type }[]
     },
     shallow: readonly VariantVal[],
     eval_: EvalTerm,
@@ -150,11 +152,11 @@ function construct(
 ): VariantVal | undefined {
     const argNames = variant.fields.map((_, i) => `f${i}`)
     const bindings = new Map<string, Value>()
-    const recursiveTotal = variant.fields.filter((field) => field.isRecursive).length
+    const recursiveTotal = variant.fields.filter((field) => field.type instanceof FamilyType).length
     let recursiveSeen = 0
     for (let i = 0; i < variant.fields.length; i++) {
         const field = variant.fields[i]!
-        if (field.isRecursive) {
+        if (field.type instanceof FamilyType) {
             const isLast = ++recursiveSeen === recursiveTotal
             const value = isLast && sample ? sample : shallow[0]
             if (value === undefined) return undefined
@@ -1042,9 +1044,9 @@ function spaceUpToSize(
     // array instead of re-walking at the new degree.
     if (cached && cachedDegree === -1) return cached
     // Seed the memo BEFORE the walk: a re-entrant request for this type
-    // (through a non-isRecursive self-typed field, or a mutual pair) sees
+    // (through a self-typed non-Family data field, or a mutual pair) sees
     // the in-progress marker (degree −1) and never rebuilds. The empty
-    // prefix is CORRECT at the walk's start — class 1's recursive fields
+    // prefix is CORRECT at the walk's start — class 1's Family fields
     // read exactly this empty array.
     spaces.set(type, [])
     degrees.set(type, -1)
@@ -1059,7 +1061,7 @@ function spaceUpToSize(
         }
         return variant.fields.every((field) => {
             const fieldType = field.type
-            if (field.isRecursive) return true
+            if (fieldType instanceof FamilyType) return true
             if (fieldType instanceof DataType) return true
             if (fieldType instanceof PatternDataType) return fieldType.patterns.length > 0
             return false
@@ -1076,7 +1078,7 @@ function spaceUpToSize(
                 field,
             ) => {
                 const fieldType = field.type
-                if (field.isRecursive) return spaces.get(type) ?? []
+                if (fieldType instanceof FamilyType) return spaces.get(type) ?? []
                 if (fieldType instanceof DataType) {
                     return spaceUpToSize(fieldType, size - 1, eval_, spaces, degrees)
                 }
@@ -1445,8 +1447,9 @@ const MAX_EXHAUSTION_INSTANCES = 2 ** 20
 export function finiteInhabitants(type: DataType): number | undefined {
     // The cache maps data types to their count-or-not-finite verdict;
     // `inProgress` marks types on the current traversal path — a cycle means
-    // a recursive field, hence unbounded. (The μ-bound α is spelled as the
-    // type itself: a self-referential field's type IS the μ-type.)
+    // a Family-typed field (the μ-bound), hence unbounded. (The μ-bound α is
+    // spelled as the Family singleton: a recursive field's type IS the
+    // bound-variable occurrence.)
     const count = (
         type: DataType,
         cache: Map<DataType, number | undefined>,
@@ -1460,7 +1463,7 @@ export function finiteInhabitants(type: DataType): number | undefined {
         for (const variant of type.allVariants()) {
             let product = 1
             for (const field of variant.fields) {
-                if (field.isRecursive) {
+                if (field.type instanceof FamilyType) {
                     inProgress.delete(type)
                     cache.set(type, undefined)
                     return undefined
@@ -2029,8 +2032,10 @@ function makeTrueValue(): VariantVal {
     // `True()` — the Bool variant, constructed without the evaluator (the
     // verdict comparison is a structural equality against the known shape;
     // the evaluator is for CONSTRUCTION of samples, and predicate verdicts
-    // come back as values from `eval_`, already resolved).
+    // come back as values from `eval_`, already resolved). Sealed like every
+    // other constructed type — types are values.
     const boolType = new DataType("Bool", [new Variant("True", []), new Variant("False", [])])
+    boolType.seal()
     return new VariantVal("True", boolType, new Map())
 }
 

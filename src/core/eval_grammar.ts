@@ -56,7 +56,7 @@ import {
     type Span,
 } from "@lapis-lang/lang-forma"
 
-import { Any, CodataType, DataType, type Type } from "./types.ts"
+import { Any, CodataType, DataType, FamilyType, type Type } from "./types.ts"
 
 import { type OpSig } from "./ops.ts"
 
@@ -502,13 +502,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             if (binding) {
                 const fieldValue = scrutinee.fields.get(field.name)
                 if (fieldValue !== undefined) {
-                    // E-Fold: a recursive (Family) field binds the *folded*
-                    // result — vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — matching the
-                    // type checker, which binds recursive fields to σ (the
-                    // fold's result type). Non-recursive fields bind raw.
+                    // E-Fold: a Family-typed field (the μ-bound) binds the
+                    // *folded* result — vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — matching
+                    // the type checker, which binds it to σ (the fold's result
+                    // type). Non-recursive fields bind raw.
                     // The recursion terminates: fieldValue is a proper
                     // subterm of the scrutinee (structural recursion).
-                    const boundValue = field.isRecursive && fieldValue instanceof VariantVal
+                    const boundValue = field.type instanceof FamilyType &&
+                            fieldValue instanceof VariantVal
                         ? this.evalFold(dataType, fieldValue, handlers, ambientEnv)
                         : fieldValue
                     handlerEnv = handlerEnv.extend(binding, boundValue)

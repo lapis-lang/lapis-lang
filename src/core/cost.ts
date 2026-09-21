@@ -102,7 +102,7 @@ import {
     SemanticPass,
 } from "@lapis-lang/lang-forma"
 
-import { CodataType, DataType, Field, FunType, PatternDataType, Type } from "./types.ts"
+import { CodataType, DataType, FamilyType, Field, foldType, Type } from "./types.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
@@ -770,14 +770,42 @@ export class CostEnv {
     }
 }
 
-/** Classify a type: function-typed (FunType) vs data vs unknown. */
+/**
+ * Classify a type: function-typed (FunType) vs data vs unknown — routed
+ * through `foldType` (the Type universe's required-case dispatch), with the
+ * classification degrading to `unknown` for any kind outside the core
+ * universe (the engine's own marker types — `FoldRecType` — are deliberate
+ * pass-local `Type` subclasses that never escape the module).
+ *
+ * The try/catch is the contract, not defense: classification is a TAG, not
+ * a membership test (the membership boundary is `subtyping.ts`'s
+ * `requireType`, which throws). A foreign subclass reaching a binder's
+ * denotation must cost nothing and classify unknown — the old `instanceof`
+ * ladder's behavior — never crash the analysis (`analyzeTerm` never
+ * throws). The interception in `extendCtx` handles the marker today; this
+ * keeps the classification robust against future call sites that forget it.
+ */
 function typeKind(type: Type | undefined): "data" | "function" | "unknown" {
     if (type === undefined) return "unknown"
-    if (type instanceof FunType) return "function"
-    if (type instanceof DataType || type instanceof PatternDataType || type instanceof CodataType) {
-        return "data"
+    try {
+        return foldType(type, {
+            fun: () => "function",
+            intersection: () => "unknown",
+            polymorphic: () => "unknown",
+            typeVar: () => "unknown",
+            family: () => "unknown",
+            data: () => "data",
+            patternData: () => "data",
+            codata: () => "data",
+            token: () => "unknown",
+            any: () => "unknown",
+            nothing: () => "unknown",
+        })
+    } catch {
+        // An undeclared Type subclass (a pass-local marker that escaped its
+        // producer's interception): classify unknown, never crash.
+        return "unknown"
     }
-    return "unknown"
 }
 
 /** The denotation for a binder at a declared type (the `extendCtx` hook's). */
@@ -1038,14 +1066,14 @@ class CostEngine extends AbstractLC<CostShape> {
     /**
      * The type a fold handler's field binding carries into `extendCtx`:
      * non-recursive fields at their declared type (data — the raw field
-     * value's size variable); recursive fields at the fold-recursion marker
-     * (the denotation is the fold's own result — opaque size, fold
-     * provenance). This is the cost-side mirror of E-Fold's binding rule (a
-     * recursive field binds the folded result) and the type checker's σ
-     * binding.
+     * value's size variable); Family fields (the μ-bound) at the
+     * fold-recursion marker (the denotation is the fold's own result —
+     * opaque size, fold provenance). This is the cost-side mirror of
+     * E-Fold's binding rule (a recursive field binds the folded result) and
+     * the type checker's σ binding.
      */
     protected override foldFieldType(field: Field, dataType: DataType): Type {
-        return field.isRecursive ? new FoldRecType(dataType.name) : field.type
+        return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
     }
 
     // ── Semantic actions ──────────────────────────────────────────────────────
@@ -1246,7 +1274,7 @@ class CostEngine extends AbstractLC<CostShape> {
                 variant.fields.forEach((field: Field, i: number) => {
                     const binding = handler.bindings[i]
                     if (binding === undefined) return
-                    if (field.isRecursive) {
+                    if (field.type instanceof FamilyType) {
                         // The recursion result at the subtree.
                         const recResult = SizeExpr.variable(RECURSION)
                         bodyCost = bodyCost.substitute(binding, recResult)
@@ -1285,13 +1313,17 @@ class CostEngine extends AbstractLC<CostShape> {
         // variant with exactly one recursive field) close via the solver;
         // everything else reports the conservative symbolic form.
         const allVariants = dataType.allVariants()
-        const recursiveVariants = allVariants.filter((v) => v.fields.some((f) => f.isRecursive))
+        const recursiveVariants = allVariants.filter((v) =>
+            v.fields.some((f) => f.type instanceof FamilyType)
+        )
         let resultSize: SizeExpr
         const isChain = recursiveVariants.length === 1 &&
-            recursiveVariants[0]!.fields.filter((f) => f.isRecursive).length === 1
+            recursiveVariants[0]!.fields.filter((f) => f.type instanceof FamilyType).length === 1
         if (isChain) {
             const recVariant = recursiveVariants[0]!
-            const baseVariants = allVariants.filter((v) => !v.fields.some((f) => f.isRecursive))
+            const baseVariants = allVariants.filter(
+                (v) => !v.fields.some((f) => f.type instanceof FamilyType),
+            )
             const baseSize = baseVariants.reduce<SizeExpr>(
                 (sum, v) => {
                     const h = perHandler.find((ph) => ph.variantName === v.name)
@@ -2392,8 +2424,8 @@ export class CostPass extends SemanticPass<CostPassShape> {
     /**
      * The handler environment for one handler record: non-recursive fields
      * bound to their declared types' denotations (the raw field sizes),
-     * recursive fields bound to the fold-recursion denotation (the
-     * flag's named producer end). The same rule the engine's
+     * Family fields bound to the fold-recursion denotation (the μ-bound's
+     * named producer end). The same rule the engine's
      * `foldFieldType` + `extendCtx` pair applies.
      */
     private handlerEnv(dataType: DataType, record: SpanFoldRecord, outer: CostEnv): CostEnv {
@@ -2403,7 +2435,7 @@ export class CostPass extends SemanticPass<CostPassShape> {
         record.bindings.forEach((binding, i) => {
             const field = variant.fields[i]
             if (field === undefined) return
-            env = field.isRecursive
+            env = field.type instanceof FamilyType
                 ? env.extend(binding, foldRecDenotation(dataType.name, binding))
                 : env.extend(binding, denotationFor(binding, field.type))
         })
@@ -2515,7 +2547,7 @@ function foldSummaryFrom(
             variant.fields.forEach((field: Field, i: number) => {
                 const binding = handler.bindings[i]
                 if (binding === undefined) return
-                if (field.isRecursive) {
+                if (field.type instanceof FamilyType) {
                     const recResult = SizeExpr.variable(RECURSION)
                     bodyCost = bodyCost.substitute(binding, recResult)
                     bodySize = bodySize.substitute(binding, recResult)
@@ -2537,14 +2569,18 @@ function foldSummaryFrom(
         perNodeDepth = perNodeDepth.max(h.depth)
     }
     const allVariants = dataType.allVariants()
-    const recursiveVariants = allVariants.filter((v) => v.fields.some((f) => f.isRecursive))
+    const recursiveVariants = allVariants.filter((v) =>
+        v.fields.some((f) => f.type instanceof FamilyType)
+    )
     let resultSize: SizeExpr
     let recurrence: string | undefined
     const isChain = recursiveVariants.length === 1 &&
-        recursiveVariants[0]!.fields.filter((f) => f.isRecursive).length === 1
+        recursiveVariants[0]!.fields.filter((f) => f.type instanceof FamilyType).length === 1
     if (isChain) {
         const recVariant = recursiveVariants[0]!
-        const baseVariants = allVariants.filter((v) => !v.fields.some((f) => f.isRecursive))
+        const baseVariants = allVariants.filter(
+            (v) => !v.fields.some((f) => f.type instanceof FamilyType),
+        )
         const baseSize = baseVariants.reduce<SizeExpr>((sum, v) => {
             const h = perHandler.find((ph) => ph.variantName === v.name)
             return sum.plus(h ? h.size : SizeExpr.ZERO)

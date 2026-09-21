@@ -34,7 +34,7 @@
  *    with compound scrutinees, are outside the fragment (loud
  *    shape-rejection naming the construct — never a silent mis-read).
  * 2. **Case structure** — one case per variant of the axis carrier
- *    (`allVariants()`); a case's recursive (`isRecursive`) fields carry
+ *    (`allVariants()`); a case's Family-typed (μ-bound) fields carry the
  *    the IH; non-Self data-typed fields do not (the direct-recursion
  *    boundary — the ∂T machinery's #64 boundary, shared).
  * 3. **Closure** — every schema instance (both directions for
@@ -84,7 +84,7 @@ import { type CheckedOpSig, OpRegistry } from "./ops.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
-import { CodataType, DataType, type Type, TypeEnv, Variant } from "./types.ts"
+import { CodataType, DataType, FamilyType, Nothing, type Type, TypeEnv, Variant } from "./types.ts"
 
 // ── The symbolic term AST ─────────────────────────────────────────────────────
 
@@ -280,11 +280,16 @@ export interface DefShape {
     axis: number
     /** The axis carrier (the fold's annotated type, resolved from Ω). */
     carrier: DataType
-    /** One handler per case; the field bindings carry the recursion marks. */
+    /** One handler per case; the field bindings carry the recursion marks
+     * (a Family-typed field is the μ-bound occurrence — it carries the
+     * induction hypothesis). */
     handlers: readonly {
         readonly variantName: string
         readonly variant: Variant
-        readonly bindings: readonly { readonly name: string; readonly isRecursive: boolean }[]
+        readonly bindings: readonly {
+            readonly name: string
+            readonly carriesIH: boolean
+        }[]
         readonly body: Term
     }[]
 }
@@ -588,7 +593,7 @@ export function readDefShape(
         }
         const bindings = h.bindings.map((name, i) => ({
             name,
-            isRecursive: variant.fields[i]?.isRecursive ?? false,
+            carriesIH: (variant.fields[i]?.type ?? Nothing) instanceof FamilyType,
         }))
         return { variantName: h.variantName, variant, bindings, body: h.body }
     })
@@ -840,15 +845,16 @@ function unfoldOne(fold: Extract<Term, { k: "fold" }>, registry: TypeRegistry): 
     if (!handler) return undefined
 
     // Bind the field variables: non-recursive fields bind the raw subterm;
-    // recursive fields bind the fold RE-APPLIED to the subterm (E-Fold's
-    // vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — the recursion continues structurally).
+    // Family fields (the μ-bound) bind the fold RE-APPLIED to the subterm
+    // (E-Fold's vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — the recursion continues
+    // structurally).
     let body = handler.body
     for (let i = 0; i < variant.fields.length; i++) {
         const binding = handler.bindings[i]
         if (binding === undefined) continue
         const subterm: Term = fold.scrutinee.args[i] ?? { k: "var", name: "_" }
-        const isRecursive = variant.fields[i]?.isRecursive ?? false
-        const bound: Term = isRecursive
+        const recurses = (variant.fields[i]?.type ?? Nothing) instanceof FamilyType
+        const bound: Term = recurses
             ? {
                 k: "fold",
                 carrier: fold.carrier,
@@ -1767,7 +1773,7 @@ export function deriveLaw(
     // The skeleton: for each motive, for each axis variant, discharge the
     // case. The case substitution: the axis-slot schema variable becomes the
     // case pattern; the IH is the motive re-instantiated at each of the
-    // case's recursion variables (only `isRecursive` fields).
+    // case's recursion variables (the μ-bound fields — `carriesIH`).
     const axiomsUsed: { op: string; kind: LawKind; provenance: LawProvenance }[] = []
     const seenAxioms = new Set<string>()
     const onAxiom = (source: AxiomSource): void => {
@@ -1805,11 +1811,11 @@ export function deriveLaw(
             const caseRight = bindAxis(motive.right, axisVar, pattern)
 
             // The IH pairs: the motive re-instantiated at each recursion
-            // variable (only `isRecursive` fields — the direct-recursion
+            // variable (the μ-bound fields — the direct-recursion
             // boundary).
             const ihPairs: Obligation[] = []
             for (const binding of handler.bindings) {
-                if (!binding.isRecursive) continue
+                if (!binding.carriesIH) continue
                 const recVar: Term = { k: "var", name: binding.name }
                 ihPairs.push({
                     left: bindAxis(motive.left, axisVar, recVar),

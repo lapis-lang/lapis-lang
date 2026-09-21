@@ -21,7 +21,7 @@ import {
 import { TokenVal, type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
 import { LCEval } from "../src/core/eval_grammar.ts"
 import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
-import { DataType, Field, Variant } from "../src/core/types.ts"
+import { DataType, Family, Field, Variant } from "../src/core/types.ts"
 
 import {
     createLawHarness,
@@ -100,10 +100,11 @@ Deno.test("contextPaths: a branching carrier has one path per recursive field oc
     // with no fields) contribute none, so the count is node count minus
     // leaves, not the node count.
     const tree = new DataType("Tree", [])
-    tree.variants.push(
+    tree.addVariant(
         new Variant("Leaf", []),
-        new Variant("Node", [new Field("l", tree, true), new Field("r", tree, true)]),
+        new Variant("Node", [new Field("l", Family), new Field("r", Family)]),
     )
+    tree.seal()
     const leaf = new VariantVal("Leaf", tree, new Map())
     const inner = new VariantVal(
         "Node",

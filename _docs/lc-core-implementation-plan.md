@@ -503,8 +503,8 @@ with the current status, milestone, and dependencies.
 - **Landed:**
   1. `src/core/type_algebra.ts` (new): `ContextSpec` (variant/field/holeType/surroundings — the
      context SHAPE, not a synthesized type) and `derivative(type: DataType)` — structural recursion
-     with implicit differentiation at the μ-bound (`Field.isRecursive` IS the μ-bound occurrence;
-     the walk never follows recursive fields, so it terminates by construction). Boundaries:
+     with implicit differentiation at the μ-bound (a `Family`-typed field IS the μ-bound occurrence;
+     the walk never follows Family fields, so it terminates by construction). Boundaries:
      intersection carriers are a typed rejection; function/`Any`/token/pattern/`Nothing` fields
      contribute no context; chain rule read one level deep (a field of another data type opens
      descent into that field's own structure). 10 tests in `test/type_algebra.test.ts`.

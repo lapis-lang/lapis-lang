@@ -111,7 +111,7 @@ Deno.test("readDefShape: add's definition reads with the axis and recursion mark
     assertEquals(shape.handlers.length, 2)
     const succ = shape.handlers.find((hh) => hh.variantName === "Succ")!
     assertEquals(succ.bindings.length, 1)
-    assertEquals(succ.bindings[0]!.isRecursive, true)
+    assertEquals(succ.bindings[0]!.carriesIH, true)
     const zero = shape.handlers.find((hh) => hh.variantName === "Zero")!
     assertEquals(zero.bindings.length, 0)
 })
