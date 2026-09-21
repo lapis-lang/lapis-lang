@@ -72,9 +72,12 @@ import {
     CodataType,
     DataType,
     FamilyType,
+    Field,
+    foldType,
     IntersectionType,
     PatternDataType,
     type Type,
+    Variant,
 } from "./types.ts"
 import { setRegistryHook, typeUnionCounts } from "./pattern_lang.ts"
 
@@ -183,29 +186,60 @@ export function derivative(type: DataType): ContextSpec[] {
     const specs: ContextSpec[] = []
     for (const variant of type.allVariants()) {
         for (const field of variant.fields) {
-            const fieldType = field.type
-            if (fieldType instanceof FamilyType || fieldType instanceof DataType) {
-                // The hole's type: Family (the μ-bound) reads as the carrier
-                // the derivative was taken OF (a comb's hole type is the
-                // carrier — the subtype's algebra, not the parent's); a data
-                // field names where the descent goes (the chain rule's
-                // one-level reading — the field itself can also BE the hole
-                // when the punch replaces the whole field value).
-                const surroundings = variant.fields
-                    .filter((f) => f !== field)
-                    .map((f) => f.type instanceof FamilyType ? type : f.type)
-                specs.push({
+            // The field's kind classification — routed through `foldType`
+            // (the same dispatcher `fieldGF` and `collect` read). The
+            // hole's type: Family (the μ-bound) reads as the carrier the
+            // derivative was taken OF (a comb's hole type is the carrier —
+            // the subtype's algebra, not the parent's); a data field names
+            // where the descent goes (the chain rule's one-level reading —
+            // the field itself can also BE the hole when the punch replaces
+            // the whole field value). Function/`Any`/`Nothing`/Token/
+            // pattern/intersection-typed fields contribute no context (no
+            // finite sample vocabulary or no structure to punch —
+            // type-algebra.md §4.3).
+            const spec = foldType(field.type, {
+                family: (): ContextSpec | undefined => ({
                     variantName: variant.name,
                     fieldName: field.name,
-                    holeType: fieldType instanceof FamilyType ? type : fieldType,
-                    surroundTypes: surroundings,
-                })
-            } // Function-typed, Any-typed, Nothing-typed, Token-typed, and
-            // pattern-typed fields: no finite sample vocabulary or no
-            // structure to punch — no context (type-algebra.md §4.3).
+                    holeType: type,
+                    surroundTypes: surroundingsOf(variant, field, type),
+                }),
+                data: (fieldCarrier): ContextSpec | undefined => ({
+                    variantName: variant.name,
+                    fieldName: field.name,
+                    holeType: fieldCarrier,
+                    surroundTypes: surroundingsOf(variant, field, type),
+                }),
+                fun: () => undefined,
+                intersection: () => undefined,
+                polymorphic: () => undefined,
+                typeVar: () => undefined,
+                patternData: () => undefined,
+                codata: () => undefined,
+                token: () => undefined,
+                any: () => undefined,
+                nothing: () => undefined,
+            })
+            if (spec !== undefined) specs.push(spec)
         }
     }
     return specs
+}
+
+/**
+ * The Leibniz surroundings for one punched field: the other fields' types,
+ * with any Family field reading as the carrier the derivative was taken OF
+ * (the hole type's translation — a comb's hole is the carrier, not the
+ * parent).
+ */
+function surroundingsOf(
+    variant: Variant,
+    punched: Field,
+    carrier: DataType,
+): Type[] {
+    return variant.fields
+        .filter((f) => f !== punched)
+        .map((f) => f.type instanceof FamilyType ? carrier : f.type)
 }
 
 // ── Coefficients: certified screen coverage (type-algebra.md §3) ─────────────
@@ -305,20 +339,30 @@ function fieldGF(
     current: GFState,
     carrier: DataType,
 ): Coefficients {
-    if (field.type instanceof FamilyType) return current.currentFor(carrier, k)
-    const fieldType = field.type
-    if (fieldType instanceof DataType) return current.currentFor(fieldType, k)
-    if (fieldType instanceof PatternDataType) {
-        // The language-equation reading: the field's GF is the
-        // pattern type's own counting — the UNION of its variants'
-        // languages (variants may overlap — `a` and `a?` both hold "a" —
-        // so the counts read off the merged string set, not the per-
-        // variant sum). With tokens sized by TEXT LENGTH (`valueSize`'s
-        // token arm), this matches the enumeration's per-length classes
-        // exactly.
-        return typeUnionCounts(fieldType, k)
-    }
-    return zeroUpTo(k)
+    // The field's kind classification — routed through `foldType` (the Type
+    // universe's one dispatcher; a new kind must answer here). Family reads
+    // the CARRIER's current approximation (the μ-bound's self-reference —
+    // the fixpoint, never unfolded; the comb's algebra is the subtype
+    // carrier); a data field reads its own type's; a pattern field reads the
+    // language-equation counting (the union of its variants' languages —
+    // variants may overlap, so the counts read off the merged string set,
+    // not the per-variant sum; tokens sized by TEXT LENGTH match the
+    // enumeration's per-length classes exactly); every other kind
+    // contributes the zero polynomial (the same unsampleable rule the
+    // screen's `construct` and `screenableDomain` apply).
+    return foldType(field.type, {
+        family: () => current.currentFor(carrier, k),
+        data: (t) => current.currentFor(t, k),
+        patternData: (t) => typeUnionCounts(t, k),
+        fun: () => zeroUpTo(k),
+        intersection: () => zeroUpTo(k),
+        polymorphic: () => zeroUpTo(k),
+        typeVar: () => zeroUpTo(k),
+        codata: () => zeroUpTo(k),
+        token: () => zeroUpTo(k),
+        any: () => zeroUpTo(k),
+        nothing: () => zeroUpTo(k),
+    })
 }
 
 /**
@@ -480,19 +524,31 @@ export function coefficients(
         )
     }
     // Collect the system: the carrier plus every data type reachable
-    // through non-recursive data fields (mutual recursion arrives that way).
+    // through non-Family data fields (mutual recursion arrives that way).
+    // The field classification routes through `foldType` — the same
+    // dispatcher `fieldGF` reads, so the two stays one case table.
     const system = new Set<DataType>()
     const collect = (t: Type): void => {
         if (t instanceof DataType && !system.has(t)) {
             system.add(t)
             for (const variant of t.allVariants()) {
                 for (const field of variant.fields) {
-                    if (
-                        !(field.type instanceof FamilyType) &&
-                        field.type instanceof DataType
-                    ) {
-                        collect(field.type)
-                    }
+                    foldType(field.type, {
+                        family: () => undefined, // the μ-bound — never collected
+                        data: (inner) => {
+                            collect(inner)
+                            return undefined
+                        },
+                        patternData: () => undefined,
+                        codata: () => undefined,
+                        fun: () => undefined,
+                        intersection: () => undefined,
+                        polymorphic: () => undefined,
+                        typeVar: () => undefined,
+                        token: () => undefined,
+                        any: () => undefined,
+                        nothing: () => undefined,
+                    })
                 }
             }
         }

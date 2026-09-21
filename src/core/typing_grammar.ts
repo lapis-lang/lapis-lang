@@ -105,28 +105,31 @@ class TypeCheckCtx {
 
 /**
  * Substitute `replacement` for type variable `varName` in `type`.
- * Used by T-TApp to compute τ[α := T₂]. Shadowing: a polymorphic type
- * binding the same variable stops the descent (α is shadowed).
+ * Used by T-TApp to compute τ[α := T₂]. The binder scopes over its BODY
+ * only: a polymorphic type binding `varName` stops the substitution inside
+ * the body (α is shadowed) — but the BOUND is parsed under the outer
+ * type-variable context (the binder does not scope over its own bound), so
+ * an occurrence of the variable there must still be substituted
+ * (`∀A <: A. A` under `A := Any` becomes `∀A <: Any. A`).
  *
  * Routed through `mapType` — the type universe's one structural traversal;
- * only the kinds that can hold the variable are spelled. The non-shadowing
- * polymorphic case returns `undefined`, delegating to mapType's structural
- * default: the original binder is reused when no child moved (no
- * allocation), rebuilt only when a child moved.
+ * only the kinds that can hold the variable are spelled. The polymorphic
+ * handler composes the shadowing rule explicitly (bound mapped, body
+ * original — identity-reused when nothing moved); the non-shadowing case
+ * returns `undefined`, delegating to mapType's structural default: the
+ * original binder is reused when no child moved (no allocation), rebuilt
+ * only when a child moved.
  */
 function substituteTypeVar(type: Type, varName: string, replacement: Type): Type {
     return mapType(type, {
         typeVar: (tv) => (tv.name === varName ? replacement : tv),
-        polymorphic: (pt, _bound, _body) => {
-            // Shadowed: return the original binder — the children were mapped
-            // before this handler ran (the body may already carry the
-            // substitution), so discarding them is the no-capture rule.
-            if (pt.typeVarName === varName) return pt
-            // Non-shadowing: delegate to mapType's structural default — it
-            // reuses the original node when neither mapped child moved
-            // (no allocation) and rebuilds only when a child moved (the
-            // mapped children are authoritative).
-            return undefined
+        polymorphic: (pt, bound, body) => {
+            if (pt.typeVarName !== varName) return undefined
+            // Shadowed body — but the bound still carries the substitution
+            // (it is under the OUTER context): rebuild when the mapped bound
+            // moved, reuse the original binder when it did not.
+            if (bound === pt.bound) return pt
+            return new PolymorphicType(pt.typeVarName, bound, pt.body)
         },
     })
 }

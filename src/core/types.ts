@@ -121,7 +121,15 @@ export class Variant {
         readonly name: string,
         readonly fields: Field[],
     ) {}
-
+    /**
+     * Close this variant: the fields array is frozen in place, so a
+     * retained alias cannot mutate a sealed definition. `DataType.seal()`
+     * seals every variant it carries; a direct call is idempotent.
+     */
+    seal(): this {
+        Object.freeze(this.fields)
+        return this
+    }
     findField(name: string): Field | undefined {
         return this.fields.find((f) => f.name === name)
     }
@@ -174,7 +182,8 @@ export class DataType extends Type {
     /**
      * Add variants during the construction phase (before `seal()`).
      * A post-`seal()` call is a caller bug — it throws, never a silent
-     * corruption.
+     * corruption. Re-using a variant (from another type) is rejected: a
+     * sealed variant cannot re-enter construction.
      */
     addVariant(...variants: Variant[]): this {
         if (this.sealed) {
@@ -182,18 +191,28 @@ export class DataType extends Type {
                 `addVariant: ${this.name} is sealed — the definition is closed`,
             )
         }
+        for (const variant of variants) {
+            if (Object.isFrozen(variant.fields)) {
+                throw new TypeError(
+                    `addVariant: ${variant.name} is already sealed — ` +
+                        `a variant cannot be re-used across type definitions`,
+                )
+            }
+        }
         this._variants.push(...variants)
         return this
     }
 
     /**
-     * Close the definition: the variants array is frozen and further
-     * construction is rejected loudly. Types are values; after sealing, a
-     * mutation attempt is a caller bug, never a silent corruption.
+     * Close the definition: the variants array AND every variant's fields
+     * array are frozen in place, so a retained alias (the type's own array,
+     * a variant, a fields array) cannot mutate the sealed definition.
+     * Further construction is rejected loudly. Types are values.
      */
     seal(): this {
         if (this.sealed) return this
         this.sealed = true
+        for (const variant of this._variants) variant.seal()
         Object.freeze(this._variants)
         return this
     }
