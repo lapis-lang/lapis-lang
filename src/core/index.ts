@@ -78,6 +78,7 @@ export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
 // Operation symbols (lc.md §2.2, §2.4 — Ω environment + named application)
 export { OpDeclarationError, OpRegistry, OpSig, scanOpReferences } from "./ops.ts"
+export type { CheckedOpSig } from "./ops.ts"
 
 // Law derivation (type-algebra.md §6 — the derivable regime: the BMF
 // derivation engine; fold-induction from primitive/discharged laws →
@@ -101,6 +102,33 @@ export {
 
 // Grammar — concrete syntax for LC (parse, don't validate)
 export { AbstractLC, LC_RESERVED_WORDS, type LCShape, TypeRegistry } from "./grammar.ts"
+
+// Cost algebra (semantics.md §5.5 — static cost/depth analysis; certified
+// bounds for the stratified fragment, flags on value-size feedback)
+export {
+    analyzeOp,
+    analyzeOps,
+    analyzeTerm,
+    COST_CEILING,
+    type CostEdge,
+    CostEnv,
+    type CostFlag,
+    CostPass,
+    type CostReport,
+    type CostSummary,
+    type CostVerdict,
+    type DeferredSummary,
+    type Denotation,
+    DepthExpr,
+    type GrowthClass,
+    type LatencyReport,
+    type OpCostSummary,
+    OpSummaryStore,
+    type Provenance,
+    renderCostReport,
+    SizeExpr,
+    type UnresolvedCost,
+} from "./cost.ts"
 
 // Derivation trees + semantic passes
 export { DerivationNode, DerivationTree, SemanticPass } from "@lapis-lang/lang-forma"

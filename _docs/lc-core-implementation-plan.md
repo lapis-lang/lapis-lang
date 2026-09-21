@@ -560,6 +560,64 @@ with the current status, milestone, and dependencies.
 - **Depends on:** #64 (the type-equation reading lands with ∂T — one module, three readings).
   #62/#63 consume the module next (the pattern language equations / the derivable regime).
 
+#### PBI #52: CostPass — static cost/depth algebra (certified bounds, flag value-size feedback)
+
+- **Status:** Implemented — 432 tests green (`deno check` / `test` / `lint` / `fmt` clean). Plan:
+  `_docs/issue52-plan.md`.
+- **Assignee:** @mlhaufe
+- **Goal:** Feasibility, not just termination: a **cost/depth algebra** over LC terms (the
+  container-shaped decomposition — a fold's invocation count IS the input's node count), a decidable
+  criterion separating the certified fragment from the flagged residual (the busy-beaver candidates:
+  value-size feedback without a static bound), and flags as diagnostics with the runtime-observation
+  payload.
+- **Landed:**
+  1. `src/core/cost.ts` (new): the polynomial-form size/cost/depth expression algebra
+     (`SizeExpr`/`DepthExpr` — saturating at `COST_CEILING = Number.MAX_SAFE_INTEGER`, the `opaque`
+     marker for function-typed values), the recurrence solver (affine closure — the Hofmann/LFPL
+     shape with the recursion variable BARE and the closure summed over the scrutinee's FULL size
+     expression; chain summation; a symbolic factor riding the recursion variable is multiplicative
+     feedback and does NOT close — the certificate states the recurrence with the coarse class
+     instead of a false linear bound; the coarse `exponential (primitive-recursive)` class with the
+     recurrence stated beyond affine), the summary records (`Provenance`, `CostEdge`, `CostFlag`,
+     `UnresolvedCost`, `LatencyReport`), the classifier, and `renderCostReport`.
+  2. `CostEngine extends AbstractLC` — the evaluator's architecture (a `CostEnv` denotation
+     environment threaded through `extendCtx`); recursive fold-handler bindings denote the fold's
+     own recursion result (fold provenance + symbolic size — the flag's named producer end), and
+     closures carry their body's full cost as a deferred chain consumed at application sites (the
+     lambda-chain propagation that gives op summaries their fold work; the body's stated recurrence
+     rides the chain too). `let`-bound names denote their definition's result size (the exact
+     bound). The algebra's symbolic quantities carry an untypable `#` prefix (`#foldRec`,
+     `#scrutinee`) so user binders never collide under substitution. `analyzeOp`/`analyzeOps`/
+     `analyzeTerm` — memoized per `(TypeRegistry, OpRegistry)` identity pair through a shared
+     module-level store cache (in declaration order — the stratification order), so repeated
+     public-entry calls on the same pair re-serve the cached summaries instead of re-parsing.
+  3. `CostPass extends SemanticPass` — the `DerivationTree` entry. The tree supplies structure and
+     identities (the `opProd` names, the `spanFoldHandler` records); the engine's single parse of
+     the same source supplies the semantics (the checker's left-recursive productions duplicate
+     derivations in the tree — a raw walk would multiply-count shared work). The walk is
+     load-bearing where the tree's information is unique: op names' Ω-resolution, and unknown-op
+     residuals (a tree derived under a divergent Ω states the names its pass cannot resolve, and
+     falls back to the walk's own summary when the engine cannot re-derive). The per-node memo is
+     cleared per report (a long-lived pass retains nothing).
+  4. `test/cost.test.ts` (new, 36 tests): the algebra units (saturation, substitution, opacity
+     propagation), the certified bounds (`add` linear at $|p_0|$, `mul` quadratic at
+     $|p_0| + |p_0||p_1|$, `addZero` polynomial, exact cost AND size on literal scrutinees, no flag
+     on `map` → fold over a `List` carrier), the Ackermann term flags with the full payload, codata
+     latency (the generator-body records + the observation's `latency(o)` atom as the stated
+     residual), memoization identity, declaration-order stratification, the `CostPass`-over-tree
+     integration (both vehicles agree, including on `let`), per-report walk state, the divergent-Ω
+     residuals, the honest unanalyzable path (including the store's cycle guard), and the solver
+     regressions (multiplicative feedback stays unclosed; additive symbolic growth still closes;
+     sum-scrutinee recurrence over the full input; the untypable symbolic names).
+- **Deferred (per the plan's D8):** runtime profiling integration (the live-image mode's channel —
+  the flag's `suggestedProfile` is the design note); T-Fold's function-result seeding (the Ackermann
+  shape exercises at the term level — `analyzeTerm`/`CostPass` — until the checker's σ-seeding
+  widens).
+- **Files:** `src/core/cost.ts` (new), `src/core/index.ts` (the cost exports), `test/cost.test.ts`
+  (new), `_docs/theory/semantics.md` (§5.5 status), `_docs/design-decisions.md` (the cost-algebra
+  bullet), this document.
+- **Depends on:** #49 (Ω-acyclicity — the cycles axis closed; the feedback edges' named form).
+
 #### PBI #62: Pattern-carrier discharge — pattern language equations + sub-space law scopes
 
 - **Status:** Implemented (2026-09-18) — plan `_docs/issue62-plan.md` (rescoped: the original
