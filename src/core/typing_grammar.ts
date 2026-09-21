@@ -123,7 +123,7 @@ class TypeCheckCtx {
 function substituteTypeVar(type: Type, varName: string, replacement: Type): Type {
     return mapType(type, {
         typeVar: (tv) => (tv.name === varName ? replacement : tv),
-        polymorphic: (pt, bound, body) => {
+        polymorphic: (pt, bound) => {
             if (pt.typeVarName !== varName) return undefined
             // Shadowed body — but the bound still carries the substitution
             // (it is under the OUTER context): rebuild when the mapped bound

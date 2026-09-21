@@ -104,7 +104,7 @@ Deno.test("Polymorphism: substitution — the binder's BOUND still substitutes (
     const selfBound = new PolymorphicType("A", new TypeVar("A", Any), new TypeVar("A", Any))
     const substituted = mapType(selfBound, {
         typeVar: (tv) => (tv.name === "A" ? Any : tv),
-        polymorphic: (pt, bound, body) => {
+        polymorphic: (pt, bound) => {
             if (pt.typeVarName !== "A") return undefined
             // Shadowed body, substituted bound (the same protocol
             // substituteTypeVar applies — kept in sync here).
