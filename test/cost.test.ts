@@ -393,6 +393,33 @@ Deno.test("latency: an unbounded latency leaves the verdict certified but the at
     assert(report.latencies.some((l) => l.observer === "head"))
 })
 
+Deno.test("regression: a generator's diagnostic records reach the unfold's certificate", () => {
+    // A generator body that contains the Ackermann shape (a fold whose
+    // recursion result is applied) carries a FLAG edge inside its body —
+    // the pre-fix bug deferred it with the generator's WORK (the latency),
+    // so observing the stream reported `certified` while the flagged
+    // feedback hid inside the generator. Records ride along now; only the
+    // work stays deferred.
+    const natStream = createNatStreamType()
+    const nat = createNatType()
+    const registry = new TypeRegistry()
+    registry.register(nat)
+    registry.register(natStream)
+    const omega = new OpRegistry()
+    const report = analyzeTerm(
+        "unfold [NatStream] s { head -> \\m:Nat. fold [Nat] m { Zero() -> \\y:Nat. Succ(y), Succ(p) -> \\y:Nat. p (Succ(y)) }, tail -> self }",
+        registry,
+        omega,
+        new Map([["s", natStream]]),
+    )
+    assert(report !== undefined)
+    // The flag surfaces (the generator's records are the codata value's
+    // own certificate), never laundered into a certified report.
+    assertEquals(report.verdict, "flagged")
+    assertEquals(report.flags.length, 1)
+    assertEquals(report.flags[0]!.edge.producer.kind, "fold")
+})
+
 Deno.test("provenance: the codata constructs keep their own kinds (not fold)", () => {
     // An unfold's result is a codata VALUE — its edge provenance is `unfold`,
     // not the fold kind (conflating them would mislabel the flag's producer
@@ -547,7 +574,11 @@ Deno.test("CostPass: the memo does not leak across reports (per-report walk stat
 
     const first = pass.evaluateReport(tc.parseToTree("double(Succ(Zero()))").trees[0]!)
     assert(first !== undefined)
-    assertEquals(first.cost.render(), "6")
+    // The eager argument composes with the instantiated callee summary:
+    // the arg's construction (2 nodes) + the fold's instantiated cost
+    // (3·|p0| at |p0| = 2 → 6) = 8 — the argument's work is part of the
+    // application (E-OpArg evaluates eagerly, leftmost).
+    assertEquals(first.cost.render(), "8")
 
     const second = pass.evaluateReport(tc.parseToTree("Succ(Succ(Zero()))").trees[0]!)
     assert(second !== undefined)

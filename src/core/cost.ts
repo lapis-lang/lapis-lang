@@ -1348,8 +1348,14 @@ class CostEngine extends AbstractLC<CostShape> {
 
     /**
      * unfold [T] s {oⱼ → gⱼ} — the codata value (lazy: generators deferred).
-     * The generators' costs surface at the observation sites as latencies;
-     * here the codata value itself is O(1) (the seed's cost + the closure).
+     * The generators' WORK stays deferred into the latency entries (an
+     * observation pays it); the generators' DIAGNOSTIC RECORDS — the flag
+     * edges and unresolved contributions inside a generator body (an
+     * Ackermann-shaped fold inside a generator, an unresolved higher-order
+     * application) — are NOT deferred: they are part of the codata value's
+     * own certificate, and deferring them would let an observation report
+     * `certified` while a flagged feedback edge hides inside the generator.
+     * Records ride along now; only the work lands in the latencies.
      */
     protected override unfold(
         codataType: CodataType,
@@ -1357,18 +1363,27 @@ class CostEngine extends AbstractLC<CostShape> {
         generators: { observerName: string; body: CostSummary }[],
         _seedType: Type,
     ): CostSummary {
-        const latencies: LatencyReport[] = generators.map((g) => ({
-            observer: g.observerName,
-            latency: g.body.cost,
-        }))
+        // The per-observer work ledger (each observation pays its
+        // generator's cost) plus the generators' own latencies (a
+        // generator may itself observe another codata value).
+        const latencies: LatencyReport[] = generators.flatMap((g) => [
+            { observer: g.observerName, latency: g.body.cost },
+            ...g.body.latencies,
+        ])
+        const edges: CostEdge[] = [...seed.edges]
+        const unresolved: UnresolvedCost[] = [...seed.unresolved]
+        for (const g of generators) {
+            edges.push(...g.body.edges)
+            unresolved.push(...g.body.unresolved)
+        }
         return {
             cost: seed.cost.plus(SizeExpr.ONE),
             depth: seed.depth.plus(SizeExpr.ONE),
             resultSize: SizeExpr.constant(1),
             provenance: { kind: "unfold", name: codataType.name },
             resultKind: "data",
-            edges: seed.edges,
-            unresolved: seed.unresolved,
+            edges,
+            unresolved,
             latencies,
         }
     }
@@ -1790,6 +1805,14 @@ function computeOpSummary(
  * parameters' size variables (`p0`…) become the arguments' size expressions,
  * the result's provenance names the op (the named form survives — the edge
  * statement's subject), and the definition's records ride along.
+ *
+ * The ARGUMENTS are part of the application's work too (E-OpArg evaluates
+ * them eagerly, leftmost): their construction costs and records compose
+ * with the instantiated callee summary — the callee's cost already reads
+ * the arguments' sizes (the instantiation contract), but it does not
+ * include the arguments' own construction. The result size/provenance stay
+ * the callee's (the composition's last value), per the instantiation
+ * contract.
  */
 function instantiateOpSummary(
     op: CheckedOpSig,
@@ -1816,14 +1839,17 @@ function instantiateOpSummary(
         resultSize = resultSize.substitute(paramName, arg.resultSize)
     })
     return {
-        cost,
-        depth: DepthExpr.of(depth),
+        // The eager arguments compose in (their construction costs, edges,
+        // latencies); the RESULT fields stay the callee's — the call's
+        // outcome is what the callee produces, not the last argument's.
+        cost: base.cost.plus(cost),
+        depth: DepthExpr.of(depth).max(base.depth),
         resultSize,
         provenance: { kind: "op", name: op.name },
         resultKind: resultSize.isOpaque ? "unknown" : "data",
-        edges: summary.edges,
-        unresolved: summary.unresolved,
-        latencies: summary.latencies,
+        edges: [...base.edges, ...summary.edges],
+        unresolved: [...base.unresolved, ...summary.unresolved],
+        latencies: [...base.latencies, ...summary.latencies],
     }
 }
 
