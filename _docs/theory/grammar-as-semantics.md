@@ -493,8 +493,9 @@ judgment-class shape (one class, one method per judgment, shared traversal, per-
 is the mechanism the term-level passes realize through grammar subclassing. The same
 subclass-and-override discipline appears on the value side as virtual methods: `Value.equals` /
 `Value.size` / `Value.renderSource` (equality, size, and source rendering are intrinsic
-representation concerns, the same tier `Type.equals` lives on) are the call surface — every consumer
-invokes the method directly.
+representation concerns, the same tier `Type.equals` lives on) are the method surface for new code;
+`valueEquals`/`valueSize` remain as same-signature compatibility delegates over the virtuals (the
+free-function surface the original API carried).
 
 ## 8. Relationship to Attribute Grammars
 
@@ -587,11 +588,11 @@ gone):
 `types.ts` owns the structural machinery every pass shares — and it is POLYMORPHIC: the dispatch
 itself lives on the `Type` subclasses, not in a free function's `instanceof` ladder.
 
-- **`t.map(cases)`** — bottom-up transformation: children mapped first, composites rebuilt when
-  a child moved, handlers defaultable (a substitution spells only the kinds it transforms; a
+- **`t.map(cases)`** — bottom-up transformation: children mapped first, composites rebuilt when a
+  child moved, handlers defaultable (a substitution spells only the kinds it transforms; a
   polymorphic-type handler returning the original node expresses shadowing). The root's base
-  implementation is the ATOM default (no traversable sub-types); `FunType`, `IntersectionType`,
-  and `PolymorphicType` override to map their children first.
+  implementation is the ATOM default (no traversable sub-types); `FunType`, `IntersectionType`, and
+  `PolymorphicType` override to map their children first.
 - **`t.dispatch(cases)`** — required-case dispatch WITHOUT recursion: the classification-style fold
   (a tag, a summary, a count). The `RequiredCases<T>` protocol makes a table that omits a kind a
   compile error — a new `Type` subclass forces every case table to answer for it, and each subclass

@@ -45,8 +45,10 @@ seam re-stated without the decorator: per-instance identity-keyed `WeakMap` cach
 v3.0.1 keying scheme, sound because types are sealed/immutable post-construction). The free-function
 surface (`derivative`, `coefficients`, `finiteInhabitants`, `setPatternLookup`) delegates to a
 module-level default instance, so zero-fixture call sites keep working; the value side mirrors this
-with `equals`/`size` as virtual methods on `Value` (`values.ts`) — the call surface itself, no
-free-function delegates (the same tier `Type.equals` lives on).
+with `equals`/`size` as virtual methods on `Value` (`values.ts`) — the method surface for new code,
+with `valueEquals`/`valueSize` retained as same-signature compatibility delegates over the virtuals
+(the free-function surface the original API carried; existing consumers keep importing them) — the
+same tier `Type.equals` lives on.
 
 The shared traversal (variant iteration, the `dispatch` field-kind classification, mutual-system
 collection, memoization) is the class's skeleton; each reading supplies its own per-kind actions —

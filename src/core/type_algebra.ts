@@ -254,7 +254,7 @@ export class TypeAlgebra {
      * memoized state seeds the new degree). The pattern arm is memoized
      * through the language equation's own environment memo (pattern_lang.ts).
      */
-    private readonly coefficientsMemo = new WeakMap<
+    private coefficientsMemo = new WeakMap<
         DataType,
         { degree: number; coeffs: Coefficients }
     >()
@@ -269,9 +269,18 @@ export class TypeAlgebra {
     /**
      * Install the type-reference lookup hook on this instance; the prior
      * hook is returned for restoration.
+     *
+     * The coefficients memo is INVALIDATED here: a pattern carrier's counts
+     * resolve `<T>` references through the lookup, so entries computed under
+     * one registry are not valid under another (the law checker swaps and
+     * restores hooks per `declareCheckedLawWithRegistry` call — a restored
+     * hook must never read entries computed under the swapped one).
      */
     setLookup(lookup: PatternLookup): PatternLookup {
         const prior = this.lookup
+        if (lookup !== prior) {
+            this.coefficientsMemo = new WeakMap()
+        }
         this.lookup = lookup
         return prior
     }
@@ -698,7 +707,13 @@ export class TypeAlgebra {
         // but the fixpoint's zero-vector seeding makes a straight prefix
         // extension wrong — recompute; the system set is derived cheaply).
         const memoed = this.coefficientsMemo.get(type)
-        if (memoed !== undefined && memoed.degree >= k) return memoed.coeffs
+        if (memoed !== undefined && memoed.degree >= k) {
+            // The cached vector is a truncated series at a ≥ degree: the
+            // requested c₀..cₖ prefix is its first k+1 entries — return the
+            // EXACT requested shape (a caller comparing the returned array
+            // against its requested degree would otherwise see extra entries).
+            return memoed.coeffs.slice(0, k + 1)
+        }
         const state = new GFState(system, this.lookup)
         const coeffs = state.getFor(type, k)
         this.coefficientsMemo.set(type, { degree: k, coeffs })

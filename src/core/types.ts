@@ -24,12 +24,25 @@
 import type { PatternAST } from "./pattern_lang.ts"
 
 /**
- * The nominal brand symbol for the Type universe (see `Type[TYPE_BRAND]`).
- * Module-scoped identity: an outside module cannot CREATE a symbol equal to
- * it (Symbol equality is by reference), so a brand check is a genuine
- * identity test, not a forgeable tag.
+ * The nominal brand symbol for the Type universe — MODULE-PRIVATE. An outside
+ * module can neither create an equal symbol (Symbol equality is by reference)
+ * nor copy the property onto a forged object, so the membership check is a
+ * genuine identity test, not a forgeable tag. Exposed only through
+ * `isDeclaredTypeKind` (below), which consults the private symbol.
  */
-export const TYPE_BRAND = Symbol("lapis-lang/Type")
+const TYPE_BRAND = Symbol("lapis-lang/Type")
+
+/**
+ * Nominal membership in the Type universe: consults the module-private brand
+ * symbol. The property lives on `Type.prototype` (an instance field on the
+ * abstract root), so only declared subclasses' instances carry it — and a
+ * caller cannot COPY it onto a plain object without possessing the private
+ * symbol, which this module does not export. This is the boundary
+ * `isTypeValue` (subtyping.ts) validates before the `dispatch` protocol.
+ */
+export function isDeclaredTypeKind(t: unknown): boolean {
+    return t !== null && typeof t === "object" && (t as { [TYPE_BRAND]?: true })[TYPE_BRAND] === true
+}
 
 // ── Type ──────────────────────────────────────────────────────────────────────
 /** The root of the LC type hierarchy. Every type is a subtype of this. */
