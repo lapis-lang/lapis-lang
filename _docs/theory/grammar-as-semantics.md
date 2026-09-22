@@ -479,6 +479,24 @@ The multi-pass fallback (Pattern 1 — a separate recursive function) is now res
 neither `_forward` nor tree-consuming grammars apply. For Lapis's current design, that may be none
 of them.
 
+Beyond the term-level passes, the judgment-class pattern also covers judgments over **already-built
+object syntax** — type-level judgments over `Type` ASTs. The type algebra's three readings
+(derivatives ∂T, coefficients, inhabitant counting — [`type-algebra.md`](./type-algebra.md) §1)
+share one `TypeAlgebra` class:
+
+| Judgment                                  | Input          | Pattern        | Mechanism                                                                                                                                                                       |
+| ----------------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type algebra (∂T, coefficients, counting) | `Type` objects | Judgment class | `TypeAlgebra` methods; NOT a `Grammar` subclass (types are not a parse) — identity-keyed per-instance memos restate `@rule`'s seam without the `Grammar`-hierarchy precondition |
+
+The input is in-memory `Type` objects, not source text — so there is no parse to subclass, and the
+judgment-class shape (one class, one method per judgment, shared traversal, per-instance memo state)
+is the mechanism the term-level passes realize through grammar subclassing. The same
+subclass-and-override discipline appears on the value side as virtual methods: `Value.equals` /
+`Value.size` / `Value.renderSource` (equality, size, and source rendering are intrinsic
+representation concerns, the same tier `Type.equals` lives on) are the method surface for new code;
+`valueEquals`/`valueSize` remain as same-signature compatibility delegates over the virtuals (the
+free-function surface the original API carried).
+
 ## 8. Relationship to Attribute Grammars
 
 The grammar-as-semantics model is an **executable attribute grammar**:
@@ -565,21 +583,27 @@ gone):
   **genuine data field** (the re-entrancy case the enumerators handle) — the two are now distinct
   positions in the data, not confusable flag/type pairs.
 
-### 10.2 One traversal (`mapType` / `foldType`)
+### 10.2 One traversal (`Type.dispatch` / `Type.map`)
 
-`types.ts` owns the structural machinery every pass shares:
+`types.ts` owns the structural machinery every pass shares — and it is POLYMORPHIC: the dispatch
+itself lives on the `Type` subclasses, not in a free function's `instanceof` ladder.
 
-- **`mapType(t, cases)`** — bottom-up transformation: children mapped first, composites rebuilt when
-  a child moved, handlers defaultable (a substitution spells only the kinds it transforms; a
-  polymorphic-type handler returning the original node expresses shadowing).
-- **`foldType(t, cases)`** — required-case dispatch WITHOUT recursion: the classification-style fold
-  (a tag, a summary, a count). A new `Type` subclass forces every case table to answer for it — the
-  closed-universe assumption is checked by the compiler, not assumed.
+- **`t.map(cases)`** — bottom-up transformation: children mapped first, composites rebuilt when a
+  child moved, handlers defaultable (a substitution spells only the kinds it transforms; a
+  polymorphic-type handler returning the original node expresses shadowing). The root's base
+  implementation is the ATOM default (no traversable sub-types); `FunType`, `IntersectionType`, and
+  `PolymorphicType` override to map their children first.
+- **`t.dispatch(cases)`** — required-case dispatch WITHOUT recursion: the classification-style fold
+  (a tag, a summary, a count). The `RequiredCases<T>` protocol makes a table that omits a kind a
+  compile error — a new `Type` subclass forces every case table to answer for it, and each subclass
+  implements its own dispatch arm, so the closed universe is the class hierarchy itself, checked by
+  the compiler, not assumed. A pass-local marker outside the universe (`cost.ts`'s `FoldRecType`)
+  overrides `dispatch` to throw its own name — classification consumers degrade it under `try`.
 
-`substituteTypeVar` (T-TApp) is `mapType` with two cases; the cost engine's kind classification is
-`foldType` under a `try` (a pass-local marker type outside the core universe classifies `unknown`,
+`substituteTypeVar` (T-TApp) is `map` with two cases; the cost engine's kind classification is
+`dispatch` under a `try` (a pass-local marker type outside the core universe classifies `unknown`,
 never crashes — classification is a tag, not a membership test); the lattice's boundary validation
-(`subtyping.ts`'s `requireType`) is `foldType` under a `try` too (an undeclared kind there is a loud
+(`subtyping.ts`'s `requireType`) is `dispatch` under a `try` too (an undeclared kind there is a loud
 rejection). No pass hand-rolls an `instanceof` ladder over the universe anymore.
 
 ### 10.3 Types are values (sealed two-phase construction)

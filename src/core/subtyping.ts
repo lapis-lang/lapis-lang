@@ -16,9 +16,9 @@ import {
     AnyType,
     CodataType,
     DataType,
-    foldType,
     FunType,
     IntersectionType,
+    isDeclaredTypeKind,
     Nothing,
     NothingType,
     PatternDataType,
@@ -32,27 +32,36 @@ import {
 /**
  * The Type-universe membership test: is this value actually a declared
  * kind? This is the lattice module's boundary — ONE validation at the
- * module's entry replaces the three silent `undefined` guards the functions
- * used to carry: the invariant is enforced at its construction point, not
+ * module's entry: the invariant is enforced at its construction point, not
  * scattered in prose.
  *
  * The grammar edge already enforces the deeper invariant (every
  * production-path override rejects a failed premise with `empty<Type>()`
  * BEFORE a contracted action runs, so the failure sentinel cannot flow into
  * a Type-typed channel); this check is what makes a BYPASSED edge crash
- * loudly instead of silently satisfying a rule — `isSubtype(undefined, Any)`
- * used to hold via S-Top (the guard's own report), so a leaked sentinel
- * silently satisfied consumer premises. Now the leak throws a TypeError
- * naming the non-type.
+ * loudly instead of silently satisfying a rule — `requireType` throws a
+ * TypeError naming the non-type operand, so a leaked sentinel can never
+ * satisfy a premise.
  *
- * Routed through `foldType` — a new Type subclass must answer here or the
+ * Routed through `t.dispatch` — a new Type subclass must answer here or the
  * boundary refuses it (the closed-universe assumption is checked, not
  * assumed).
+ *
+ * This is the ONE definition of "member of the closed universe" — the
+ * typing grammar's `isWellFormedType` check reuses it, so a new subclass
+ * cannot satisfy one consumer while being refused by the other.
  */
-function isTypeValue(t: unknown): t is Type {
+export function isTypeValue(t: unknown): t is Type {
     if (t === undefined || t === null) return false
+    // Nominal brand check FIRST — through `isDeclaredTypeKind` (types.ts),
+    // which consults the module-private brand symbol: a plain object with a
+    // compatible `dispatch` method (or any forged duck-type) is refused
+    // before the protocol is ever consulted — the dispatch result is data,
+    // not identity, and the brand cannot be forged without the private
+    // symbol.
+    if (!isDeclaredTypeKind(t)) return false
     try {
-        foldType(t as Type, {
+        ;(t as Type).dispatch<boolean>({
             fun: () => true,
             intersection: () => true,
             polymorphic: () => true,
@@ -105,8 +114,8 @@ export function isSubtype(
     // override rejects a failed premise with `empty<Type>()` BEFORE any
     // contracted action runs, so `undefined` (the contract-failure sentinel)
     // cannot reach the lattice as an operand. A bypassed edge is a caller
-    // bug — `requireType` throws loudly, never silently satisfying a premise
-    // via S-Top (the old guards' failure mode).
+    // bug — `requireType` throws loudly, never silently satisfying a
+    // premise via S-Top.
     requireType(sub, "sub", "isSubtype")
     requireType(super_, "super", "isSubtype")
 
@@ -298,8 +307,8 @@ export function join(
 ): Type {
     // `Type`-typed operands (strict null checks) + the grammar-edge invariant
     // (a failed premise is `empty<Type>()`, never a leaked sentinel) keep the
-    // lattice's operands types; `requireType` (via `isSubtype`) makes a
-    // bypassed edge loud instead of the old guard's silent failure signal.
+    // lattice's operands types; `requireType` (via `isSubtype`) throws on a
+    // bypassed edge.
     requireType(s, "s", "join")
     requireType(t, "t", "join")
 
@@ -345,8 +354,8 @@ export function meet(
     t: Type,
     delta: TypeVarEnv = new TypeVarEnv(),
 ): Type {
-    // The `undefined` guard is gone with the invariant it defended (see
-    // `join`) — `requireType` makes a bypassed edge loud.
+    // `requireType` validates both operands once at the entry — the
+    // invariant is enforced here, not per-guard downstream.
     requireType(s, "s", "meet")
     requireType(t, "t", "meet")
 

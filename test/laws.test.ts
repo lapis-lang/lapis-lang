@@ -23,7 +23,6 @@ import {
     screenLaw,
     type Value,
     ValueEnv,
-    valueEquals,
     VariantVal,
 } from "../src/index.ts"
 import { FunType, TypeEnv } from "../src/core/types.ts"
@@ -673,7 +672,7 @@ function identityElimLeft(
     const identityLaw = e.lookup(opName).find((law) => law.kind === "identity")
     if (!identityLaw) return { eliminated: false, result: undefined }
     const eValue = evalOf(identityLaw.argument!, new ValueEnv())[0]
-    if (left instanceof VariantVal && eValue instanceof VariantVal && valueEquals(left, eValue)) {
+    if (left instanceof VariantVal && eValue instanceof VariantVal && left.equals(eValue)) {
         return { eliminated: true, result: right }
     }
     return { eliminated: false, result: undefined }
@@ -692,12 +691,12 @@ Deno.test("exploit: identity-elimination rewrites add(Zero(), t) to t without th
     const t = natOf(3)
     const { eliminated, result } = identityElimLeft("add", natOf(0), t, e)
     assert(eliminated, "the rewrite fires on the identity operand")
-    assert(valueEquals(result as VariantVal, t))
+    assert((result as VariantVal).equals(t))
 
     // The rewrite is an equivalence with direct evaluation — the thesis
     // experiment: the declaration bought an optimization.
     const direct = evalOf("add(Zero(), Succ(Succ(Succ(Zero()))))", new ValueEnv())[0]
-    assert(valueEquals(direct as VariantVal, t))
+    assert((direct as VariantVal).equals(t))
 })
 
 Deno.test("exploit: the rewrite does not fire on a non-identity operand", () => {
@@ -719,26 +718,26 @@ Deno.test("exploit: no identity law in E means no rewrite", () => {
     assertEquals(eliminated, false)
 })
 
-// ── valueEquals (the screen's comparison primitive) ──────────────────────────
+// ── Value.equals (the screen's comparison primitive) ─────────────────────────
 
-Deno.test("valueEquals: structural equality on data values", () => {
-    assert(valueEquals(natOf(2), natOf(2)))
-    assertEquals(valueEquals(natOf(1), natOf(2)), false)
-    assertEquals(valueEquals(natOf(0), natOf(1)), false)
+Deno.test("Value.equals: structural equality on data values", () => {
+    assert(natOf(2).equals(natOf(2)))
+    assertEquals(natOf(1).equals(natOf(2)), false)
+    assertEquals(natOf(0).equals(natOf(1)), false)
 })
 
-Deno.test("valueEquals: same reference is equal even for non-structural values", () => {
+Deno.test("Value.equals: same reference is equal even for non-structural values", () => {
     const closure = evalOf("\\x:Nat. x", new ValueEnv())[0]!
-    assert(valueEquals(closure, closure))
-    assertEquals(valueEquals(closure, evalOf("\\x:Nat. x", new ValueEnv())[0]!), false)
+    assert(closure.equals(closure))
+    assertEquals(closure.equals(evalOf("\\x:Nat. x", new ValueEnv())[0]!), false)
 })
 
-Deno.test("valueEquals: nesting is compared", () => {
+Deno.test("Value.equals: nesting is compared", () => {
     const two = natOf(2)
     const other = natOf(2)
     assert(two instanceof VariantVal && other instanceof VariantVal)
-    assert(valueEquals(two, other))
-    assertEquals(valueEquals(natOf(0), natOf(0)), true)
+    assert(two.equals(other))
+    assertEquals(natOf(0).equals(natOf(0)), true)
 })
 
 // ── Value plumbing (screen internals surfaced for regression) ─────────────────
@@ -786,7 +785,7 @@ const { gen, evalOf: harnessEval } = createLawHarness()
  * variant, unbound variable, type mismatch) as an `EvalErrorValue` sentinel —
  * a proper `Value` subclass, indistinguishable from a real result without the
  * guard the screen applies (law_checking.ts). A sentinel entering the law
- * comparison would make `valueEquals` return `false`: a tooling regression
+ * comparison would make `equals` return `false`: a tooling regression
  * reported as a mathematical falsification. Reject it here, like the empty
  * forest. Throwing (not returning `false`) also keeps the failure mode
  * distinct from a falsification: `forAll` wraps the throw in
@@ -824,10 +823,8 @@ function natDepth(src: string): number {
  * `fold [Nat] e { Zero() -> Zero(), Succ(p) -> Succ(p) } ≡ e`.
  */
 function identityFoldHolds(src: string): boolean {
-    return valueEquals(
-        mustEval(`fold [Nat] ${src} { Zero() -> Zero(), Succ(p) -> Succ(p) }`),
-        mustEval(src),
-    )
+    return mustEval(`fold [Nat] ${src} { Zero() -> Zero(), Succ(p) -> Succ(p) }`)
+        .equals(mustEval(src))
 }
 
 /**
@@ -836,7 +833,7 @@ function identityFoldHolds(src: string): boolean {
  * minimal counterexample.
  */
 function idempotentMulHolds(src: string): boolean {
-    return valueEquals(mustEval(`mul(${src}, ${src})`), mustEval(src))
+    return mustEval(`mul(${src}, ${src})`).equals(mustEval(src))
 }
 
 Deno.test("forAll: identity-fold law holds over 200 generated Nat values", () => {

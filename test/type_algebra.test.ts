@@ -9,7 +9,7 @@
 
 import { assertEquals, assertThrows } from "@std/assert"
 
-import { coefficients, type ContextSpec, derivative } from "../src/core/type_algebra.ts"
+import { coefficients, ContextSpec, derivative, typeAlgebra } from "../src/core/type_algebra.ts"
 import { createPatternType } from "./fixtures.ts"
 import {
     Any,
@@ -69,14 +69,14 @@ Deno.test("seal: the frozen array rejects mutation even through a retained alias
 function bool(): DataType {
     const b = new DataType("Bool", [])
     b.addVariant(new Variant("True", []), new Variant("False", []))
-    return b
+    return b.seal()
 }
 
 /** `Nat = Zero | Succ(pred: Nat)` — the single-recursive-field carrier. */
 function nat(): DataType {
     const n = new DataType("Nat", [])
     n.addVariant(new Variant("Zero", []), new Variant("Succ", [new Field("pred", Family)]))
-    return n
+    return n.seal()
 }
 
 /** `Pair(a: Bool, b: Bool)` — the two-field record (Leibniz's product). */
@@ -85,14 +85,14 @@ function pair(): DataType {
     p.addVariant(
         new Variant("MkPair", [new Field("a", bool()), new Field("b", bool())]),
     )
-    return p
+    return p.seal()
 }
 
 /** `Wrapped(inner: Nat)` — a field of another data type (chain-rule step). */
 function wrapped(): DataType {
     const w = new DataType("Wrapped", [])
     w.addVariant(new Variant("MkWrapped", [new Field("inner", nat())]))
-    return w
+    return w.seal()
 }
 
 /** `Stack = Empty | Push(value: Any, rest: Stack)` — heterogeneous fields. */
@@ -102,7 +102,7 @@ function stack(): DataType {
         new Variant("Empty", []),
         new Variant("Push", [new Field("value", Any), new Field("rest", Family)]),
     )
-    return s
+    return s.seal()
 }
 
 /**
@@ -115,14 +115,14 @@ function fork(): DataType {
         new Variant("Leaf", []),
         new Variant("ForkIt", [new Field("left", Family), new Field("right", Family)]),
     )
-    return t
+    return t.seal()
 }
 
 /** A carrier with a comb parent: `NatPos` inherits `Nat`'s variants. */
 function natPos(): DataType {
     const n = nat()
     const p = new DataType("NatPos", [new Variant("Top", [])], n)
-    return p
+    return p.seal()
 }
 
 function spec(
@@ -131,7 +131,11 @@ function spec(
     holeType: Type,
     surroundTypes: Type[],
 ): ContextSpec {
-    return { variantName, fieldName, holeType, surroundTypes }
+    // The spec is now a class (the chain rule's data edge lives on it);
+    // the module default instance constructs it, exactly as `derivative`
+    // does. The edge is never consulted in these structural-shape tests —
+    // the constructor's fields alone carry every assertion below.
+    return new ContextSpec(variantName, fieldName, holeType, surroundTypes, typeAlgebra)
 }
 
 // ── The sum rule (nullary variants) ───────────────────────────────────────────
@@ -199,6 +203,7 @@ Deno.test("derivative: function-typed, Token, pattern, Nothing, and Any fields c
             ],
         ),
     )
+    weird.seal()
     // The unsampleable fields yield no specs of their own, but they DO join
     // the recursive field's surroundings (Leibniz: everything except the
     // hole, in field order).

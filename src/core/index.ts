@@ -22,6 +22,7 @@ export {
     Observer,
     PatternDataType,
     PolymorphicType,
+    type RequiredCases,
     Token,
     TokenType,
     Type,
@@ -178,7 +179,11 @@ export {
     type ContextSpec,
     derivative,
     MAX_COEFFICIENT,
+    MAX_FINITE_INHABITANTS,
+    type PatternLookup,
     setPatternLookup,
+    TypeAlgebra,
+    typeAlgebra,
 } from "./type_algebra.ts"
 
 // The pattern language (the AST, parser, and language-equation

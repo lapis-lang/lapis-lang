@@ -602,7 +602,7 @@ function isBoolType(t: Type): boolean {
  */
 function paramTypeCompatible(a: Type, b: Type): boolean {
     // Two pattern types: same name = same carrier (the token identity is
-    // type-qualified — see `valueEquals`'s `TokenVal` branch).
+    // type-qualified — see `TokenVal.equals`'s type-name comparison).
     if (a instanceof PatternDataType && b instanceof PatternDataType) return a.equals(b)
     // Mixed data/pattern: never compatible.
     if (a instanceof PatternDataType !== (b instanceof PatternDataType)) return false

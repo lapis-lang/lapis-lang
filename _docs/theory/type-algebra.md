@@ -4,7 +4,8 @@
 > algebraic data types: generating functions for inhabitant counts, coefficient sequences for
 > certified screen coverage, and derivatives (one-hole contexts) for structural shrinking. It
 > extends [`lc.md`](./lc.md) §7 (Algebraic Equivalence) and [`semantics.md`](./semantics.md) §5.4
-> (Law Checking); implementation anchor: `src/core/law_checking.ts`.
+> (Law Checking); implementation anchor: `src/core/type_algebra.ts` (the `TypeAlgebra` judgment
+> class) and `src/core/law_checking.ts`.
 
 ## 1. Overview
 
@@ -25,7 +26,7 @@ decomposition of `semantics.md` §5.5 are generating-function reasoning in proof
 is the **type-level** mirror: the same equations, read for _sizes_ and _contexts_ rather than
 proofs.
 
-Three readings of one equation, one module:
+Three readings of one equation, one **judgment class** (see below for the class form):
 
 1. **Counting** — `|T|`, the total inhabitant count: decides the `finite` regime
    (`finiteInhabitants`, implemented).
@@ -34,11 +35,33 @@ Three readings of one equation, one module:
 3. **Derivatives** — $\partial T$, the type of one-hole contexts: structural shrinking, paramorphism
    typing, live-observation evidence.
 
+**One judgment class, three readings.** The type-level judgments over the `Type` AST are hosted as
+methods of one `TypeAlgebra` class (`type_algebra.ts`) — the judgment-class pattern
+([`grammar-as-semantics.md`](./grammar-as-semantics.md) §7.3) applied to type-level syntax: the
+`Type` ASTs are the syntax, the algebra's readings are the judgments. The class is deliberately NOT
+a `Grammar` subclass (types are not a parse; `@rule` memoization is implemented on the
+`Grammar.prototype` machinery and is unusable outside that hierarchy) — its memoization is the same
+seam re-stated without the decorator: per-instance identity-keyed `WeakMap` caches (the `treeKey`
+v3.0.1 keying scheme, sound because types are sealed/immutable post-construction). The free-function
+surface (`derivative`, `coefficients`, `finiteInhabitants`, `setPatternLookup`) delegates to a
+module-level default instance, so zero-fixture call sites keep working; the value side mirrors this
+with `equals`/`size` as virtual methods on `Value` (`values.ts`) — the method surface for new code,
+with `valueEquals`/`valueSize` retained as same-signature compatibility delegates over the virtuals
+(the free-function surface the original API carried; existing consumers keep importing them) — the
+same tier `Type.equals` lives on.
+
+The shared traversal (variant iteration, the `dispatch` field-kind classification, mutual-system
+collection, memoization) is the class's skeleton; each reading supplies its own per-kind actions —
+the readings stay independent (the counting's saturation arithmetic and the coefficients' truncated
+polynomial fixpoint are genuinely different algorithms on the same equations; unifying them would
+break each caller's honest saturation contract).
+
 ## 2. Counting: `|T|` as a decision procedure
 
 ### 2.1 The classifier
 
-`finiteInhabitants(type)` (implemented, `law_checking.ts`) evaluates the generating function:
+`finiteInhabitants(type)` (implemented — migrated to `TypeAlgebra.inhabitants`, `type_algebra.ts`;
+`law_checking.ts` re-exports the delegate) evaluates the generating function:
 
 - A variant contributes the **product** over its fields; the variant set contributes the **sum**.
 - A **recursive field** (`Family` position) makes the count undefined: $T = 1 + a\,T$ has no
@@ -274,35 +297,44 @@ total maps (`from`/`to`) checked against the calculus.
 
 ## 7. Implementation status and roadmap
 
-| Piece                                                    | Status                                                    |
-| -------------------------------------------------------- | --------------------------------------------------------- |
-| `finiteInhabitants` (counting classifier)                | **implemented** (`law_checking.ts`)                       |
-| Exact sweep routing (`screeningRegime`)                  | **implemented** (`law_checking.ts`)                       |
-| Exhaustion (`exhaustLaw` → `discharged`)                 | **implemented** (`law_checking.ts`)                       |
-| Zero-coverage rejection (declined screen)                | **implemented** (`screenLaw` outcome + reject)            |
-| `Token` value form (`TokenVal`, T-Token)                 | **implemented** (`values.ts`, `grammar.ts`)               |
-| Pattern sampling (token prefix, §2.3/§3)                 | **implemented** (`patternSamples` in `law_checking.ts`)   |
-| ∂T machinery (§4) — `derivative(T)`                      | **implemented** (`type_algebra.ts`; `ContextSpec` shapes, |
-|                                                          | implicit differentiation at the μ-bound)                  |
-| ∂T-based structural shrinking                            | **implemented** (`law_testing.ts`; `DerivativeGenerator`, |
-|                                                          | regeneration as the fallback)                             |
-| ∂T: `old`/paramorphism typing (§4.2)                     | pending (stretch — needs the `old` language feature)      |
-| ∂T: observation-channel evidence typing                  | pending (stretch — needs the re-screening channel)        |
-| Coefficient-certified screen coverage (§3)               | **implemented** (`type_algebra.ts` `coefficients`;        |
-| `law_checking.ts` `inhabitantsUpToSize` + certification) |                                                           |
-| Pattern language-equation coefficients (§2.3/§3)         | **implemented** (`pattern_lang.ts` parse + counting;      |
-|                                                          | `types.ts` AST patterns; `type_algebra.ts` pattern arm)   |
-| Token size = text length (§3 certificates)               | **implemented** (`values.ts` `valueSize` token arm)       |
-| Sub-space specifications + `machineFinite` (§5)          | **implemented** (`laws.ts` `LawDecl.subSpace` +           |
-|                                                          | validation; `law_checking.ts` machineFinite arm +         |
-|                                                          | `exhaustLaw` sub-space filtering)                         |
-| Encoding declarations (§5)                               | **rejected** — contradicts the token architecture (§5)    |
-| Sub-space surface syntax                                 | pending (core: structured `subSpace` field; the surface   |
-|                                                          | form lands with the pattern-surface PBI)                  |
-| BMF derivation engine (§6)                               | **implemented** (`derivation.ts` — the bounded,           |
-|                                                          | search-free discharger; the fragment is defined by what   |
-|                                                          | the engine closes; `commutative` on Nat's `add` stays     |
-|                                                          | the honest edge)                                          |
+| Piece                                               | Status                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| `finiteInhabitants` (counting classifier)           | **implemented** (`TypeAlgebra.inhabitants` in                |
+|                                                     | `type_algebra.ts`; `law_checking.ts` re-export)              |
+| Exact sweep routing (`screeningRegime`)             | **implemented** (`law_checking.ts` — the router over         |
+|                                                     | `(law, op)` stays there; its counting calls the class)       |
+| Exhaustion (`exhaustLaw` → `discharged`)            | **implemented** (`law_checking.ts`)                          |
+| Zero-coverage rejection (declined screen)           | **implemented** (`screenLaw` outcome + reject)               |
+| `Token` value form (`TokenVal`, T-Token)            | **implemented** (`values.ts`, `grammar.ts`)                  |
+| Pattern sampling (token prefix, §2.3/§3)            | **implemented** (`patternSamples` in `law_checking.ts`)      |
+| ∂T machinery (§4) — `derivative(T)`                 | **implemented** (`type_algebra.ts` `TypeAlgebra.derivative`; |
+|                                                     | `ContextSpec` shapes — a class with the chain-rule data      |
+|                                                     | edge `derivative()`; implicit differentiation at the         |
+|                                                     | μ-bound)                                                     |
+| ∂T-based structural shrinking                       | **implemented** (`law_testing.ts`; `DerivativeGenerator`     |
+|                                                     | walks the algebra's memoized `specFor` and the specs'        |
+|                                                     | data edge — regeneration as the fallback)                    |
+| ∂T: `old`/paramorphism typing (§4.2)                | pending (stretch — needs the `old` language feature)         |
+| ∂T: observation-channel evidence typing             | pending (stretch — needs the re-screening channel)           |
+| Coefficient-certified screen coverage (§3)          | **implemented** (`TypeAlgebra.coefficients`;                 |
+|                                                     | `law_checking.ts` `inhabitantsUpToSize` + certification)     |
+| Pattern language-equation coefficients (§2.3/§3)    | **implemented** (`pattern_lang.ts` parse + counting;         |
+|                                                     | `types.ts` AST patterns; the class's pattern arm)            |
+| Token size = text length (§3 certificates)          | **implemented** (`values.ts` `Value.size` token arm —        |
+|                                                     | the virtual method on `Value`)                               |
+| `TypeAlgebra` judgment class (§1 — one class, three | **implemented** (`type_algebra.ts` — the readings share      |
+| readings: ∂T + coefficients + counting)             | the traversal and identity-keyed memos; the class is not     |
+|                                                     | a `Grammar` subclass — per-instance `WeakMap` keying)        |
+| Sub-space specifications + `machineFinite` (§5)     | **implemented** (`laws.ts` `LawDecl.subSpace` +              |
+|                                                     | validation; `law_checking.ts` machineFinite arm +            |
+|                                                     | `exhaustLaw` sub-space filtering)                            |
+| Encoding declarations (§5)                          | **rejected** — contradicts the token architecture (§5)       |
+| Sub-space surface syntax                            | pending (core: structured `subSpace` field; the surface      |
+|                                                     | form lands with the pattern-surface PBI)                     |
+| BMF derivation engine (§6)                          | **implemented** (`derivation.ts` — the bounded,              |
+|                                                     | search-free discharger; the fragment is defined by what      |
+|                                                     | the engine closes; `commutative` on Nat's `add` stays        |
+|                                                     | the honest edge)                                             |
 
 Ordering rationale: counting and routing landed first because they are the **decision procedures**
 everything else consults; pattern-value support next (it unblocks the largest unserved universe);

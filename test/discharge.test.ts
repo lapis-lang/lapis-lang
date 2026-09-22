@@ -116,6 +116,7 @@ Deno.test("finiteInhabitants: a record of finites is the product of its fields",
             new Field("snd", bool),
         ]),
     )
+    pair.seal()
     assertEquals(finiteInhabitants(pair), 4)
 })
 
@@ -123,6 +124,7 @@ Deno.test("finiteInhabitants: a function-typed field makes the type unbounded", 
     const nat = createNatType()
     const fnBox = new DataType("FnBox", [])
     fnBox.addVariant(new Variant("MkFnBox", [new Field("f", new FunType(nat, nat))]))
+    fnBox.seal()
     assertEquals(finiteInhabitants(fnBox), undefined)
 })
 
@@ -133,6 +135,7 @@ Deno.test("finiteInhabitants: a recursive field makes the type unbounded", () =>
         new Variant("Nil", []),
         new Variant("Cons", [new Field("tail", Family)]),
     )
+    list.seal()
     assertEquals(finiteInhabitants(list), undefined)
 })
 
@@ -185,14 +188,17 @@ Deno.test("screeningRegime: the sweep estimate is the exact per-position product
     big.addVariant(
         new Variant("Big", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    big.seal()
     const n7 = new DataType("N7", [])
     n7.addVariant(
         new Variant("N7", Array.from({ length: 7 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    n7.seal()
     const n6 = new DataType("N6", [])
     n6.addVariant(
         new Variant("N6", Array.from({ length: 6 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    n6.seal()
     h.registry.register(big)
     h.registry.register(n7)
     h.registry.register(n6)
@@ -362,6 +368,7 @@ Deno.test("screen: typed field samples — residual folds over field variants ev
         new Variant("Succ", [new Field("p", Family)]),
     )
     ns.seal()
+    ns.seal()
     h.registry.register(ns)
     h.opRegistry.declare(
         new OpSig(
@@ -483,6 +490,7 @@ Deno.test("finiteInhabitants: an 18-Bool record (2¹⁸) exceeds the ceiling; 17
     wide.addVariant(
         new Variant("MkWide", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    wide.seal()
     assertEquals(finiteInhabitants(wide), 2 ** 17 + 1)
 
     // A 17-Bool record sits exactly at the ceiling — exhaustible in principle.
@@ -490,6 +498,7 @@ Deno.test("finiteInhabitants: an 18-Bool record (2¹⁸) exceeds the ceiling; 17
     narrow.addVariant(
         new Variant("MkNarrow", Array.from({ length: 17 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    narrow.seal()
     assertEquals(finiteInhabitants(narrow), 2 ** 17)
 })
 
@@ -508,6 +517,7 @@ Deno.test("discharge: an over-ceiling type routes residual — certification DEC
     wide.addVariant(
         new Variant("MkWide", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    wide.seal()
     h.registry.register(wide)
     const bindings = Array.from({ length: 18 }, (_, i) => `v${i}`).join(" ")
     h.opRegistry.declare(
@@ -544,7 +554,9 @@ Deno.test("discharge: a failed inhabitant construction rejects the declaration �
     const unreg = new DataType("Unreg", [])
     unreg.addVariant(new Variant("U1", []), new Variant("U2", []))
     const holder = new DataType("Holder", [])
+    unreg.seal()
     holder.addVariant(new Variant("MkHolder", [new Field("u", unreg)]))
+    holder.seal()
     h.registry.register(holder) // `unreg` deliberately NOT registered
     h.opRegistry.declare(
         new OpSig(
@@ -585,6 +597,7 @@ Deno.test("discharge: a position no schema variable lands on is never enumerated
     n2.addVariant(
         new Variant("N2", Array.from({ length: 2 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    n2.seal()
     h.registry.register(n2)
     const b2 = Array.from({ length: 2 }, (_, i) => `v${i}`).join(" ")
     h.opRegistry.declare(
@@ -629,6 +642,7 @@ Deno.test("discharge: an empty operand type discharges vacuously (0 instances)",
     // carry a handler list, so the definition need not be a fold.)
     const h = boolHarness()
     const empty = new DataType("Empty", [])
+    empty.seal()
     h.registry.register(empty)
     h.opRegistry.declare(
         new OpSig("emptyId", [empty], empty, "\\e:Empty. e"),
@@ -724,15 +738,18 @@ Deno.test("discharge: a variant with a zero-inhabitant field contributes nothing
     // true (2-value) space.
     const h = boolHarness()
     const empty = new DataType("Empty", [])
+    empty.seal()
     const big = new DataType("Big", [])
     big.addVariant(
         new Variant("Big", Array.from({ length: 17 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    big.seal()
     const mixed = new DataType("Mixed", [])
     mixed.addVariant(
         new Variant("Dead", [new Field("payload", big), new Field("hole", empty)]),
         new Variant("Live", []),
     )
+    mixed.seal()
     h.registry.register(empty)
     h.registry.register(big)
     h.registry.register(mixed)
@@ -784,6 +801,7 @@ Deno.test("discharge: a residual law whose screen declines is REJECTED — zero 
     const h = boolHarness()
     const streamLike = new DataType("StreamLike", [])
     streamLike.addVariant(new Variant("Wrap", [new Field("inner", Family)]))
+    streamLike.seal()
     streamLike.seal()
     h.registry.register(streamLike)
     h.opRegistry.declare(
@@ -1032,6 +1050,7 @@ Deno.test("discharge: a data type with a pattern-typed field is sampled — Empt
         new Variant("Empty", []),
         new Variant("With", [new Field("p", pat)]),
     )
+    withPat.seal()
     h.registry.register(pat)
     h.registry.register(withPat)
     h.opRegistry.declare(
@@ -1297,6 +1316,7 @@ Deno.test("enumerator contract: a self-typed non-recursive data field re-enters 
         new Variant("Wrap", [new Field("inner", self)]),
     )
     self.seal()
+    self.seal()
     h.registry.register(self)
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
     const space = inhabitantsUpToSize(self, 3, eval_)
@@ -1318,6 +1338,7 @@ Deno.test("enumerator contract: a mutually recursive A↔B pair enumerates both 
     a.addVariant(new Variant("BaseA", []), new Variant("MkA", [new Field("b", b)]))
     b.addVariant(new Variant("MkB", [new Field("a", a)]))
     a.seal()
+    b.seal()
     b.seal()
     h.registry.register(a)
     h.registry.register(b)
@@ -1345,6 +1366,7 @@ Deno.test("certified screen: a wide-flat record certifies its raised min class (
     rec.addVariant(
         new Variant("MkRec", Array.from({ length: 7 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    rec.seal()
     h.registry.register(nat)
     h.registry.register(rec)
     const bindings = Array.from({ length: 7 }, (_, i) => `v${i}`).join(" ")
@@ -1401,6 +1423,7 @@ Deno.test("certified screen: an 18-Bool record's min class exceeds the prefix bu
     wide.addVariant(
         new Variant("MkWide", Array.from({ length: 18 }, (_, i) => new Field(`f${i}`, h.bool))),
     )
+    wide.seal()
     h.registry.register(wide)
     const bindings = Array.from({ length: 18 }, (_, i) => `v${i}`).join(" ")
     h.opRegistry.declare(
@@ -1524,8 +1547,10 @@ Deno.test("certified screen: a construction yielding a foreign carrier's variant
     victim.addVariant(
         new Variant("Tag", [new Field("b", h.bool)]),
     )
+    victim.seal()
     const impostor = new DataType("Impostor", [])
     impostor_variants_helper(impostor)
+    impostor.seal()
     h.registry.register(victim)
     h.registry.register(impostor)
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
@@ -1562,6 +1587,7 @@ function impostor_variants_helper(impostor: DataType): void {
     impostor.addVariant(
         new Variant("Tag", [new Field("n", new DataType("Unused", []))]),
     )
+    impostor.seal()
 }
 
 // ── Sub-space discharge (the machineFinite regime) ───────────────

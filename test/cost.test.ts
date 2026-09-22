@@ -36,7 +36,15 @@ import {
     SizeExpr,
     TypeRegistry,
 } from "../src/index.ts"
-import { DataType, Family, Field, Type, Variant } from "../src/core/types.ts"
+import {
+    DataType,
+    Family,
+    Field,
+    type RequiredCases,
+    Type,
+    type TypeCases,
+    Variant,
+} from "../src/core/types.ts"
 import { createNatStreamType, createNatType, createOpFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -470,6 +478,20 @@ Deno.test("typeKind: a pass-local Type subclass classifies unknown, never crashe
         }
         toString(): string {
             return "⟨foreign⟩"
+        }
+        // The pass-local marker is outside the core universe — no generic
+        // case table or structural map answers for it (mirrors the engine's
+        // FoldRecType).
+        override dispatch<T>(_cases: RequiredCases<T>): T {
+            throw new TypeError("ForeignMarker is outside the Type universe")
+        }
+
+        override map(_cases: TypeCases<Type>): Type {
+            throw new TypeError("ForeignMarker is outside the Type universe")
+        }
+
+        override resolveFamily(_carrier: DataType): Type {
+            throw new TypeError("ForeignMarker is outside the Type universe")
         }
     }
     const { registry, opRegistry, nat } = createOpFixtures()
