@@ -15,6 +15,29 @@ import type { Span } from "@lapis-lang/lang-forma"
 // ── Value ─────────────────────────────────────────────────────────────────────
 
 /**
+ * The free-function surface for the virtuals (compatibility exports): the
+ * ladders live on the subclasses as `Value.equals`/`Value.size` — these are
+ * the same-signature delegates the original API carried, so existing
+ * consumers keep importing them. New code calls the methods directly.
+ */
+
+/**
+ * Structural equality on data values — the virtual `Value.equals` (the
+ * per-kind contracts live on the subclasses). Free-function surface.
+ */
+export function valueEquals(a: Value, b: Value): boolean {
+    return a.equals(b)
+}
+
+/**
+ * The structural size of a value — the virtual `Value.size`. Free-function
+ * surface.
+ */
+export function valueSize(value: Value): number {
+    return value.size()
+}
+
+/**
  * The root of the LC value hierarchy.
  *
  * Equality, size, and source rendering are intrinsic representation concerns

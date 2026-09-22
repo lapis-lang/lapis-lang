@@ -34,7 +34,7 @@ import {
 
 import { typeAlgebra } from "./type_algebra.ts"
 import { type EvalTerm, samplesFor } from "./law_checking.ts"
-import { ValueEnv, VariantVal } from "./values.ts"
+import { type Value, ValueEnv, VariantVal } from "./values.ts"
 import { DataType, type Type } from "./types.ts"
 
 // ── Context paths ─────────────────────────────────────────────────────────────
@@ -76,21 +76,23 @@ export function contextPaths(value: VariantVal): ContextPath[] {
             // this step) is itself a context — replace the whole field.
             const here: ContextPath = [...prefix, [node.variantName, fieldName] as const]
             paths.push(here)
-            // The chain rule, one level — read off the spec's data edge
+            // The chain rule, one level — driven by the spec's data edge
             // (the algebra's derivative for the hole's own structure, the
-            // rule as DATA): when the hole's type is the field subtree's
-            // own carrier type, the descent may continue INSIDE that
-            // subtree — the path extends with contexts of the subtree
-            // (taken under the subtree's carrier). Identity comparison: the
-            // evaluator stamps every value's `dataType` from the same
-            // registry the carrier came from, so reference equality is exact
-            // and cheaper than name matching (two distinct DataType
-            // instances can share a name). Rose-shaped recursion (a Family
-            // under a list-like field) differentiates through here only one
-            // level deep — the expressiveness boundary type-algebra.md §4.3
-            // states.
+            // rule as DATA): the descent continues INSIDE the field's
+            // subtree exactly when the edge is defined AND the subtree's
+            // carrier is the edge's hole carrier. The edge IS the hole
+            // type's derivative (memoized on the spec), so the walk consults
+            // the same spec objects the algebra serves — no independent
+            // re-derivation. Identity comparison: the evaluator stamps every
+            // value's `dataType` from the same registry the carrier came
+            // from, so reference equality is exact and cheaper than name
+            // matching (two distinct DataType instances can share a name).
+            // Rose-shaped recursion (a Family under a list-like field)
+            // differentiates through here only one level deep — the
+            // expressiveness boundary type-algebra.md §4.3 states.
+            const edge = spec.derivative()
             if (
-                fieldValue instanceof VariantVal && spec.holeType instanceof DataType &&
+                fieldValue instanceof VariantVal && edge !== undefined &&
                 fieldValue.dataType === spec.holeType
             ) {
                 walk(fieldValue, fieldValue.dataType, here)
@@ -127,6 +129,17 @@ export function plug(
     const fields = new Map(value.fields)
     fields.set(fieldName!, patched)
     return new VariantVal(value.variantName, value.dataType, fields)
+}
+
+/**
+ * Render a value as LC source — the virtual `Value.renderSource` (the
+ * per-kind arms live on the subclasses). Free-function surface: the harness's
+ * domain is source strings, so plugged candidates render back to the concrete
+ * syntax the evaluator parses; `undefined` when the value has no valid
+ * source form (the result must always re-parse).
+ */
+export function renderValue(value: Value): string | undefined {
+    return value.renderSource()
 }
 
 // ── The ∂T shrinker ───────────────────────────────────────────────────────────
@@ -292,6 +305,14 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
         for (const [variantName, fieldName] of path) {
             const spec = typeAlgebra.specFor(carrier).get(variantName)?.get(fieldName)
             if (spec === undefined) return undefined
+            // The data edge IS the gate: it is defined exactly when the hole
+            // type has punchable structure (a DataType), so consulting it
+            // (memoized on the spec) is what licenses the descent — the walk
+            // and the edge cannot diverge (the edge is computed from the
+            // hole type by the algebra, the single derivation both walkers
+            // read).
+            const edge = spec.derivative()
+            if (edge === undefined) return undefined
             const next = spec.holeType
             if (!(next instanceof DataType)) return undefined
             carrier = next

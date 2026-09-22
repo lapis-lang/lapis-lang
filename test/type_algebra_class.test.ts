@@ -39,14 +39,14 @@ import { TokenVal, VariantVal } from "../src/core/values.ts"
 function bool(): DataType {
     const b = new DataType("Bool", [])
     b.addVariant(new Variant("True", []), new Variant("False", []))
-    return b
+    return b.seal()
 }
 
 /** `Nat = Zero | Succ(pred: Nat)` — the single-recursive-field carrier. */
 function nat(): DataType {
     const n = new DataType("Nat", [])
     n.addVariant(new Variant("Zero", []), new Variant("Succ", [new Field("pred", Family)]))
-    return n
+    return n.seal()
 }
 
 // ── Identity-keyed memos (D2 — the same-instance cache) ──────────────────────
@@ -124,11 +124,15 @@ Deno.test("inhabitants: same-name carriers do not share verdicts (identity keyin
     // shapes, different verdicts, never conflated by the memo.
     const inner = new DataType("Carrier", [])
     inner.addVariant(new Variant("MkInner", [new Field("flag", bool())]))
+    inner.seal()
+    inner.seal()
     assertEquals(finiteInhabitants(inner), 2)
     const outer = new DataType("Carrier", [])
     outer.addVariant(
         new Variant("MkOuter", [new Field("flag", bool()), new Field("rest", Family)]),
     )
+    outer.seal()
+    outer.seal()
     assertEquals(finiteInhabitants(outer), undefined)
     // The first verdict is intact after the second's walk.
     assertEquals(finiteInhabitants(inner), 2)
@@ -142,6 +146,7 @@ Deno.test("context edge: a data-hole spec carries the hole's own derivative", ()
     const n = nat()
     const w = new DataType("Wrapped", [])
     w.addVariant(new Variant("MkWrapped", [new Field("inner", n)]))
+    w.seal()
     const [spec] = typeAlgebra.derivative(w)
     assert(spec.holeType === n)
     const edge = spec.derivative()
@@ -183,6 +188,7 @@ Deno.test("context edge: no-structure hole types carry no edge (undefined)", () 
             ],
         ),
     )
+    weird.seal()
     const specs = typeAlgebra.derivative(weird)
     assertEquals(specs.length, 1)
     const [spec] = specs
@@ -192,6 +198,8 @@ Deno.test("context edge: no-structure hole types carry no edge (undefined)", () 
     // A data-hole spec on another carrier: edge defined.
     const wrapped = new DataType("Wrapped", [])
     wrapped.addVariant(new Variant("MkWrapped", [new Field("inner", nat())]))
+    wrapped.seal()
+    wrapped.seal()
     const dataSpec = typeAlgebra.derivative(wrapped)[0]
     assert(dataSpec.derivative() !== undefined)
 })
@@ -202,6 +210,7 @@ Deno.test("context edge: the edge is computed at most once per spec (lazily memo
     const n = nat()
     const w = new DataType("Wrapped", [])
     w.addVariant(new Variant("MkWrapped", [new Field("inner", n)]))
+    w.seal()
     const [spec] = typeAlgebra.derivative(w)
     assert(spec.derivative() === spec.derivative())
 })

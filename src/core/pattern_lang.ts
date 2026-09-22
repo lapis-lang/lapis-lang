@@ -1019,6 +1019,20 @@ export function typeUnionCounts(type: PatternDataType, k: number): readonly numb
         const resolved = patternLookupHook(name)
         return resolved
     }
+    return typeUnionCountsWith(type, k, lookup)
+}
+
+/**
+ * The union-coefficient reading against an EXPLICIT lookup — the
+ * per-instance seam: a TypeAlgebra instance threads its constructor-injected
+ * lookup here so a pattern type's <T> references resolve under that
+ * instance's environment, not the process-global hook.
+ */
+export function typeUnionCountsWith(
+    type: PatternDataType,
+    k: number,
+    lookup: (name: string) => PatternDataType | undefined,
+): readonly number[] {
     return typeCoefficients(type, k, lookup, [type.name], new Map())
 }
 
@@ -1036,6 +1050,19 @@ export function typeUnionStrings(
     maxCount: number,
 ): Set<string> | undefined {
     const lookup = (name: string): PatternDataType | undefined => patternLookupHook(name)
+    return typeUnionStringsWith(type, k, maxCount, lookup)
+}
+
+/**
+ * The union enumeration against an EXPLICIT lookup — the per-instance
+ * seam (the same contract as typeUnionCountsWith).
+ */
+export function typeUnionStringsWith(
+    type: PatternDataType,
+    k: number,
+    maxCount: number,
+    lookup: (name: string) => PatternDataType | undefined,
+): Set<string> | undefined {
     return typeEnumeration(type, k, maxCount, lookup, [type.name], new Map())
 }
 

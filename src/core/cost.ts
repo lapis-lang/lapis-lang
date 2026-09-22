@@ -1111,13 +1111,13 @@ class CostEngine extends AbstractLC<CostShape> {
      * the type checker's σ binding.
      */
     protected override foldFieldType(field: Field, dataType: DataType): Type {
-        // The μ-bound resolves to the carrier (the type side), then the
-        // cost engine re-marks it as the fold-recursion denotation (the
-        // cost side's opaque size — E-Fold binds the recursive field to the
-        // folded result).
-        return field.type.resolveFamily(dataType) instanceof DataType
-            ? new FoldRecType(dataType.name)
-            : field.type
+        // Only the μ-bound occurrence (a Family-typed field) is the
+        // fold-recursion denotation: resolveFamily translates Family → the
+        // carrier, so the RESOLVED type is the carrier exactly when the field
+        // was Family-typed; an ordinary data field stays itself. Distinguish
+        // the two by the DECLARED field type: Family resolves to the carrier
+        // (== dataType); a genuine data field names its own type.
+        return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
     }
 
     // ── Semantic actions ──────────────────────────────────────────────────────

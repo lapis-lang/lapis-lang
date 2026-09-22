@@ -24,6 +24,7 @@ import {
     PolymorphicType,
     TokenType,
     type Type,
+    TYPE_BRAND,
     TypeVar,
     TypeVarEnv,
 } from "./types.ts"
@@ -52,6 +53,11 @@ import {
  */
 export function isTypeValue(t: unknown): t is Type {
     if (t === undefined || t === null) return false
+    // Nominal brand check FIRST: the brand is a module-private symbol on the
+    // Type prototype chain, so a plain object with a compatible `dispatch`
+    // method (or any forged duck-type) is refused before the protocol is
+    // ever consulted — the dispatch result is data, not identity.
+    if ((t as { [TYPE_BRAND]?: true })[TYPE_BRAND] !== true) return false
     try {
         ;(t as Type).dispatch<boolean>({
             fun: () => true,

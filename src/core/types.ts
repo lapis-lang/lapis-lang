@@ -23,10 +23,27 @@
 // type-only (a cycle-free edge: pattern_lang.ts imports the pattern TYPE here).
 import type { PatternAST } from "./pattern_lang.ts"
 
-// ── Type ──────────────────────────────────────────────────────────────────────
+/**
+ * The nominal brand symbol for the Type universe (see `Type[TYPE_BRAND]`).
+ * Module-scoped identity: an outside module cannot CREATE a symbol equal to
+ * it (Symbol equality is by reference), so a brand check is a genuine
+ * identity test, not a forgeable tag.
+ */
+export const TYPE_BRAND = Symbol("lapis-lang/Type")
 
+// ── Type ──────────────────────────────────────────────────────────────────────
 /** The root of the LC type hierarchy. Every type is a subtype of this. */
 export abstract class Type {
+    /**
+     * The closed-universe brand: every instance of a declared Type subclass
+     * carries this marker through the prototype chain, so nominal membership
+     * is checkable WITHOUT relying on the structural `dispatch` protocol (any
+     * object with a compatible `dispatch` method would otherwise pass a
+     * duck-typed test). The brand is a module-private symbol — outside
+     * modules cannot forge it.
+     */
+    readonly [TYPE_BRAND]: true = true
+
     /** Structural equality (not subtyping — use `isSubtype` for that). */
     abstract equals(other: Type): boolean
 
@@ -336,6 +353,16 @@ export class DataType extends Type {
         return this
     }
 
+    /**
+     * Whether the definition is sealed (immutable). Consumers that key
+     * instance-identity caches on a carrier (`TypeAlgebra`'s memos) enforce
+     * this as their precondition: an unsealed carrier's shape can still
+     * change, so its identity is not yet a valid cache key.
+     */
+    isSealed(): boolean {
+        return this.sealed
+    }
+
     equals(other: Type): boolean {
         return other instanceof DataType && this.name === other.name
     }
@@ -456,6 +483,11 @@ export class CodataType extends Type {
         this.sealed = true
         Object.freeze(this._observers)
         return this
+    }
+
+    /** Whether the definition is sealed (see `DataType.isSealed`). */
+    isSealed(): boolean {
+        return this.sealed
     }
 
     equals(other: Type): boolean {
@@ -762,4 +794,29 @@ export interface TypeCases<T> {
 export type RequiredCases<T> = {
     // deno-lint-ignore no-explicit-any
     [K in keyof TypeCases<T>]-?: (t: any, ...rest: any[]) => T
+}
+
+/**
+ * The free-function surface for the virtuals (compatibility exports): the
+ * dispatch itself lives on the subclasses as `Type.dispatch`/`Type.map` —
+ * these are the same-signature entry points the original API carried, so
+ * existing consumers keep importing them. New code calls the methods
+ * directly.
+ */
+
+/**
+ * The classification-style fold — the virtual `Type.dispatch`. Free-function
+ * surface.
+ */
+// deno-lint-ignore no-explicit-any
+export function foldType<T>(t: Type, cases: TypeCases<T> & Record<keyof TypeCases<never>, any>): T {
+    return t.dispatch(cases)
+}
+
+/**
+ * The bottom-up transformation — the virtual `Type.map`. Free-function
+ * surface.
+ */
+export function mapType(t: Type, cases: TypeCases<Type>): Type {
+    return t.map(cases)
 }

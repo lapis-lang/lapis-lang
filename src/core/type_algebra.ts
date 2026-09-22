@@ -108,7 +108,7 @@ import {
     type Type,
     Variant,
 } from "./types.ts"
-import { setRegistryHook, typeUnionCounts } from "./pattern_lang.ts"
+import { setRegistryHook, typeUnionCountsWith } from "./pattern_lang.ts"
 
 // ── The lookup hook (instance state; the module global is the facade) ────────
 
@@ -180,10 +180,15 @@ export class ContextSpec {
      */
     private edge: ContextSpec[] | undefined | false = false
 
-    /** @internal — constructed only by `TypeAlgebra.derivative` (by
-     * convention: the module keeps construction in the algebra, but TS
-     * cannot enforce a module-private constructor — treat direct
-     * construction as internal API). */
+    /**
+     * The spec constructor — the STABLE construction surface for shape-level
+     * consumers (the structural tests build specs directly to assert their
+     * fields; the algebra itself constructs them inside `derivative`). The
+     * 4-argument call shape of the former interface is preserved (the
+     * algebra reference is the 5th, injectable argument); direct construction
+     * is supported but should prefer `derivative`/`specFor` for production
+     * reads (those serve the memoized, identity-consistent specs).
+     */
     constructor(
         variantName: string,
         fieldName: string,
@@ -241,6 +246,18 @@ export class TypeAlgebra {
         Map<string, Map<string, ContextSpec>>
     >()
     private readonly inhabitantsMemo = new WeakMap<DataType, number | undefined>()
+    /**
+     * The coefficients memo (identity-keyed per carrier, degree-keyed per
+     * entry): the truncated series is INTRINSIC to the sealed carrier, so a
+     * repeat call at the same (or smaller) degree reads the cache; a LARGER
+     * degree re-solves (the previous array is a prefix — the fixpoint's
+     * memoized state seeds the new degree). The pattern arm is memoized
+     * through the language equation's own environment memo (pattern_lang.ts).
+     */
+    private readonly coefficientsMemo = new WeakMap<
+        DataType,
+        { degree: number; coeffs: Coefficients }
+    >()
 
     /** The pattern-language type-reference lookup (constructor-injected). */
     private lookup: PatternLookup
@@ -257,6 +274,31 @@ export class TypeAlgebra {
         const prior = this.lookup
         this.lookup = lookup
         return prior
+    }
+
+    /**
+     * The sealed-immutable precondition for the identity-keyed memos: a
+     * carrier's shape must be frozen before its identity is a valid cache
+     * key. Enforced at every reading's entry — an unsealed carrier (or one
+     * whose parent chain still has an unsealed member: comb inheritance
+     * reads the chain's variants) rejects loudly, instead of caching specs
+     * or verdicts for a shape that can still change.
+     */
+    private requireSealedCarrier(type: DataType): void {
+        if (!type.isSealed()) {
+            throw new TypeError(
+                `${type.name} is not sealed — the identity-keyed caches require ` +
+                    `an immutable (sealed) carrier; call seal() after construction`,
+            )
+        }
+        for (let parent = type.parent; parent !== null; parent = parent.parent) {
+            if (!parent.isSealed()) {
+                throw new TypeError(
+                    `${parent.name} (in ${type.name}'s parent chain) is not sealed ` +
+                        `— the identity-keyed caches require an immutable carrier`,
+                )
+            }
+        }
     }
 
     // ── The derivative (type-algebra.md §4) ──────────────────────────────────
@@ -292,6 +334,7 @@ export class TypeAlgebra {
      */
     derivative(type: DataType): ContextSpec[] {
         this.requireSemiringCarrier(type, "derivative")
+        this.requireSealedCarrier(type)
         const cached = this.derivativeMemo.get(type)
         if (cached !== undefined) return cached
         const specs: ContextSpec[] = []
@@ -350,6 +393,7 @@ export class TypeAlgebra {
      * rebuilding a fresh index per node).
      */
     specFor(carrier: DataType): Map<string, Map<string, ContextSpec>> {
+        this.requireSealedCarrier(carrier)
         let index = this.specIndexMemo.get(carrier)
         if (index === undefined) {
             index = new Map()
@@ -408,6 +452,7 @@ export class TypeAlgebra {
      * absent-or-computed distinction); `null` reads back as `undefined`.
      */
     inhabitants(type: DataType): number | undefined {
+        this.requireSealedCarrier(type)
         const cached = this.inhabitantsMemo.get(type)
         if (this.inhabitantsMemo.has(type)) {
             // The null sentinel IS the undefined verdict (a count is always
@@ -612,7 +657,7 @@ export class TypeAlgebra {
             // the per-variant sum. Cycles through type references reject
             // loudly inside the environment (an ill-founded equation has no
             // reading).
-            return typeUnionCounts(type, k)
+            return typeUnionCountsWith(type, k, this.lookup)
         }
         this.requireSemiringCarrier(type, "coefficients")
         // Collect the system: the carrier plus every data type reachable
@@ -646,8 +691,18 @@ export class TypeAlgebra {
             }
         }
         collect(type)
-        const state = new GFState(system)
-        return state.getFor(type, k)
+        // The identity/degree-keyed memo: a repeat call at the same (or a
+        // smaller) degree reads the cached truncated series — the fixpoint
+        // does not re-run. A larger degree re-runs the fixpoint over the
+        // collected system (the previous result is a prefix of the new one,
+        // but the fixpoint's zero-vector seeding makes a straight prefix
+        // extension wrong — recompute; the system set is derived cheaply).
+        const memoed = this.coefficientsMemo.get(type)
+        if (memoed !== undefined && memoed.degree >= k) return memoed.coeffs
+        const state = new GFState(system, this.lookup)
+        const coeffs = state.getFor(type, k)
+        this.coefficientsMemo.set(type, { degree: k, coeffs })
+        return coeffs
     }
 }
 
@@ -778,7 +833,7 @@ function fieldGF(
     return field.type.dispatch<Coefficients>({
         family: () => current.currentFor(carrier, k),
         data: (t) => current.currentFor(t, k),
-        patternData: (t) => typeUnionCounts(t, k),
+        patternData: (t) => typeUnionCountsWith(t, k, current.lookup),
         fun: () => zeroUpTo(k),
         intersection: () => zeroUpTo(k),
         polymorphic: () => zeroUpTo(k),
@@ -804,7 +859,11 @@ function fieldGF(
 class GFState {
     private readonly memo = new Map<DataType, number[]>()
 
-    constructor(private readonly system: Set<DataType>) {}
+    constructor(
+        private readonly system: Set<DataType>,
+        /** The algebra instance's pattern-type lookup (the per-instance seam). */
+        readonly lookup: (name: string) => PatternDataType | undefined,
+    ) {}
 
     /** A system member's CURRENT approximation (never triggers a solve). */
     currentFor(type: DataType, k: number): Coefficients {
