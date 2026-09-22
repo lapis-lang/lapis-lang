@@ -41,7 +41,8 @@ const TYPE_BRAND = Symbol("lapis-lang/Type")
  * `isTypeValue` (subtyping.ts) validates before the `dispatch` protocol.
  */
 export function isDeclaredTypeKind(t: unknown): boolean {
-    return t !== null && typeof t === "object" && (t as { [TYPE_BRAND]?: true })[TYPE_BRAND] === true
+    return t !== null && typeof t === "object" &&
+        (t as { [TYPE_BRAND]?: true })[TYPE_BRAND] === true
 }
 
 // ── Type ──────────────────────────────────────────────────────────────────────
