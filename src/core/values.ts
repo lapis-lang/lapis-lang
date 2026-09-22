@@ -5,7 +5,7 @@
  *
  *   v ::= λx:σ. t                           closure
  *       | Cᵢ(v₁, ..., vₙ)                   constructed variant (eager: fields are values)
- *       | match(pₖ)                         matched token (a value of pattern-matched type)
+ *       | match("p")                        matched token (a value of pattern-matched type)
  *       | unfold [T] s {oⱼ → gⱼ}            codata value (lazy: seed stored, generators deferred)
  */
 
@@ -251,13 +251,18 @@ export class VariantVal extends Value {
 // ── Token value ───────────────────────────────────────────────────────────────
 
 /**
- * `match(pₖ)` — a matched token: the sole inhabitant of a pattern-matched
+ * `match("p")` — a matched token: the sole inhabitant of a pattern-matched
  * data type (`PatternDataType`). The raw matched text IS the value — there is
  * no structure beneath it (lc.md §2.1: the token is introduced by the lexer,
  * an axiom of the operational semantics, with no evaluation rule producing
  * it). In this grammar-based evaluator the "lexer" is the term grammar
- * itself: an atom whose name resolves to a registered `PatternDataType`
- * parses the matched text and yields the token as a value.
+ * itself, with two introduction routes: a bare atom whose name resolves to a
+ * registered `PatternDataType` (`patternTokenProd` — text = the name) and the
+ * explicit `match("p")` form (E-Pattern — text = the pattern source). Both
+ * yield the same value shape; the text convention differs by route. The
+ * route also decides the value's LC source form (`renderSource`): the bare
+ * name for the atom, the `match("…")` form for the explicit form — so a
+ * rendered source always re-parses through the route that produced it.
  *
  * Two tokens are equal (structurally, like `equals`) iff they inhabit
  * the SAME pattern type AND their raw text is equal. The type name is part
@@ -269,13 +274,18 @@ export class VariantVal extends Value {
  */
 export class TokenVal extends Value {
     readonly kind = "tokenVal"
+    /** How this token was introduced — "token" (the bare atom) or "pattern" (match("p")). */
+    readonly route: "token" | "pattern"
     constructor(
         /** The pattern-matched type this token inhabits. */
         readonly dataTypeName: string,
         /** The raw matched text — the token's entire content. */
         readonly text: string,
+        /** The introduction route (the bare atom by default — the E-Token shape). */
+        route: "token" | "pattern" = "token",
     ) {
         super()
+        this.route = route
     }
 
     /**
@@ -301,13 +311,32 @@ export class TokenVal extends Value {
     }
 
     /**
-     * LC source form: the bare pattern-type name — the evaluator's
-     * `patternTokenProd` emits `matchedToken(name, name)`, so the text IS
-     * the name-lexed source. `Pat("x")` is NOT LC syntax; a token whose
-     * text deviates from its type name (possible only by direct
-     * construction, never by evaluation) has no source form and declines.
+     * LC source form: whichever introduction route reconstructs this value.
+     *
+     * - The bare token atom (route = "token"): the name itself —
+     *   `patternTokenProd` emits `matchedToken(name, name)`, so the name-lexed
+     *   source re-evaluates to this token.
+     * - The explicit form (route = "pattern"): `match("<text>")` with the
+     *   delimiter quotes escaped — the E-Pattern reading, which re-parses the
+     *   pattern source and re-checks it against the type's declared patterns.
+     *   The route, not the text, decides: a token carrying pattern text must
+     *   have come from the pattern form (the bare atom's text is the name), so
+     *   the render is always the form that produced the value.
+     * - The default route ("token") with text ≠ the type name has no source
+     *   form and declines — a direct-constructed token whose text is not its
+     *   type name (e.g. a law checker's enumerated matched text, `42`) would
+     *   render `match("42")`, a source the evaluator REJECTS (`42` is not a
+     *   declared pattern) — the round-trip judgment never emits a partial
+     *   render.
      */
     override renderSource(): string | undefined {
+        if (this.route === "pattern") {
+            // The match-form reading: escape the delimiter characters ("
+            // and \) so the source is re-parsable — the payload is re-quoted
+            // as written.
+            const escaped = this.text.replace(/["\\]/g, "\\$&")
+            return `match("${escaped}")`
+        }
         return this.text === this.dataTypeName ? this.dataTypeName : undefined
     }
 

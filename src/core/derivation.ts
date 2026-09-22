@@ -434,6 +434,28 @@ class DerivationReader extends AbstractLC<ReaderShape> {
             `matched token (\`${dataTypeName}\` — a pattern-type atom)`,
         )
     }
+
+    /**
+     * match("p") — pattern-matched construction. The derivation fragment is a
+     * fold-skeleton language over VARIANT carriers; a pattern-matched
+     * construction has no variant cases to skeletonize (the same rejection the
+     * bare token atom takes), so the fragment rejects it loudly.
+     *
+     * The diagnostic quotes the payload as LC SOURCE — delimiter-escaped
+     * (the same `"`/`\` escaping `TokenVal.renderSource` applies), so the
+     * message shows the spelling the definition actually carries. A payload
+     * containing quotes/backslashes interpolated raw would render a string
+     * that closes at the first inner `"` — malformed and misleading (the
+     * pre-scan's shadowed sibling diagnostic included; the action's message
+     * is also the one a future direct-action consumer would see).
+     */
+    protected override matchedPattern(_dataTypeName: string, patternSource: string): Term {
+        const escaped = patternSource.replace(/["\\]/g, "\\$&")
+        throw new DefinitionShapeError(
+            "",
+            `pattern-matched construction (\`match("${escaped}")\` — a pattern-type constructor)`,
+        )
+    }
 }
 
 /**
@@ -452,6 +474,7 @@ const REJECTED_CONSTRUCTS: readonly (readonly [string, string])[] = [
     ["cofold", "cofold (codata elimination)"],
     ["let", "let-binding (`let x:σ = t in u`)"],
     ["^", "type abstraction (`^α<:σ. t` — polymorphism)"],
+    ["match", 'pattern-matched construction (`match("…")` — a pattern-type constructor)'],
 ]
 
 /** Whether a source contains the lexeme as a word (bounded on both sides). */

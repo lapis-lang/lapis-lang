@@ -37,6 +37,7 @@ Deno.test("metatheory: LCEval produces evaluation rules from contract metadata",
         "E-Let",
         "E-Obs",
         "E-Op",
+        "E-Pattern",
         "E-TAbs",
         "E-TApp",
         "E-Unfold",
@@ -76,8 +77,8 @@ Deno.test("metatheory: rules are classified as value-rules or step-rules", () =>
         .map((c) => c.rule.name)
         .sort()
 
-    // Value-rules (no premises): lambda, unfold, type abstraction
-    assertEquals(valueRules, ["E-Lam", "E-TAbs", "E-Unfold"])
+    // Value-rules (no premises): lambda, unfold, type abstraction, pattern
+    assertEquals(valueRules, ["E-Lam", "E-Pattern", "E-TAbs", "E-Unfold"])
 
     // Step-rules (with premises): application, let, fold, obs, cofold, typeApp, op
     assertEquals(stepRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-Op", "E-TApp"])
@@ -200,6 +201,7 @@ Deno.test("metatheory: LCTypeCheck rules are still collected correctly", () => {
         "T-Let",
         "T-Obs",
         "T-Op",
+        "T-Pattern",
         "T-TAbs",
         "T-TApp",
         "T-Unfold",

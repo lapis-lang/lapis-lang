@@ -44,7 +44,7 @@
  * check must be grammar-independent. This is exact for the current LC
  * concrete syntax, which has no string literals and no comments — the only
  * camelCase-ident-then-paren forms are op applications and the built-in
- * `match(pₖ)` form (excluded below). If a future syntax revision adds string
+ * `match("p")` form (excluded below). If a future syntax revision adds string
  * literals, comments, or other call-shaped constructs, the exclusion list
  * (or the scan itself) must be updated — until then, every match the scan
  * reports is a genuine op application.
@@ -98,18 +98,19 @@ const brandChecked = (op: OpSig): CheckedOpSig => Object.assign(op, { checked: t
  *
  * - **Reserved from operation names** (`declare` rejects an op named with
  *   one). An op named `match` would be indistinguishable from the
- *   pattern-matched construction `match(pₖ)` (lc.md §2.2, T-Pattern) — worse,
- *   once in Ω the `opProd` registry gate would shadow the language form for
- *   every subsequent parse. The same parseability rationale as the camelCase
- *   name-shape check: a name that cannot be a distinct op application cannot
- *   be an op name.
+ *   pattern-matched construction `match("p")` (lc.md §2.2, T-Pattern) —
+ *   worse, once in Ω the `opProd` registry gate would shadow the language
+ *   form for every subsequent parse. The same parseability rationale as the
+ *   camelCase name-shape check: a name that cannot be a distinct op
+ *   application cannot be an op name.
  * - **Excluded from the dependency scan** (`referencedOps`). Because the
  *   names are reserved from operations, an occurrence of `match(` in a
  *   definition is always the language form, never an op application — the
  *   exclusion can never suppress a genuine op reference.
  *
- * - `match` — the pattern-matched construction `match(pₖ)`, introduced by
- *   the lexer, not an operation.
+ * - `match` — the pattern-matched construction `match("p")`
+ *   (lc.md §2.2, T-Pattern — `patternMatchProd`), introduced by the grammar's
+ *   pattern gate, not an operation.
  */
 const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
 
@@ -133,7 +134,7 @@ const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
  * constructed), so the check must be grammar-independent. It is exact for
  * the current LC concrete syntax, which has no string literals and no
  * comments; the language-level call forms (`BUILTIN_CALL_FORMS`, e.g.
- * `match(pₖ)`) are excluded because they are language constructs, not
+ * `match("p")`) are excluded because they are language constructs, not
  * operations — sound because `declare` reserves those names from
  * operations (check 1b), so an occurrence of a reserved name in a
  * definition is always the language form, never an op application. A
@@ -297,7 +298,7 @@ export class OpRegistry {
 
         // 1b. Built-in call forms are reserved from operation names: an op
         //     named `match` would be indistinguishable from the language's
-        //     `match(pₖ)` form, and once installed would shadow it at the
+        //     `match("p")` form, and once installed would shadow it at the
         //     `opProd` gate for every subsequent parse. Reserving the name
         //     is also what makes `referencedOps`'s scan exclusion sound: a
         //     reserved name can never be an operation, so excluding it never

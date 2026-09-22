@@ -33,8 +33,10 @@ import {
     OpSig,
     OpSummaryStore,
     renderCostReport,
+    sanitizeNameComponent,
     SizeExpr,
     TypeRegistry,
+    unescapeNameComponent,
 } from "../src/index.ts"
 import {
     DataType,
@@ -57,6 +59,60 @@ Deno.test("SizeExpr: constants, variables, and rendering", () => {
     assertEquals(SizeExpr.constant(7).render(), "7")
     assertEquals(SizeExpr.variable("x").render(), "|x|")
     assertEquals(SizeExpr.variablePow("x", 3).render(), "|x|^3")
+})
+
+Deno.test("sanitizeNameComponent: the safe alphabet passes through unescaped", () => {
+    // Identifiers, digits, and the algebra's own structural characters stay
+    // readable: a canonical ASCII pattern like `[0-9]+`... is NOT safe (`[` and
+    // `]` are bracketed out of the alphabet), but a plain ident-like component
+    // is. The token variable's TYPE name (`NatPat`) always passes through.
+    assertEquals(sanitizeNameComponent("NatPat"), "NatPat")
+    assertEquals(sanitizeNameComponent("p0"), "p0")
+    assertEquals(sanitizeNameComponent("#foldRec"), "#foldRec")
+})
+
+Deno.test("sanitizeNameComponent: unsafe characters hex-escape to a safe name", () => {
+    // The pattern metacharacters and the algebra's structural characters
+    // escape: `[`, `]`, `^`, `,`, `|`, `:`, `"`, `\`, whitespace.
+    assertEquals(sanitizeNameComponent("[0-9]+"), "\\x5b0-9\\x5d+")
+    assertEquals(sanitizeNameComponent("a^b"), "a\\x5eb")
+    assertEquals(sanitizeNameComponent("a,b"), "a\\x2cb")
+    assertEquals(sanitizeNameComponent('a"b'), "a\\x22b")
+    assertEquals(sanitizeNameComponent("a b"), "a\\x20b")
+    assertEquals(sanitizeNameComponent("a\\b"), "a\\x5cb")
+    // A control character (the newline a quoted payload may carry).
+    assertEquals(sanitizeNameComponent("a\nb"), "a\\x0ab")
+})
+
+Deno.test("sanitizeNameComponent: injective — distinct inputs, distinct names", () => {
+    // The escape alphabet cannot collide with an unescaped safe string: the
+    // raw `\` of an escape is itself escaped, so `unescape` is the exact
+    // inverse and `substitute`'s exact-match discipline stays correct.
+    const pairs: [string, string][] = [
+        ["[0-9]+", "0123456789"],
+        ['"<Char>*"', "^,|:"],
+        ["a\\b", "a\\x5cb"],
+    ]
+    for (const [a, b] of pairs) {
+        const sa = sanitizeNameComponent(a)
+        const sb = sanitizeNameComponent(b)
+        assert(sa !== sb, `distinct inputs must not collide: ${a} vs ${b}`)
+        assertEquals(unescapeNameComponent(sa), a, "unescape is the exact inverse")
+        assertEquals(unescapeNameComponent(sb), b)
+    }
+})
+
+Deno.test("SizeExpr: a hostile variable name survives merge and render", () => {
+    // The end-to-end hazard: a variable named from arbitrary pattern text
+    // (`a^2,b`) goes through plus (the monomial merge key splits factors on
+    // `,` and appends `^e`) — a raw name would mis-parse in fromMerged and
+    // corrupt the substitution. The sanitized name is structurally sound.
+    const x = SizeExpr.variable(sanitizeNameComponent("a^,|b"))
+    const sum = x.plus(x)
+    assertEquals(sum.render(), "2·|a\\x5e\\x2c\\x7cb|")
+    // Substitute by exact match (the recurrence driver's discipline).
+    const substituted = x.substitute(sanitizeNameComponent("a^,|b"), SizeExpr.ONE)
+    assertEquals(substituted.render(), "1")
 })
 
 Deno.test("SizeExpr: plus merges monomials (2|x| + |x| = 3|x|)", () => {

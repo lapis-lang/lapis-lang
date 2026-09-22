@@ -109,7 +109,7 @@ Deno.test("Ω: declare rejects the cyclic A↔B pair", () => {
 // loudly (rejected declaration), never silently.
 
 Deno.test("Ω: the scan's exclusions — built-in call forms are not op references", () => {
-    // `match(pₖ)` is a language-level call form (lc.md §2.2, T-Pattern), not
+    // `match("p")` is a language-level call form (lc.md §2.2, T-Pattern), not
     // an operation. A definition using it must declare cleanly.
     const ops = new OpRegistry()
     ops.declare(
@@ -177,7 +177,7 @@ Deno.test("Ω: declare rejects a PascalCase operation name", () => {
 
 Deno.test("Ω: declare rejects an operation named with a built-in call form", () => {
     // An op named `match` would be indistinguishable from the language's
-    // `match(pₖ)` form and, once installed, would shadow it at the opProd
+    // `match("p")` form and, once installed, would shadow it at the opProd
     // gate. Reserving the name is also what makes the acyclicity scan's
     // exclusion of it sound: before the reservation, a match-named op's
     // self/forward references bypassed the scan (an acyclicity hole).

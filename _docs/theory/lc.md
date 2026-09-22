@@ -23,8 +23,9 @@ appear in the term grammar and never step. See §7 (Algebraic Equivalence).
 `cofold [T]` is an elimination form for codata (the dual of fold), not a recursion form — it
 observes, it does not recurse.
 
-`match(pₖ)` is a value introduced by the lexer (external to the calculus). It appears as a term and
-a value, but no evaluation rule produces it; it is an axiom of the operational semantics.
+`match(pₖ)` is a value introduced by the lexer (external to the calculus; the LC concrete syntax
+spells it `match("p")` — a quoted pattern source, §2.2). It appears as a term and a value, but no
+evaluation rule produces it; it is an axiom of the operational semantics.
 
 ## 2. Syntax
 
@@ -74,6 +75,18 @@ whitespace-delimited (`fold [T] e {...}`, `let x:σ = ...`, `... in u`). An oper
 be named `fold` — the two readings never compete. Disambiguation from variable application is by the
 registry gate: `f(a)` parses as an op application only when `f ∈ Ω`, while variable application
 requires whitespace (`f a`, never `f(a)`).
+
+**The `match` form in LC concrete syntax.** In the surface language the lexer introduces `match(pₖ)`
+implicitly (a literal `42` lexes against `Nat`'s pattern). LC's grammar-based realization makes the
+introduction explicit: `match("p")` — a quoted pattern source. The pattern must be one of a
+registered pattern type's declared patterns (anchored: its FIRST ATOM — the first leaf, descending
+through the postfix wrappers `*`/`+`/`?` — is a literal, a class, or a type reference; a leading `.`
+rejects, so `Nat = [0-9]+` anchors while `.*` does not), and the term types as that type (T-Pattern,
+§5.1). LC syntax has no other string literals — this is the one deliberate exception: the payload is
+a _pattern_ (the constructor), not a term. A delimiter `"` inside the payload is escaped (`\"`). The
+bare `Ident` atom for a registered pattern type (§2.3's token) remains the registry-gated short
+form; the two routes yield the same value shape. `match` is reserved from operation names
+(`BUILTIN_CALL_FORMS`, §2.4) so the call shape can never be shadowed by an Ω entry.
 
 ### 2.3 Values
 
@@ -151,6 +164,15 @@ risk. See [`design-decisions.md`](../design-decisions.md) (Laws).
 ### 3.1 Evaluation Rules
 
 ```
+match("p") ⇓ tok                                    (E-Pattern)
+  where tok is the matched Token — the token is an axiom of the
+  operational semantics (§1): no subterm evaluation, the value IS
+  the matched text. The grammar-based evaluator realizes the
+  lexer's match as a parse-time gate; the value is a `TokenVal` of
+  the pattern type carrying the pattern's canonical source.
+  (The abstract rule notation writes the form `match(pₖ)` — pₖ is
+  the pattern the quoted source carries.)
+
 (λx:σ. t) v → [x ↦ v] t                              (E-App)
 
 fold [T] (Cₖ(vⱼ)) {Cᵢ(xⱼ) → tᵢ}

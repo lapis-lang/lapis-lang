@@ -22,6 +22,7 @@
  *             | Ident                        variable
  *             | Ident (args)                 variant construction
  *             | ident (args)                 named operation application
+ *             | match("p")                   pattern-matched construction
  *             | ( t )                        parenthesized
  *
  *   Handlers: C(x₁ x₂ ...) → t              fold handler (variant + bindings)
@@ -37,8 +38,11 @@
  *   obsProd       = appProd ( "." ident | "[" type "]" )*
  *   appProd       = typeAppProd ( ws1 typeAppProd )*
  *   typeAppProd   = atomProd ( "[" type "]" )*
- *   atomProd      = "(" expr ")" | variantName "(" args ")" | opProd | ident
+ *   atomProd      = "(" expr ")" | variantName "(" args ")" | opProd | patternToken
+ *                 | patternMatchProd | ident
  *   opProd        = ident "(" args ")"   (registry-gated; tight paren — no ws)
+ *   patternMatchProd = "match" "(" patternString ")"  (registry-gated; tight paren)
+ *   patternString = '"' patternChar* '"'    (the quoted pattern source)
  *   typeProd      = atomType ( "→" typeProd )?
  *   atomType      = "(" type ")" | typeName
  *
@@ -80,6 +84,8 @@ import {
 
 import { OpRegistry } from "./ops.ts"
 
+import { parsePattern, patternToString } from "./pattern_lang.ts"
+
 /**
  * The reserved words of the LC concrete syntax — never lexed as an `ident`.
  *
@@ -108,6 +114,73 @@ export const LC_RESERVED_WORDS: readonly string[] = [
     "in",
 ] as const
 
+// ── Pattern anchoring (the T-Pattern lexer premise) ─────────────────────────────
+
+/**
+ * Whether a pattern AST is ANCHORED — it must start with a specific literal
+ * character or character class (surface-syntax.md §1.3). The rejected shapes
+ * the spec names are `.*` (a bare leading `.`) and the classic-regex
+ * prefix-repetition anchors (`*`/`?` as the first token — unrepresentable in
+ * this postfix fragment, where `*`/`?`/`+` are postfix on an atom).
+ *
+ * The checkable form of the premise: the pattern's FIRST ATOM — the first
+ * leaf, descending through the postfix wrappers — must be a literal char, a
+ * class, or a type reference. A leading `.` (any) rejects. The wrapper
+ * reading is what makes the canonical carriers anchorable: `Nat = [0-9]+`
+ * (design-decisions.md's bootstrapping example) is a PLUS wrapping a class —
+ * its first leaf IS a class, so it is anchored; `".*"` is a concat whose
+ * first leaf is the literal quote char — anchored while bare `.*` is not.
+ * A concatenation anchors at its FIRST part (the first atom decides where
+ * the match must start). A type reference `<T>` is anchored — it resolves to
+ * another declared pattern, whose own anchoring the declaration machinery
+ * checked; at the term layer the reference is taken as anchored (its
+ * language is the referenced type's, which T-Pattern cannot re-litigate
+ * without unfolding the registry — the declaration check owns that).
+ */
+function isAnchoredPattern(ast: ReturnType<typeof parsePattern>): boolean {
+    switch (ast.kind) {
+        case "char":
+        case "class":
+        case "typeref":
+            return true
+        case "any":
+            // A leading `.` matches any character from any position — the
+            // shape the spec rejects (`not \`.*\``).
+            return false
+        case "concat": {
+            // The first part decides where the match must start. The parser
+            // never produces an empty concat (`parseRepeat` pushes at least
+            // one atom before the `concat` node is built — an exhausted
+            // source throws in `parseAtom` first), but a future producer
+            // that did would crash on the `!` — so the arm treats empty as
+            // unanchored (a pattern matching NOTHING cannot anchor a match)
+            // rather than trusting the cross-module invariant blindly.
+            const first = ast.parts[0]
+            return first === undefined ? false : isAnchoredPattern(first)
+        }
+        case "star":
+        case "plus":
+        case "opt":
+            // A postfix wrapper is transparent for anchoring: the pattern
+            // starts at its inner's first atom (`[0-9]+` anchors at the
+            // class; `".*"` anchors at the quote).
+            return isAnchoredPattern(ast.inner)
+        default: {
+            // Exhaustiveness: the narrowing to `never` is a compile error the
+            // moment `PatternAST` grows a kind without an arm here; at
+            // runtime the throw surfaces an undeclared kind loudly (the same
+            // loud-unknown policy `Type.dispatch`'s root default applies — a
+            // silent `undefined` would classify the new kind as unanchored
+            // and quietly reject every pattern using it).
+            const unknown: never = ast
+            throw new TypeError(
+                `unknown pattern AST kind: ${JSON.stringify((unknown as { kind: string }).kind)}` +
+                    " — isAnchoredPattern is not exhaustive over PatternAST",
+            )
+        }
+    }
+}
+
 // ── Shape ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -128,15 +201,60 @@ export interface LCShape {
  * The grammar needs to know what `Stack`, `Stream`, etc. refer to.
  *
  * Also provides reverse lookups: variant name → DataType, observer name →
- * CodataType. These let `variantCon` and `obs` semantic actions resolve the
- * containing type from just the constructor/observer name.
+ * CodataType, pattern source → PatternDataType. These let `variantCon`, `obs`,
+ * and `matchedPattern` semantic actions resolve the containing type from just
+ * the constructor/observer/pattern name.
+ *
+ * **Registration is final.** `register` REJECTS a type whose name is already
+ * registered (`TypeRegistryError`) — the same duplicate-redeclaration policy
+ * `OpRegistry.declare` applies (its check 2), and for the same reason: the
+ * reverse indexes (variant, observer, pattern) are built incrementally, with
+ * the pattern index deliberately keeping a source's FIRST declaration (the
+ * lexer's declaration-order tie-break). A same-named re-registration would
+ * overwrite the `types` entry while leaving the reverse indexes pointing at
+ * the PRIOR instance — a stale mapping the lookups cannot surface (the
+ * indexes key by variant/observer/pattern names, not by type name, so
+ * "remove the old entries for this type name" has no sound implementation
+ * without a full index rebuild, and a silent first-pick is the ambiguity the
+ * tie-break exists to name). Every call site constructs a fresh registry per
+ * harness (fixtures, per-test setups, the shared-store memo keys by registry
+ * identity) — replacement is not a supported operation, so it is an error,
+ * not a hazard.
+ *
+ * Cross-type NAME collisions (two distinct types declaring the same VARIANT
+ * or OBSERVER name) are NOT rejected here — the last registration wins that
+ * reverse-lookup key, and the certificate machinery treats the collision as
+ * a loud failure when it matters (the certified-prefix construction
+ * validates the constructed value's carrier against the declaring type). The
+ * pattern index keeps first-declaration-wins, the one key whose tie-break
+ * the lexer's own resolution documents.
  */
+export class TypeRegistryError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "TypeRegistryError"
+    }
+}
+
 export class TypeRegistry {
     private readonly types = new Map<string, DataType | CodataType | PatternDataType>()
     private readonly variantIndex = new Map<string, DataType>()
     private readonly observerIndex = new Map<string, CodataType>()
+    private readonly patternIndex = new Map<string, PatternDataType>()
 
+    /**
+     * Register a type. A type whose NAME is already registered is rejected —
+     * registration is final (see the class doc).
+     *
+     * @throws TypeRegistryError when the name is already registered.
+     */
     register(type: DataType | CodataType | PatternDataType): void {
+        if (this.types.has(type.name)) {
+            throw new TypeRegistryError(
+                `"${type.name}" is already registered — registration is final; ` +
+                    "construct a fresh TypeRegistry for a revised type set",
+            )
+        }
         this.types.set(type.name, type)
         // Index variants for reverse lookup
         if (type instanceof DataType) {
@@ -148,6 +266,21 @@ export class TypeRegistry {
         if (type instanceof CodataType) {
             for (const observer of type.allObservers()) {
                 this.observerIndex.set(observer.name, type)
+            }
+        }
+        // Index patterns for reverse lookup: the pattern's canonical source
+        // (patternToString — the round-trip normalization) maps to its type.
+        // A source already indexed is LEFT at its first declaration — matching
+        // the lexer's declaration-order tie-break; a later type declaring the
+        // identical pattern is shadowed (two types declaring the same pattern
+        // is an ambiguity the surface declaration machinery must reject; at
+        // the core layer the first declaration wins, deterministically).
+        if (type instanceof PatternDataType) {
+            for (const pattern of type.patterns) {
+                const source = patternToString(pattern)
+                if (!this.patternIndex.has(source)) {
+                    this.patternIndex.set(source, type)
+                }
             }
         }
     }
@@ -164,6 +297,21 @@ export class TypeRegistry {
     /** Reverse lookup: find the CodataType that declares an observer by name. */
     lookupObserver(observerName: string): CodataType | undefined {
         return this.observerIndex.get(observerName)
+    }
+
+    /**
+     * Reverse lookup: find the PatternDataType that declares a pattern by its
+     * canonical source. The key is `patternToString`'s rendering (the
+     * round-trip normalization), so a caller's source string must be in the
+     * same canonical form — the `match("…")` form's payload parses through
+     * `parsePattern` and compares canonically, so two spellings of one AST
+     * (`[0123456789]` and `[0-9]`) agree.
+     *
+     * Returns the FIRST type that declared the pattern (registration order —
+     * the lexer's declaration-order tie-break, `surface-syntax.md` §1.3).
+     */
+    lookupPatternSource(patternSource: string): PatternDataType | undefined {
+        return this.patternIndex.get(patternSource)
     }
 }
 
@@ -237,6 +385,16 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
      * content; a richer lexer would pass the lexed span's text here).
      */
     protected abstract matchedToken(dataTypeName: string, text: string): S["atom"]
+
+    /**
+     * A pattern-matched construction: `match("p")` — the explicit introduction
+     * form for a pattern-matched data type (T-Pattern, lc.md §5.1). The action
+     * receives the type the declared pattern belongs to and the pattern's
+     * source. The premise (the pattern is declared on a registered
+     * `PatternDataType`, and anchored) is enforced by `patternMatchProd`'s
+     * gate before this action is reached.
+     */
+    protected abstract matchedPattern(dataTypeName: string, patternSource: string): S["atom"]
 
     // ── Context extension hook (for type checker / evaluator subclasses) ──────
 
@@ -765,6 +923,10 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             // Matched token: Ident — gated on the registry (a PatternDataType
             // name) and on the term context (a bound name is a variable)
             this.patternTokenProd(ctx),
+            // Pattern-matched construction: match("p") — gated on the registry
+            // (a registered type declares the pattern) and the anchoredness
+            // premise
+            this.patternMatchProd(ctx),
             // Variable
             this.varProd(ctx),
         )
@@ -774,7 +936,8 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     //
     // A bare PascalCase atom whose name resolves to a registered
     // `PatternDataType` is a matched token: the sole inhabitant of a
-    // pattern-matched type (`match(pₖ)`, lc.md §2.3). Gated on the registry —
+    // pattern-matched type (T-Token, lc.md §2.3 — the bare atom is the token
+    // introduction the abstract notation writes as `match(pₖ)`). Gated on the registry —
     // like `opProd`'s Ω gate — and on the term context via `nameBound`: a
     // name bound as a term variable (Γ/ρ) is a VARIABLE reference, not a
     // token — the branch falls through to `varProd` so T-Var/E-Var stays
@@ -798,6 +961,127 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             }
             return epsilon(name).map(() => this.matchedToken(name, name))
         })
+    }
+
+    // match("p") — pattern-matched construction (T-Pattern, lc.md §5.1)
+    //
+    // The explicit introduction form for a pattern-matched data type: the
+    // constructor is the PATTERN ITSELF (lc.md §5.1 — `input matches pₖ ∈
+    // {pᵢ}`), carried as a quoted pattern source. The bare `Ident` token atom
+    // (`patternTokenProd`) is the lexer's registry-gated reading (any name the
+    // registry holds); this form additionally PROVES its pattern is one of the
+    // type's declared constructor patterns.
+    //
+    // `match` is camelCase + a tight paren — the op-application shape — but Ω
+    // can never hold the name (`BUILTIN_CALL_FORMS` reserves it, `ops.ts`), so
+    // the branch is unambiguous: the op gate declines and this branch owns the
+    // form. The tight paren keeps it positionally disjoint from variable
+    // application (`match ("…")` is a variable applied, not the pattern form),
+    // and a λ-bound `match` variable remains an ordinary variable reference.
+    //
+    // The branch is ordered AFTER `patternTokenProd` — the two are lexically
+    // disjoint (camelCase-then-`(` vs PascalCase-then-anything), so the order
+    // is for documentation, not correctness.
+    @rule
+    protected patternMatchProd(_ctx: unknown): Parser<S["atom"]> {
+        return seq(
+            this.kw("match"),
+            char("("), // tight paren — no whitespace (the op form's discipline)
+            this.ws,
+            this.patternString,
+            this.ws,
+            char(")"),
+        ).bind(([, , , patternSource]) => {
+            const source = patternSource as string
+            const typeName = this.patternTypeName(source)
+            if (typeName === undefined) {
+                return empty<S["atom"]>()
+            }
+            return epsilon(this.matchedPattern(typeName, source))
+        })
+    }
+
+    /**
+     * Resolve a pattern source to the name of the registered `PatternDataType`
+     * that declares it. The source parses through `parsePattern` (the SAME
+     * parse the declaration machinery uses) and compares canonically —
+     * `patternToString` normalization — against the registry's pattern index.
+     *
+     * Premises checked here (the T-Pattern gate, lc.md §5.1):
+     * 1. the source parses as a pattern (a malformed source is a REJECTION —
+     *    empty parse forest, the term is ill-typed — never a thrown error out
+     *    of the parse),
+     * 2. the parsed pattern is DECLARED on a registered `PatternDataType`
+     *    (canonical comparison — `patternToString` normalization — so two
+     *    spellings of one AST agree),
+     * 3. the pattern is ANCHORED (surface-syntax.md §1.3: it must start with a
+     *    specific literal or class — a leading `.`/`*`/`+`/`?`-driven shape
+     *    would match from any position; the explicit form names its pattern,
+     *    so the lexer-side premise is checkable at parse time).
+     *
+     * `undefined` — any failed premise; the caller rejects the branch.
+     */
+    protected patternTypeName(patternSource: string): string | undefined {
+        let ast: ReturnType<typeof parsePattern>
+        try {
+            ast = parsePattern(patternSource)
+        } catch {
+            // A malformed pattern is a REJECTION (empty parse forest — the
+            // term is ill-typed), never a thrown error out of the parse.
+            return undefined
+        }
+        if (!isAnchoredPattern(ast)) {
+            return undefined
+        }
+        const canonical = patternToString(ast)
+        const resolved = this.registry.lookupPatternSource(canonical)
+        if (!resolved) {
+            return undefined
+        }
+        return resolved.name
+    }
+
+    // The quoted pattern string: "…" with `\` escapes.
+    //
+    // The payload is a PATTERN (the constructor) — the one deliberate string
+    // literal in the LC concrete syntax. A `"` inside the payload is escaped
+    // (`\"`) and a `\\` as `\\\\`: the DELIMITER's escapes, undone here so
+    // the pattern language reads its own raw source (a pattern's own `\`
+    // escapes — `\+`, `\.` — are payload characters, carried through
+    // unescaped, because only `"` and `\\` are special to the string form).
+    @rule
+    protected get patternString(): Parser<string> {
+        return seq(char('"'), this.patternChars, char('"'))
+            .map(([, chars]) => chars)
+    }
+
+    // The payload: patternChar* (zero or more pieces, collected into an
+    // array and joined ONCE). A pattern is never empty (parsePattern rejects
+    // the empty pattern), so a zero-length payload still parses here and is
+    // rejected by the declared-pattern check — the gate, not the lexeme,
+    // owns that premise.
+    //
+    // `many`, not right-recursion: the identRest-style `seq(char, rest)` +
+    // `.or(epsilon(""))` shape builds the string by one concatenation PER
+    // character (O(n²) in the payload length) and one recursion frame PER
+    // character — a long pattern payload would pay quadratic string work
+    // and stack depth linear in the payload. `.many()` (the combinator
+    // `obsProd`'s observation chains already use) collects the pieces into
+    // an array first; the single `join` keeps the lexeme linear and flat.
+    @rule
+    protected get patternChars(): Parser<string> {
+        return this.patternChar.many().map((chars) => chars.join(""))
+    }
+
+    // One payload piece: an escaped delimiter char (`\"` or `\\` → the raw
+    // char), or a plain character (not a delimiter, not a backslash).
+    @rule
+    protected get patternChar(): Parser<string> {
+        return or(
+            seq(char("\\"), pred((c) => c === '"' || c === "\\", "<escaped-delim>"))
+                .map(([, c]) => c),
+            pred((c) => c !== '"' && c !== "\\", "<pattern-char>"),
+        )
     }
 
     // Ident(args)  — variant construction

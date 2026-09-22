@@ -1360,4 +1360,47 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         )
         return resolved
     }
+
+    // ── T-Pattern: Γ ⊢ match("p") : T ───────────────────────────────────────────
+
+    /**
+     * A pattern-matched construction types as the pattern-matched type whose
+     * declared pattern the form names (lc.md §5.1 T-Pattern).
+     *
+     * The premises — the source parses, it is anchored, and it is DECLARED on
+     * a registered `PatternDataType` — are enforced by the base
+     * `patternMatchProd`'s gate (`patternTypeName`), so a violation here is a
+     * caller bug, not an input error: it fails LOUDLY (`assert`) rather than
+     * degrading to `Any`, the same shape as `matchedToken`. A silent `Any`
+     * would type an undeclared pattern's construction, and under an `Any`
+     * annotation the wrong type satisfies S-Refl — the absorption shape the
+     * production-path overrides exist to close.
+     */
+    @ensures(
+        (_self: LCTypeCheck, _args: [string, string], _old, result: Type) =>
+            isWellFormedType(result),
+        { rule: "T-Pattern", role: "conclusion", formula: "result : T" },
+    )
+    protected matchedPattern(dataTypeName: string, _patternSource: string): Type {
+        const resolved = this.registry.lookup(dataTypeName)
+        assert(
+            resolved instanceof PatternDataType,
+            `matchedPattern premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the pattern gate (patternMatchProd) must be consulted before this action`,
+        )
+        return resolved
+    }
+
+    /**
+     * Override `patternMatchProd` to enforce T-Pattern's premises in the
+     * production path. The base production's gate (`patternTypeName`) covers
+     * the full premise set — source parses, anchored, declared on a registered
+     * `PatternDataType` — and the checker's context is irrelevant to them (the
+     * rule reads the REGISTRY, not Γ), so the base gate IS the premise check.
+     * No Γ-dependent premise exists: T-Pattern's formal rule is `T = μ α. Σᵢ
+     * pᵢ ∧ input matches pₖ ∧ tok : Token` — no Γ judgment. The conclusion is
+     * committed through the base `epsilon(this.matchedPattern(...))` — the
+     * `@ensures`-contracted action is only reached on the verified path, the
+     * established production-path shape (#56).
+     */
+    // match("p")  — T-Pattern (premises enforced by the base patternMatchProd gate)
 }
