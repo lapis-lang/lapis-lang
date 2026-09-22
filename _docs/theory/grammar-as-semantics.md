@@ -606,13 +606,18 @@ never crashes — classification is a tag, not a membership test); the lattice's
 (`subtyping.ts`'s `requireType`) is `dispatch` under a `try` too (an undeclared kind there is a loud
 rejection). No pass hand-rolls an `instanceof` ladder over the universe anymore.
 
-### 10.3 Types are values (sealed two-phase construction)
+### 10.3 Types are values (persistent construction)
 
-`DataType`/`CodataType` construct in two phases — create, `addVariant`/`addObserver` (self-reference
-requires the construction phase; a post-`seal()` call throws), then `seal()`: the array freezes at
-runtime and the property is `readonly` in the type, so a post-construction mutation attempt is a
-COMPILE error, not a runtime failure. The factories (`test/fixtures.ts`, the registry constructors)
-seal at the end of construction; consumers see immutable types.
+`DataType`/`CodataType` are immutable VALUES built through persistent builders:
+`define(name, parent?)` returns a builder handle; `addVariant`/`addObserver` return a NEW builder
+(the receiver is unchanged); `build()` publishes a fresh frozen instance. A field may reference the
+builder to name the type being built — the direct self-reference knot
+(`Self = Base | Wrap(inner: Self)`), resolved at `build()` time. Mutually referencing definitions
+build as a group (`DataType.buildAll`); `Variant`/`Field`/`Observer` are frozen at their own
+construction. Identity tracks shape by construction — every `addVariant` and every `build()`
+produces a distinct object — so instance-keyed caches (the algebra's identity-keyed memos) are sound
+with no precondition and no invalidation path. The builder is a distinct type from `Type` (the
+compiler enforces the separation); the type registry holds only built instances.
 
 ### 10.4 The lattice boundary (`requireType`)
 

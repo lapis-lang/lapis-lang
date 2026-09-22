@@ -92,12 +92,12 @@ Deno.test("contextPaths: a branching carrier has one path per recursive field oc
     // recursive FIELD occurrence across the value — the two leaves (nodes
     // with no fields) contribute none, so the count is node count minus
     // leaves, not the node count.
-    const tree = new DataType("Tree", [])
-    tree.addVariant(
-        new Variant("Leaf", []),
-        new Variant("Node", [new Field("l", Family), new Field("r", Family)]),
-    )
-    tree.seal()
+    const tree = DataType.define("Tree")
+        .addVariant(
+            new Variant("Leaf", []),
+            new Variant("Node", [new Field("l", Family), new Field("r", Family)]),
+        )
+        .build()
     const leaf = new VariantVal("Leaf", tree, new Map())
     const inner = new VariantVal(
         "Node",

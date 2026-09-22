@@ -7,20 +7,18 @@
  * for fields of other data types.
  */
 
-import { assertEquals, assertThrows } from "@std/assert"
+import { assert, assertEquals, assertThrows } from "@std/assert"
 
 import { coefficients, ContextSpec, derivative, typeAlgebra } from "../src/core/type_algebra.ts"
 import { createPatternType } from "./fixtures.ts"
 import {
     Any,
-    CodataType,
     DataType,
     Family,
     Field,
     FunType,
     IntersectionType,
     NothingType,
-    Observer,
     TokenType,
     Type,
     Variant,
@@ -28,38 +26,35 @@ import {
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-// ── The typed-immutability contract (two-phase construction) ─────────────────
+// ── The persistent construction contract (types are values) ───────────────────
 
-Deno.test("seal: a post-seal addVariant/addObserver throws (the definition is closed)", () => {
-    const t = new DataType("SealedProbe", [])
-    t.addVariant(new Variant("Base", []))
-    t.seal()
-    assertThrows(
-        () => t.addVariant(new Variant("Evil", [])),
-        TypeError,
-        "SealedProbe is sealed",
-    )
-    const c = new CodataType("SealedCodataProbe")
-    c.addObserver(new Observer("head", Any))
-    c.seal()
-    assertThrows(
-        () => c.addObserver(new Observer("tail", c)),
-        TypeError,
-        "SealedCodataProbe is sealed",
-    )
+Deno.test("persist: addVariant returns a new builder; the receiver is unchanged", () => {
+    const b0 = DataType.define("PersistProbe").addVariant(new Variant("Base", []))
+    const b1 = b0.addVariant(new Variant("Extra", []))
+    // The derivation is persistent: the original lineage still builds
+    // WITHOUT the added variant, and the two lineages are distinct.
+    assertEquals(b0.build().variants.length, 1)
+    assertEquals(b1.build().variants.length, 2)
+    // Two builds from one builder are distinct instances (identity tracks
+    // construction — the property the identity-keyed caches consume).
+    const first = b1.build()
+    const second = b1.build()
+    assert(first !== second)
+    assertEquals(first.name, second.name)
 })
 
-Deno.test("seal: the frozen array rejects mutation even through a retained alias", () => {
-    // The freeze is IN PLACE (not a copy-and-replace): a caller who kept a
-    // reference to the pre-seal array cannot mutate the sealed type either.
-    const preSealVariants = [new Variant("Base", [])]
-    const t = new DataType("AliasProbe", preSealVariants)
-    t.seal()
+Deno.test("persist: the published definition is frozen, including through a retained alias", () => {
+    // The freeze happens at build(): a caller who kept a reference to the
+    // pre-build fields array cannot mutate the built definition either.
+    const fields: Field[] = []
+    const variant = new Variant("Base", fields)
+    const t = DataType.define("AliasProbe").addVariant(variant).build()
     assertThrows(
-        () => preSealVariants.push(new Variant("Evil", [])),
+        () => fields.push(new Field("evil", Any)),
         TypeError,
     )
-    // The readonly getter exposes the same (now-frozen) array.
+    assert(Object.isFrozen(t.variants))
+    assert(t.variants.every((v) => Object.isFrozen(v.fields)))
     assertEquals(t.variants.length, 1)
 })
 
@@ -67,42 +62,42 @@ Deno.test("seal: the frozen array rejects mutation even through a retained alias
 
 /** `Bool = True | False` — a nullary-sum carrier. */
 function bool(): DataType {
-    const b = new DataType("Bool", [])
-    b.addVariant(new Variant("True", []), new Variant("False", []))
-    return b.seal()
+    return DataType.define("Bool")
+        .addVariant(new Variant("True", []), new Variant("False", []))
+        .build()
 }
 
 /** `Nat = Zero | Succ(pred: Nat)` — the single-recursive-field carrier. */
 function nat(): DataType {
-    const n = new DataType("Nat", [])
-    n.addVariant(new Variant("Zero", []), new Variant("Succ", [new Field("pred", Family)]))
-    return n.seal()
+    return DataType.define("Nat")
+        .addVariant(new Variant("Zero", []), new Variant("Succ", [new Field("pred", Family)]))
+        .build()
 }
 
 /** `Pair(a: Bool, b: Bool)` — the two-field record (Leibniz's product). */
 function pair(): DataType {
-    const p = new DataType("Pair", [])
-    p.addVariant(
-        new Variant("MkPair", [new Field("a", bool()), new Field("b", bool())]),
-    )
-    return p.seal()
+    return DataType.define("Pair")
+        .addVariant(
+            new Variant("MkPair", [new Field("a", bool()), new Field("b", bool())]),
+        )
+        .build()
 }
 
 /** `Wrapped(inner: Nat)` — a field of another data type (chain-rule step). */
 function wrapped(): DataType {
-    const w = new DataType("Wrapped", [])
-    w.addVariant(new Variant("MkWrapped", [new Field("inner", nat())]))
-    return w.seal()
+    return DataType.define("Wrapped")
+        .addVariant(new Variant("MkWrapped", [new Field("inner", nat())]))
+        .build()
 }
 
 /** `Stack = Empty | Push(value: Any, rest: Stack)` — heterogeneous fields. */
 function stack(): DataType {
-    const s = new DataType("Stack", [])
-    s.addVariant(
-        new Variant("Empty", []),
-        new Variant("Push", [new Field("value", Any), new Field("rest", Family)]),
-    )
-    return s.seal()
+    return DataType.define("Stack")
+        .addVariant(
+            new Variant("Empty", []),
+            new Variant("Push", [new Field("value", Any), new Field("rest", Family)]),
+        )
+        .build()
 }
 
 /**
@@ -110,19 +105,19 @@ function stack(): DataType {
  * one variant (both are μ-bound occurrences).
  */
 function fork(): DataType {
-    const t = new DataType("Fork", [])
-    t.addVariant(
-        new Variant("Leaf", []),
-        new Variant("ForkIt", [new Field("left", Family), new Field("right", Family)]),
-    )
-    return t.seal()
+    return DataType.define("Fork")
+        .addVariant(
+            new Variant("Leaf", []),
+            new Variant("ForkIt", [new Field("left", Family), new Field("right", Family)]),
+        )
+        .build()
 }
 
 /** A carrier with a comb parent: `NatPos` inherits `Nat`'s variants. */
 function natPos(): DataType {
-    const n = nat()
-    const p = new DataType("NatPos", [new Variant("Top", [])], n)
-    return p.seal()
+    return DataType.define("NatPos", nat())
+        .addVariant(new Variant("Top", []))
+        .build()
 }
 
 function spec(
@@ -189,21 +184,21 @@ Deno.test("derivative: Stack → only the recursive field yields a spec; Any con
 })
 
 Deno.test("derivative: function-typed, Token, pattern, Nothing, and Any fields contribute no context", () => {
-    const weird = new DataType("Weird", [])
-    weird.addVariant(
-        new Variant(
-            "Mk",
-            [
-                new Field("fn", new FunType(bool(), nat())),
-                new Field("tok", new TokenType()),
-                new Field("pat", createPatternType("Pat", ["a+b"])),
-                new Field("none", new NothingType()),
-                new Field("any", Any),
-                new Field("rec", Family),
-            ],
-        ),
-    )
-    weird.seal()
+    const weird = DataType.define("Weird")
+        .addVariant(
+            new Variant(
+                "Mk",
+                [
+                    new Field("fn", new FunType(bool(), nat())),
+                    new Field("tok", new TokenType()),
+                    new Field("pat", createPatternType("Pat", ["a+b"])),
+                    new Field("none", new NothingType()),
+                    new Field("any", Any),
+                    new Field("rec", Family),
+                ],
+            ),
+        )
+        .build()
     // The unsampleable fields yield no specs of their own, but they DO join
     // the recursive field's surroundings (Leibniz: everything except the
     // hole, in field order).
@@ -270,13 +265,13 @@ Deno.test("coefficients: Pair(a: Bool, b: Bool) — a record's exact count c₃ 
 Deno.test("coefficients: NS (Zero | One(b: Bool) | Succ(p)) — both field values counted", () => {
     // The coefficient reading sees One(False()) — which the old depth
     // sampler never generated (it took the first field sample per variant).
-    const ns = new DataType("NS", [])
-    ns.addVariant(
-        new Variant("Zero", []),
-        new Variant("One", [new Field("b", bool())]),
-        new Variant("Succ", [new Field("p", Family)]),
-    )
-    ns.seal()
+    const ns = DataType.define("NS")
+        .addVariant(
+            new Variant("Zero", []),
+            new Variant("One", [new Field("b", bool())]),
+            new Variant("Succ", [new Field("p", Family)]),
+        )
+        .build()
     // Size 1: Zero. Size 2: One(True), One(False), Succ(Zero) → 3.
     // Size 3: Succ(One(True)), Succ(One(False)), Succ(Succ(Zero)) → 3.
     // Size 4: three Succ-chains → 3.
@@ -284,12 +279,12 @@ Deno.test("coefficients: NS (Zero | One(b: Bool) | Succ(p)) — both field value
 })
 
 Deno.test("coefficients: Tree (Leaf | Node(l, r)) — the Catalan shape (the algebraic family)", () => {
-    const t = new DataType("Tree", [])
-    t.addVariant(
-        new Variant("Leaf", []),
-        new Variant("Node", [new Field("l", Family), new Field("r", Family)]),
-    )
-    t.seal()
+    const t = DataType.define("Tree")
+        .addVariant(
+            new Variant("Leaf", []),
+            new Variant("Node", [new Field("l", Family), new Field("r", Family)]),
+        )
+        .build()
     // GF: T = x + x·T² → the Catalan numbers, node-counted: sizes 1, 3, 5
     // hold 1, 1, 2 trees; even sizes hold none (a Node has two subtrees).
     // c₅ = 2: Node(Leaf, Node(Leaf, Leaf)) and its mirror.
@@ -301,12 +296,17 @@ Deno.test("coefficients: a mutually recursive pair with a base case converges", 
     // lockstep: each round every equation reads the others' PREVIOUS round,
     // so the minimal nonzero degree advances one step per round and the
     // fixpoint settles at the true truncated series.
-    const a = new DataType("A", [])
-    const b = new DataType("B", [])
-    a.addVariant(new Variant("baseA", []), new Variant("mkA", [new Field("b", b)]))
-    b.addVariant(new Variant("mkB", [new Field("a", a)]))
-    a.seal()
-    b.seal()
+    // The builder handles ARE the knot: each field names the other
+    // definition's builder, and buildAll resolves both simultaneously.
+    const aBuilder = DataType.define("A")
+    const bBuilder = DataType.define("B")
+    const [a, b] = DataType.buildAll(
+        aBuilder.addVariant(
+            new Variant("baseA", []),
+            new Variant("mkA", [new Field("b", bBuilder)]),
+        ),
+        bBuilder.addVariant(new Variant("mkB", [new Field("a", aBuilder)])),
+    )
     // Size 1: baseA. Size 2: mkB(baseA). Size 3: mkA(mkB(baseA)). ...
     assertEquals(coefficients(a, 4), [0, 1, 0, 1, 0])
     assertEquals(coefficients(b, 4), [0, 0, 1, 0, 1])
@@ -317,21 +317,22 @@ Deno.test("coefficients: a strictly alternating system has NO inhabitants (hones
     // need the other type at every depth, so both series are identically
     // zero. The fixpoint converges to the honest zeros (an unproductive
     // variant has no inhabitants, consistent with the sampler's drop).
-    const a = new DataType("A", [])
-    const b = new DataType("B", [])
-    a.addVariant(new Variant("mkA", [new Field("b", b)]))
-    b.addVariant(new Variant("mkB", [new Field("a", a)]))
-    a.seal()
-    b.seal()
+    const aBuilder = DataType.define("A")
+    const bBuilder = DataType.define("B")
+    const [a, b] = DataType.buildAll(
+        aBuilder.addVariant(new Variant("mkA", [new Field("b", bBuilder)])),
+        bBuilder.addVariant(new Variant("mkB", [new Field("a", aBuilder)])),
+    )
     assertEquals(coefficients(a, 4), [0, 0, 0, 0, 0])
     assertEquals(coefficients(b, 4), [0, 0, 0, 0, 0])
 })
 
 Deno.test("coefficients: a variant with a function-typed field contributes 0", () => {
-    const fnBox = new DataType("FnBox", [])
-    fnBox.addVariant(
-        new Variant("MkFnBox", [new Field("fn", new FunType(bool(), nat()))]),
-    )
+    const fnBox = DataType.define("FnBox")
+        .addVariant(
+            new Variant("MkFnBox", [new Field("fn", new FunType(bool(), nat()))]),
+        )
+        .build()
     // Function-typed fields have no finite vocabulary — the variant dies,
     // the same rule `construct` applies.
     assertEquals(coefficients(fnBox, 3), [0, 0, 0, 0])

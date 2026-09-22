@@ -1949,10 +1949,10 @@ function makeTrueValue(): VariantVal {
     // `True()` — the Bool variant, constructed without the evaluator (the
     // verdict comparison is a structural equality against the known shape;
     // the evaluator is for CONSTRUCTION of samples, and predicate verdicts
-    // come back as values from `eval_`, already resolved). Sealed like every
-    // other constructed type — types are values.
-    const boolType = new DataType("Bool", [new Variant("True", []), new Variant("False", [])])
-    boolType.seal()
+    // come back as values from `eval_`, already resolved).
+    const boolType = DataType.define("Bool")
+        .addVariant(new Variant("True", []), new Variant("False", []))
+        .build()
     return new VariantVal("True", boolType, new Map())
 }
 

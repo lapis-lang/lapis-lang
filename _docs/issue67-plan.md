@@ -115,16 +115,16 @@ measured decorator behavior.
 
 ### D2 — Memoization: identity-keyed, instance-carried
 
-- Method memos are `WeakMap<DataType, …>` instance fields — sound because #74 made `DataType`
-  effectively immutable post-`seal()` (frozen variants array, construction-phase mutators throw), so
-  instance identity is a valid cache key. The `treeKey` v3.0.1 precedent (identity via
+- Method memos are `WeakMap<DataType, …>` instance fields — sound because `DataType` is immutable by
+  construction (persistent builders; PBI #77 replaced the two-phase `seal()` ceremony, so instance
+  identity is a valid cache key unconditionally). The `treeKey` v3.0.1 precedent (identity via
   `WeakMap<object, number>`) is the keying model.
 - `derivative(type)` memoizes per carrier; `coefficients` absorbs `GFState` (the fixpoint's `memo`
   becomes the class's — the system set is derived per call as today, but a repeat call at the same
   degree reads the memo); `finiteInhabitants`' verdict memo becomes persistent (a type's finiteness
   is intrinsic; cycles resolve to the `undefined` verdict, cached).
 - Cache growth is bounded by the number of distinct `DataType` instances — registries are finite and
-  types are sealed. No eviction.
+  types are immutable values. No eviction.
 
 ### D3 — `ContextSpec` gains the recursive edge (the chain rule as data)
 
