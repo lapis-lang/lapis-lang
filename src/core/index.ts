@@ -8,8 +8,10 @@
 export {
     Any,
     AnyType,
+    CodataBuilder,
     CodataType,
     DataType,
+    DataTypeBuilder,
     Family,
     FamilyType,
     Field,

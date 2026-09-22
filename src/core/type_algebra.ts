@@ -232,10 +232,10 @@ export class ContextSpec {
  * instance needs no fixture setup; the module default instance backs the
  * free-function delegates).
  *
- * Memoization is identity-keyed (`WeakMap` per carrier): the two-phase
- * construction made `DataType` immutable post-`seal()` (frozen variant
- * array, construction mutators throw), so instance identity is a valid
- * cache key — the same keying scheme `treeKey` v3.0.1 applies to class
+ * Memoization is identity-keyed (`WeakMap` per carrier): types are immutable
+ * by construction (persistent builders — types.ts), so instance identity is
+ * a valid cache key with no precondition and no invalidation path — the same
+ * keying scheme `treeKey` v3.0.1 applies to class
  * instances. Cache growth is bounded by the number of distinct carrier
  * instances seen (registries are finite); no eviction.
  */
@@ -248,7 +248,7 @@ export class TypeAlgebra {
     private readonly inhabitantsMemo = new WeakMap<DataType, number | undefined>()
     /**
      * The coefficients memo (identity-keyed per carrier, degree-keyed per
-     * entry): the truncated series is INTRINSIC to the sealed carrier, so a
+     * entry): the truncated series is INTRINSIC to the immutable carrier, so a
      * repeat call at the same (or smaller) degree reads the cache; a LARGER
      * degree re-solves (the previous array is a prefix — the fixpoint's
      * memoized state seeds the new degree). The pattern arm is memoized
@@ -285,31 +285,6 @@ export class TypeAlgebra {
         return prior
     }
 
-    /**
-     * The sealed-immutable precondition for the identity-keyed memos: a
-     * carrier's shape must be frozen before its identity is a valid cache
-     * key. Enforced at every reading's entry — an unsealed carrier (or one
-     * whose parent chain still has an unsealed member: comb inheritance
-     * reads the chain's variants) rejects loudly, instead of caching specs
-     * or verdicts for a shape that can still change.
-     */
-    private requireSealedCarrier(type: DataType): void {
-        if (!type.isSealed()) {
-            throw new TypeError(
-                `${type.name} is not sealed — the identity-keyed caches require ` +
-                    `an immutable (sealed) carrier; call seal() after construction`,
-            )
-        }
-        for (let parent = type.parent; parent !== null; parent = parent.parent) {
-            if (!parent.isSealed()) {
-                throw new TypeError(
-                    `${parent.name} (in ${type.name}'s parent chain) is not sealed ` +
-                        `— the identity-keyed caches require an immutable carrier`,
-                )
-            }
-        }
-    }
-
     // ── The derivative (type-algebra.md §4) ──────────────────────────────────
 
     /**
@@ -335,7 +310,7 @@ export class TypeAlgebra {
      * The result is ordered variant-by-variant, field-by-field; the order is
      * deterministic (it follows the declaration order) so callers can rely on
      * reproducible shrink candidate orderings. The array is memoized per
-     * carrier instance (identity-keyed — a sealed carrier's derivative is
+     * carrier instance (identity-keyed — a carrier's derivative is
      * intrinsic); callers must not mutate the returned array.
      *
      * @throws TypeError when the carrier is headed by an intersection type
@@ -343,7 +318,6 @@ export class TypeAlgebra {
      */
     derivative(type: DataType): ContextSpec[] {
         this.requireSemiringCarrier(type, "derivative")
-        this.requireSealedCarrier(type)
         const cached = this.derivativeMemo.get(type)
         if (cached !== undefined) return cached
         const specs: ContextSpec[] = []
@@ -402,7 +376,6 @@ export class TypeAlgebra {
      * rebuilding a fresh index per node).
      */
     specFor(carrier: DataType): Map<string, Map<string, ContextSpec>> {
-        this.requireSealedCarrier(carrier)
         let index = this.specIndexMemo.get(carrier)
         if (index === undefined) {
             index = new Map()
@@ -455,13 +428,12 @@ export class TypeAlgebra {
      * value past the ceiling means "finite but not exhaustible here".
      *
      * The verdict is memoized per carrier instance (identity-keyed): a type's
-     * finiteness is intrinsic to the sealed carrier, so the memo is sound
+     * finiteness is intrinsic to the immutable carrier, so the memo is sound
      * across calls. The memo stores `null` for the undefined verdict
      * (a WeakMap value cannot be `undefined` without losing the
      * absent-or-computed distinction); `null` reads back as `undefined`.
      */
     inhabitants(type: DataType): number | undefined {
-        this.requireSealedCarrier(type)
         const cached = this.inhabitantsMemo.get(type)
         if (this.inhabitantsMemo.has(type)) {
             // The null sentinel IS the undefined verdict (a count is always

@@ -17,7 +17,25 @@
  * `Family` singleton (`FamilyType`) — the same bound-variable mechanism as
  * ∀-quantification: a binder (the μ) and an occurrence (the field type). A
  * field whose type is `Family` IS the recursion; there is no parallel flag.
- */
+ *
+ * ## Construction protocol (persistent builders)
+ *
+ * `DataType`/`CodataType` are immutable VALUES built through persistent
+ * builders: `define(name, parent?)` returns a builder handle;
+ * `addVariant`/`addObserver` return a NEW builder (the receiver is
+ * unchanged); `build()` publishes a fresh frozen instance. A field may
+ * reference the builder to name the type being built — the direct
+ * self-reference knot (`Self = Base | Wrap(inner: Self)`), resolved at
+ * `build()` time. The knot was chosen over a lazy type reference because a
+ * thunk cannot be initialized before `build()` consumes it without a
+ * post-build fixup pass; the builder handle is inert until publication, so
+ * one resolution walk suffices and no construction-phase mutator survives
+ * on the type. Identity tracks shape by construction — every `addVariant`
+ * and every `build()` produces a distinct object — so instance-keyed
+ * caches are sound with no precondition and no invalidation path. Mutually
+ * referencing definitions build as a group (`DataType.buildAll`);
+ * `Variant`/`Field`/`Observer` are frozen at their own construction; the
+ * `Family` μ-bound singleton is orthogonal to the protocol. */
 
 // The pattern AST type — pattern_lang.ts owns the language; this import is
 // type-only (a cycle-free edge: pattern_lang.ts imports the pattern TYPE here).
@@ -265,33 +283,97 @@ export class FunType extends Type {
  * A variant constructor: `Cᵢ(field₁: σ₁, field₂: σ₂, ...)`.
  *
  * A field's type may be `Family` at the recursive position (the μ-bound α).
+ * The fields array is frozen AT CONSTRUCTION: a variant is an immutable
+ * value from the moment it exists, so a retained alias cannot mutate any
+ * definition that carries it.
  */
 export class Variant {
+    readonly fields: readonly Field[]
+
     constructor(
         readonly name: string,
-        readonly fields: Field[],
-    ) {}
-    /**
-     * Close this variant: the fields array is frozen in place, so a
-     * retained alias cannot mutate a sealed definition. `DataType.seal()`
-     * seals every variant it carries; a direct call is idempotent.
-     */
-    seal(): this {
-        Object.freeze(this.fields)
-        return this
+        fields: Field[],
+    ) {
+        this.fields = Object.freeze(fields)
+        Object.freeze(this)
     }
+
     findField(name: string): Field | undefined {
         return this.fields.find((f) => f.name === name)
     }
 }
 
-/** A field within a variant: `fieldName: Type`. */
+/**
+ * The type slot during construction: a resolved `Type`, or an unresolved
+ * builder reference — the self-reference knot (a field may name the type
+ * being built through its builder, resolved by `build()`).
+ *
+ * The union exists at CONSTRUCTION time only: `build()` rewrites builder
+ * slots to the built instances, so every published `Field`/`Observer`
+ * carries a genuine `Type` behind its getter. Reading the type of a
+ * retained pre-build field throws loudly — nothing unresolved can leak
+ * into the closed `Type` universe.
+ */
+export type TypeSlot = Type | DataTypeBuilder | CodataBuilder
+
+/**
+ * The read side of a type slot: a builder reference reaching a consumer is
+ * a caller bug (a field that never went through `build()`) — rejected
+ * loudly, never silently read as a type.
+ */
+function resolvedSlotType(slot: TypeSlot, what: string): Type {
+    if (slot instanceof DataTypeBuilder || slot instanceof CodataBuilder) {
+        throw new TypeError(
+            `${what} is unresolved — its builder reference was never resolved by build()`,
+        )
+    }
+    return slot
+}
+
+/** A field within a variant: `fieldName: Type` — frozen AT CONSTRUCTION. */
 export class Field {
+    #slot: TypeSlot
+
     constructor(
         readonly name: string,
-        readonly type: Type,
-    ) {}
+        type: TypeSlot,
+    ) {
+        this.#slot = type
+        Object.freeze(this)
+    }
+
+    /** The field's type — always a resolved `Type` on a published definition. */
+    get type(): Type {
+        return resolvedSlotType(this.#slot, `field "${this.name}"`)
+    }
+
+    /**
+     * Resolve an unresolved builder slot against a build group: the original
+     * field when the slot is already a resolved type, a NEW field carrying
+     * the built instance when the slot's lineage is in the group, a loud
+     * rejection when the reference cannot resolve (a foreign lineage, or the
+     * other construction kind — mixed data/codata groups are not supported).
+     */
+    resolveBuild(group: BuildGroup): Field | undefined {
+        if (this.#slot instanceof DataTypeBuilder || this.#slot instanceof CodataBuilder) {
+            const resolved = group.get(this.#slot.lineage)
+            if (resolved === undefined) {
+                throw new TypeError(
+                    `field "${this.name}" references a builder outside the build group — ` +
+                        `every unresolved reference must resolve within the same build call`,
+                )
+            }
+            return new Field(this.name, resolved)
+        }
+        return undefined
+    }
 }
+
+/**
+ * The build-time resolution map: a lineage token (shared by every builder
+ * derived from one `define()` call) → the instance publishing for it.
+ */
+export type BuildGroup = Map<object, DataType | CodataType>
 
 /**
  * `μ α. Σᵢ Cᵢ(σᵢ)` — a recursive data type (initial algebra).
@@ -299,82 +381,82 @@ export class Field {
  * The bound `α` is the recursive self-reference (`Family` in the surface syntax).
  * `variants` is the sum (tagged union). `parent` is the supertype for comb
  * inheritance (null for base types).
+ *
+ * Persistent construction (see the module doc): instances are immutable on
+ * publication — the constructor is private, `define(name, parent?)` returns
+ * a builder, and `build()` publishes a fresh frozen instance. Identity
+ * tracks shape: two builds (or two builder derivations) are distinct
+ * objects, which is what makes instance-keyed caches sound with no
+ * precondition.
  */
 export class DataType extends Type {
-    /** The construction-phase array (private — mutation flows through
-     * `addVariant` only, which rejects a post-`seal()` call). */
-    private readonly _variants: Variant[]
-    parent: DataType | null
+    // The variants array is swapped exactly once, inside `buildAll` (before
+    // publication): instances are constructed with the raw variants, then
+    // the resolved (knotted) variants replace them. A published instance
+    // never changes again — `private` keeps the swap module-internal.
+    private _variants: readonly Variant[]
+    readonly parent: DataType | null
 
-    private sealed = false
-
-    constructor(
+    private constructor(
         readonly name: string,
-        variants: Variant[] = [],
-        parent: DataType | null = null,
+        variants: readonly Variant[],
+        parent: DataType | null,
     ) {
         super()
-        this._variants = variants
+        this._variants = Object.freeze(variants)
         this.parent = parent
     }
 
+    /** Begin construction: a builder handle for a data type definition. */
+    static define(name: string, parent: DataType | null = null): DataTypeBuilder {
+        return DataTypeBuilder.initial(name, parent)
+    }
+
     /**
-     * The variants — readonly in the type: mutation happens only through
-     * `addVariant` during the construction phase, so a post-construction
-     * mutation attempt is a COMPILE error, not a runtime failure. After
-     * `seal()` the array is also frozen at runtime (an alias-retaining
-     * caller cannot mutate it either).
+     * Build a mutually referencing group in one pass: every builder in the
+     * group may reference every other (through the builder handle), and all
+     * references resolve simultaneously at publication. Duplicate lineages
+     * in one group reject.
+     */
+    static buildAll(...builders: DataTypeBuilder[]): DataType[] {
+        if (builders.length === 0) return []
+        const group: BuildGroup = new Map<object, DataType | CodataType>()
+        for (const b of builders) {
+            if (group.has(b.lineage)) {
+                throw new TypeError(
+                    `buildAll: the builder for ${b.name} appears twice — one lineage, one slot`,
+                )
+            }
+            group.set(b.lineage, undefined as unknown as DataType | CodataType)
+        }
+        // Construction order: the instances exist first (nothing reads their
+        // fields yet), the group fills with THOSE instances, then each
+        // definition's variants resolve against the completed map and are
+        // installed — the returned instances ARE the map's values, so a
+        // knotted field names the final instance of its lineage. A mixed-kind
+        // group (a data builder reaching a codata publication) rejects with a
+        // message naming both kinds — the group is single-kind, never mixed.
+        const instances = builders.map((b) => new DataType(b.name, b.variants, b.parent))
+        builders.forEach((b, i) => group.set(b.lineage, instances[i]!))
+        builders.forEach((b, i) => {
+            instances[i]!._variants = Object.freeze(resolveVariantFields(b.variants, group))
+        })
+        // Publication closes the definition: the freeze covers the whole
+        // carrier (name, parent, the variants slot) — not just the arrays —
+        // so a retained alias cannot mutate a published instance through
+        // ordinary property writes. The last step of buildAll, after the
+        // knot resolution has installed the final variants.
+        for (const t of instances) Object.freeze(t)
+        return instances
+    }
+
+    /**
+     * The variants — a frozen array: the definition is immutable from the
+     * moment it exists (post-construction mutation is impossible, not
+     * merely rejected).
      */
     get variants(): readonly Variant[] {
         return this._variants
-    }
-
-    /**
-     * Add variants during the construction phase (before `seal()`).
-     * A post-`seal()` call is a caller bug — it throws, never a silent
-     * corruption. Re-using a variant (from another type) is rejected: a
-     * sealed variant cannot re-enter construction.
-     */
-    addVariant(...variants: Variant[]): this {
-        if (this.sealed) {
-            throw new TypeError(
-                `addVariant: ${this.name} is sealed — the definition is closed`,
-            )
-        }
-        for (const variant of variants) {
-            if (Object.isFrozen(variant.fields)) {
-                throw new TypeError(
-                    `addVariant: ${variant.name} is already sealed — ` +
-                        `a variant cannot be re-used across type definitions`,
-                )
-            }
-        }
-        this._variants.push(...variants)
-        return this
-    }
-
-    /**
-     * Close the definition: the variants array AND every variant's fields
-     * array are frozen in place, so a retained alias (the type's own array,
-     * a variant, a fields array) cannot mutate the sealed definition.
-     * Further construction is rejected loudly. Types are values.
-     */
-    seal(): this {
-        if (this.sealed) return this
-        this.sealed = true
-        for (const variant of this._variants) variant.seal()
-        Object.freeze(this._variants)
-        return this
-    }
-
-    /**
-     * Whether the definition is sealed (immutable). Consumers that key
-     * instance-identity caches on a carrier (`TypeAlgebra`'s memos) enforce
-     * this as their precondition: an unsealed carrier's shape can still
-     * change, so its identity is not yet a valid cache key.
-     */
-    isSealed(): boolean {
-        return this.sealed
     }
 
     equals(other: Type): boolean {
@@ -405,6 +487,70 @@ export class DataType extends Type {
     findVariant(name: string): Variant | undefined {
         return this.allVariants().find((v) => v.name === name)
     }
+}
+
+/**
+ * The persistent builder for a `DataType`: `define` starts one, every
+ * `addVariant` derives a NEW builder (the receiver's lineage is unchanged),
+ * and `build()` publishes a fresh frozen instance carrying the accumulated
+ * variants — the self-reference knot resolving on the way.
+ */
+export class DataTypeBuilder {
+    /** The lineage token shared by every builder derived from one `define()`. */
+    readonly lineage: object
+
+    private constructor(
+        readonly name: string,
+        readonly parent: DataType | null,
+        readonly variants: readonly Variant[],
+        lineage: object,
+    ) {
+        this.lineage = lineage
+    }
+
+    static initial(name: string, parent: DataType | null): DataTypeBuilder {
+        return new DataTypeBuilder(name, parent, [], {})
+    }
+
+    /** Derive a builder carrying these variants in addition to the current ones. */
+    addVariant(...variants: Variant[]): DataTypeBuilder {
+        return new DataTypeBuilder(
+            this.name,
+            this.parent,
+            [...this.variants, ...variants],
+            this.lineage,
+        )
+    }
+
+    /** Publish a fresh immutable instance (two builds are distinct objects). */
+    build(): DataType {
+        return DataType.buildAll(this)[0]!
+    }
+}
+
+/**
+ * A group's variants with the knot resolved: fields whose slots are already
+ * resolved types keep their ORIGINAL objects (no allocation); unresolved
+ * builder references produce NEW fields carrying the built instance.
+ */
+function resolveVariantFields(
+    variants: readonly Variant[],
+    group: BuildGroup,
+): Variant[] {
+    return variants.map((variant) => {
+        const mapped = variant.fields.map((f) => f.resolveBuild(group))
+        return mapped.some((f) => f !== undefined)
+            ? new Variant(variant.name, mapped.map((f, i) => f ?? variant.fields[i]!))
+            : variant
+    })
+}
+
+/** The observers' counterpart of `resolveVariantFields` (one slot per observer). */
+function resolveObserverFields(
+    observers: readonly Observer[],
+    group: BuildGroup,
+): Observer[] {
+    return observers.map((observer) => observer.resolveBuild(group) ?? observer)
 }
 
 // ── Pattern-matched data type (μ with patterns) ───────────────────────────────
@@ -453,55 +599,64 @@ export class PatternDataType extends Type {
  *
  * The bound `α` is the corecursive self-reference (`Self` in the surface syntax).
  * `observers` is the product (record of observations). `parent` is the supertype.
+ *
+ * Persistent construction mirrors `DataType` exactly: `define` returns a
+ * builder, `addObserver` derives a new builder, `build()` publishes a fresh
+ * frozen instance — immutable on publication, identity tracking shape.
  */
 export class CodataType extends Type {
-    /** The construction-phase array (private — mutate through `addObserver`); see `DataType`. */
-    private readonly _observers: Observer[]
-    parent: CodataType | null
+    // The observers array's pre-publication swap (see `DataType._variants`).
+    private _observers: readonly Observer[]
+    readonly parent: CodataType | null
 
-    private sealed = false
-
-    constructor(
+    private constructor(
         readonly name: string,
-        observers: Observer[] = [],
-        parent: CodataType | null = null,
+        observers: readonly Observer[],
+        parent: CodataType | null,
     ) {
         super()
-        this._observers = observers
+        this._observers = Object.freeze(observers)
         this.parent = parent
     }
 
+    /** Begin construction: a builder handle for a codata type definition. */
+    static define(name: string, parent: CodataType | null = null): CodataBuilder {
+        return CodataBuilder.initial(name, parent)
+    }
+
     /**
-     * The observers — readonly in the type (see `DataType.variants`); after
-     * `seal()` the array is also frozen at runtime.
+     * Build a mutually referencing group in one pass (see
+     * `DataType.buildAll`): the ν-side of a mutual knot — an observer may
+     * name the codata type being built through any builder of the group.
+     */
+    static buildAll(...builders: CodataBuilder[]): CodataType[] {
+        if (builders.length === 0) return []
+        const group: BuildGroup = new Map<object, DataType | CodataType>()
+        for (const b of builders) {
+            if (group.has(b.lineage)) {
+                throw new TypeError(
+                    `buildAll: the builder for ${b.name} appears twice — one lineage, one slot`,
+                )
+            }
+            group.set(b.lineage, undefined as unknown as DataType | CodataType)
+        }
+        const instances = builders.map((b) => new CodataType(b.name, b.observers, b.parent))
+        builders.forEach((b, i) => group.set(b.lineage, instances[i]!))
+        builders.forEach((b, i) => {
+            instances[i]!._observers = Object.freeze(resolveObserverFields(b.observers, group))
+        })
+        // Publication closes the definition (see `DataType.buildAll`): the
+        // freeze covers the whole carrier, the last step of buildAll.
+        for (const t of instances) Object.freeze(t)
+        return instances
+    }
+
+    /**
+     * The observers — a frozen array (see `DataType.variants`): immutable
+     * from the moment the definition exists.
      */
     get observers(): readonly Observer[] {
         return this._observers
-    }
-
-    /** Add observers during the construction phase (before `seal()`); a
-     * post-`seal()` call throws (see `DataType.addVariant`). */
-    addObserver(...observers: Observer[]): this {
-        if (this.sealed) {
-            throw new TypeError(
-                `addObserver: ${this.name} is sealed — the definition is closed`,
-            )
-        }
-        this._observers.push(...observers)
-        return this
-    }
-
-    /** Close the definition (see `DataType.seal`). */
-    seal(): this {
-        if (this.sealed) return this
-        this.sealed = true
-        Object.freeze(this._observers)
-        return this
-    }
-
-    /** Whether the definition is sealed (see `DataType.isSealed`). */
-    isSealed(): boolean {
-        return this.sealed
     }
 
     equals(other: Type): boolean {
@@ -534,15 +689,88 @@ export class CodataType extends Type {
     }
 }
 
-/** An observer declaration: `oⱼ: σⱼ`. A continuation observer's type names
+/**
+ * The persistent builder for a `CodataType` (see `DataTypeBuilder`):
+ * `define` starts one, `addObserver` derives a new builder, `build()`
+ * publishes a fresh frozen instance with the knot resolved.
+ */
+export class CodataBuilder {
+    /** The lineage token shared by every builder derived from one `define()`. */
+    readonly lineage: object
+
+    private constructor(
+        readonly name: string,
+        readonly parent: CodataType | null,
+        readonly observers: readonly Observer[],
+        lineage: object,
+    ) {
+        this.lineage = lineage
+    }
+
+    static initial(name: string, parent: CodataType | null): CodataBuilder {
+        return new CodataBuilder(name, parent, [], {})
+    }
+
+    /** Derive a builder carrying these observers in addition to the current ones. */
+    addObserver(...observers: Observer[]): CodataBuilder {
+        return new CodataBuilder(
+            this.name,
+            this.parent,
+            [...this.observers, ...observers],
+            this.lineage,
+        )
+    }
+
+    /** Publish a fresh immutable instance (two builds are distinct objects). */
+    build(): CodataType {
+        return CodataType.buildAll(this)[0]!
+    }
+}
+
+/**
+ * An observer declaration: `oⱼ: σⱼ`. A continuation observer's type names
  * the codata type itself (the ν-side self-reference — a data field, not a
- * flag; `allObservers` reads it like any other observer type). */
+ * flag; `allObservers` reads it like any other observer type).
+ *
+ * The type slot follows `Field`'s discipline: a builder reference is
+ * accepted at construction (the self-reference knot) and resolved by
+ * `build()`; the public `type` getter always hands back a genuine `Type`.
+ */
 export class Observer {
+    private readonly slot: TypeSlot
+
     constructor(
         readonly name: string,
-        readonly type: Type,
+        type: TypeSlot,
         readonly isContinuation: boolean = false,
-    ) {}
+    ) {
+        this.slot = type
+    }
+
+    /** The observer's type — always a resolved `Type` on a published definition. */
+    get type(): Type {
+        return resolvedSlotType(this.slot, `observer "${this.name}"`)
+    }
+
+    /**
+     * Resolve an unresolved builder slot against a build group (see
+     * `Field.resolveBuild`): the original observer when already resolved, a
+     * NEW observer carrying the built instance when the reference resolves,
+     * a loud rejection otherwise.
+     */
+    resolveBuild(group: BuildGroup): Observer | undefined {
+        if (this.slot instanceof DataTypeBuilder || this.slot instanceof CodataBuilder) {
+            const resolved = group.get(this.slot.lineage)
+            if (resolved === undefined) {
+                throw new TypeError(
+                    `observer "${this.name}" references a builder outside the build group — ` +
+                        `every unresolved reference must resolve within the same build call`,
+                )
+            }
+            return new Observer(this.name, resolved, this.isContinuation)
+        }
+        return undefined
+    }
 }
 
 // ── Token type ────────────────────────────────────────────────────────────────

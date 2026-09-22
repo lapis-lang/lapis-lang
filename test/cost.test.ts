@@ -220,15 +220,15 @@ Deno.test("certified: map → fold certifies with no flag (affine constructors)"
     // and a consuming fold: the producer's result size closes (linear in |l|),
     // so the consumer's scrutinee edge carries a bound — no flag.
     const nat = createNatType()
-    const list = new DataType("List", [])
-    list.addVariant(
-        new Variant("Nil", []),
-        new Variant("Cons", [
-            new Field("head", nat),
-            new Field("tail", Family),
-        ]),
-    )
-    list.seal()
+    const list = DataType.define("List")
+        .addVariant(
+            new Variant("Nil", []),
+            new Variant("Cons", [
+                new Field("head", nat),
+                new Field("tail", Family),
+            ]),
+        )
+        .build()
     const registry = new TypeRegistry()
     registry.register(nat)
     registry.register(list)

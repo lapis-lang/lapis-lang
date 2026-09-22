@@ -43,58 +43,59 @@ import {
 
 /** Constructs a fresh `Stack` data type with `Empty`/`Push` variants. */
 export function createStackType(): DataType {
-    const stack = new DataType("Stack", [])
-    stack.addVariant(
-        new Variant("Empty", []),
-        new Variant("Push", [
-            new Field("value", Any),
-            new Field("rest", Family),
-        ]),
-    )
-    return stack.seal()
+    return DataType.define("Stack")
+        .addVariant(
+            new Variant("Empty", []),
+            new Variant("Push", [
+                new Field("value", Any),
+                new Field("rest", Family),
+            ]),
+        )
+        .build()
 }
 
 /** Constructs a fresh `Queue` data type with `Empty`/`Enq` variants. */
 export function createQueueType(): DataType {
-    const queue = new DataType("Queue", [])
-    queue.addVariant(
-        new Variant("Empty", []),
-        new Variant("Enq", [
-            new Field("value", Any),
-            new Field("rest", Family),
-        ]),
-    )
-    return queue.seal()
+    return DataType.define("Queue")
+        .addVariant(
+            new Variant("Empty", []),
+            new Variant("Enq", [
+                new Field("value", Any),
+                new Field("rest", Family),
+            ]),
+        )
+        .build()
 }
 
 /** Constructs a fresh `Nat` data type with `Zero`/`Succ` variants. */
 export function createNatType(): DataType {
-    const nat = new DataType("Nat", [])
-    nat.addVariant(
-        new Variant("Zero", []),
-        new Variant("Succ", [new Field("pred", Family)]),
-    )
-    return nat.seal()
+    return DataType.define("Nat")
+        .addVariant(
+            new Variant("Zero", []),
+            new Variant("Succ", [new Field("pred", Family)]),
+        )
+        .build()
 }
 
 /** Constructs a fresh `Bool` data type with `True`/`False` variants. */
 export function createBoolType(): DataType {
-    const bool = new DataType("Bool", [])
-    bool.addVariant(
-        new Variant("True", []),
-        new Variant("False", []),
-    )
-    return bool.seal()
+    return DataType.define("Bool")
+        .addVariant(
+            new Variant("True", []),
+            new Variant("False", []),
+        )
+        .build()
 }
 
 /** Constructs a fresh `Stream` codata type with `head`/`tail` observers. */
 export function createStreamType(): CodataType {
-    const stream = new CodataType("Stream")
-    stream.addObserver(
-        new Observer("head", Any, false),
-        new Observer("tail", stream, true),
-    )
-    return stream.seal()
+    const stream = CodataType.define("Stream")
+    return stream
+        .addObserver(
+            new Observer("head", Any, false),
+            new Observer("tail", stream, true),
+        )
+        .build()
 }
 
 /**
@@ -106,13 +107,14 @@ export function createStreamType(): CodataType {
  * types as `[NatStream] → Nat`.
  */
 export function createNatStreamType(): CodataType {
-    const natStream = new CodataType("NatStream")
+    const natStream = CodataType.define("NatStream")
     const nat = createNatType()
-    natStream.addObserver(
-        new Observer("head", nat, false),
-        new Observer("tail", natStream, true),
-    )
-    return natStream.seal()
+    return natStream
+        .addObserver(
+            new Observer("head", nat, false),
+            new Observer("tail", natStream, true),
+        )
+        .build()
 }
 
 // ── Registry factory ──────────────────────────────────────────────────────────
