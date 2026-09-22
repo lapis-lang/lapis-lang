@@ -3,7 +3,7 @@
  */
 
 import { LCEval, LCTypeCheck, ValueEnv } from "../src/index.ts"
-import { Any, FunType, mapType, PolymorphicType, TypeEnv, TypeVar } from "../src/core/types.ts"
+import { Any, FunType, PolymorphicType, TypeEnv, TypeVar } from "../src/core/types.ts"
 import { createTestFixtures } from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
@@ -98,11 +98,11 @@ Deno.test("Polymorphism: substitution — the binder's BOUND still substitutes (
     // variable in the BOUND must still be substituted even when the binder
     // shadows: `∀A <: A. A` under `A := Any` is `∀A <: Any. A` — the body
     // keeps its A, the bound moves. Pinned at the unit level through
-    // `mapType` (the same protocol `substituteTypeVar` routes through; the
+    // `map` (the same protocol `substituteTypeVar` routes through; the
     // grammar cannot express a self-bounded binder because the bound parses
     // under the outer Δ where the name is unbound).
     const selfBound = new PolymorphicType("A", new TypeVar("A", Any), new TypeVar("A", Any))
-    const substituted = mapType(selfBound, {
+    const substituted = selfBound.map({
         typeVar: (tv) => (tv.name === "A" ? Any : tv),
         polymorphic: (pt, bound) => {
             if (pt.typeVarName !== "A") return undefined

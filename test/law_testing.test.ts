@@ -10,14 +10,7 @@
 
 import { assert, assertEquals } from "@std/assert"
 
-import {
-    contextPaths,
-    DerivativeGenerator,
-    plug,
-    renderValue,
-    valueEquals,
-    valueSize,
-} from "../src/index.ts"
+import { contextPaths, DerivativeGenerator, plug } from "../src/index.ts"
 import { TokenVal, type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
 import { LCEval } from "../src/core/eval_grammar.ts"
 import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
@@ -143,7 +136,7 @@ Deno.test("plug: replacing each context with the same subtree round-trips to the
         })()
         const patched = plug(value, path, subtree)
         assert(patched !== undefined)
-        assert(renderValue(patched) === renderValue(value), `path ${path.length} round-trips`)
+        assert(patched.renderSource() === value.renderSource(), `path ${path.length} round-trips`)
     }
 })
 
@@ -155,40 +148,40 @@ Deno.test("plug: a mismatched path yields undefined (honest failure)", () => {
 
 // ── Sizes and rendering ──────────────────────────────────────────────────────
 
-Deno.test("valueSize: node count — Zero()=1, Succ(Zero())=2", () => {
-    assertEquals(valueSize(natOf(0)), 1)
-    assertEquals(valueSize(natOf(1)), 2)
-    assertEquals(valueSize(natOf(3)), 4)
+Deno.test("Value.size: node count — Zero()=1, Succ(Zero())=2", () => {
+    assertEquals(natOf(0).size(), 1)
+    assertEquals(natOf(1).size(), 2)
+    assertEquals(natOf(3).size(), 4)
 })
 
-Deno.test("renderValue: the round trip parses and evaluates back to the same value", () => {
+Deno.test("renderSource: the round trip parses and evaluates back to the same value", () => {
     for (const n of [0, 1, 3]) {
         const value = natOf(n)
-        const rendered = renderValue(value)
+        const rendered = value.renderSource()
         assert(rendered !== undefined, "a Nat always renders")
         const [reparsed] = evalGrammar.parseWith(rendered, new ValueEnv())
         assert(reparsed instanceof VariantVal)
-        assertEquals(renderValue(reparsed), rendered)
+        assertEquals(reparsed.renderSource(), rendered)
     }
 })
 
-Deno.test("renderValue: a token renders as its bare type name and round-trips", () => {
+Deno.test("renderSource: a token renders as its bare type name and round-trips", () => {
     // The evaluator's token source form is the bare pattern-type name
     // (patternTokenProd emits matchedToken(name, name) — text IS the
     // name-lexed source). `Pat("x")` is NOT LC syntax: it was the old
     // renderer's output and failed to re-parse (the malformed-candidate
     // bug this contract fixes).
-    const rendered = renderValue(new TokenVal("Pat", "Pat"))
+    const rendered = new TokenVal("Pat", "Pat").renderSource()
     assertEquals(rendered, "Pat")
 })
 
-Deno.test("renderValue: a deviant token (text ≠ type name) declines", () => {
+Deno.test("renderSource: a deviant token (text ≠ type name) declines", () => {
     // Only constructible directly (the evaluator always stamps text = name);
     // the decline keeps such a value from becoming a malformed candidate.
-    assertEquals(renderValue(new TokenVal("Pat", "x")), undefined)
+    assertEquals(new TokenVal("Pat", "x").renderSource(), undefined)
 })
 
-Deno.test("renderValue: a closure-valued field declines the whole candidate", () => {
+Deno.test("renderSource: a closure-valued field declines the whole candidate", () => {
     // Stack's `value` field is Any-typed — a Push holding a closure is a
     // real evaluated value, and the closure has NO LC source form. The
     // decline PROPAGATES: a partial render is never emitted.
@@ -200,7 +193,7 @@ Deno.test("renderValue: a closure-valued field declines the whole candidate", ()
         stack,
         new Map([["value", closure as Value], ["rest", new VariantVal("Empty", stack, new Map())]]),
     )
-    assertEquals(renderValue(value), undefined)
+    assertEquals(value.renderSource(), undefined)
 })
 
 // ── The ∂T shrinker (standalone) ──────────────────────────────────────────────
@@ -229,7 +222,7 @@ function derivativeGenerator(): DerivativeGenerator<{ nat: string }> {
 Deno.test("shrink: a Nat's candidates are exactly the strictly smaller Nats, ordered smallest-first per path", () => {
     const gen = derivativeGenerator()
     const value = natOf(2)
-    const source = renderValue(value)
+    const source = value.renderSource()
     assert(source !== undefined)
     const candidates = gen.shrink(source)
     // Every candidate is a Nat, strictly smaller, and re-parses.
@@ -238,7 +231,7 @@ Deno.test("shrink: a Nat's candidates are exactly the strictly smaller Nats, ord
         const [parsed] = evalGrammar.parseWith(candidate, new ValueEnv())
         assert(parsed instanceof VariantVal, `candidate parses: ${candidate}`)
         assert(
-            valueSize(parsed) < valueSize(value),
+            parsed.size() < value.size(),
             `candidate strictly smaller: ${candidate}`,
         )
         assertEquals(natDepthOf(parsed) < natDepthOf(value), true)
@@ -279,7 +272,7 @@ Deno.test("shrink: fillers reuse the failing value's own subvalues (no generatio
     // is exhausted, not skipped. So the candidate list is exactly
     // [Succ(Zero())]: one-level spine shrink, deduped (plugging Zero() into
     // the outer hole renders the SAME source as the existing candidate).
-    const source = renderValue(natOf(2))
+    const source = natOf(2).renderSource()
     assert(source !== undefined)
     const candidates = gen.shrink(source)
     assertEquals(candidates, ["Succ(Zero())"])
@@ -297,8 +290,8 @@ Deno.test("harness: the promoted harness still runs forAll end to end (identity 
         const [original] = evalOf(src, new ValueEnv())
         // Structural equality — the same primitive the law checker uses.
         // (JSON.stringify would choke on the circular `dataType` back-
-        // pointers; valueEquals is the honest comparison.)
-        return folded !== undefined && original !== undefined && valueEquals(folded, original)
+        // pointers; equals is the honest comparison.)
+        return folded !== undefined && original !== undefined && folded.equals(original)
     }, { numRuns: 100, seed: 42 })
     assertEquals(result.passed, true)
 })
@@ -309,7 +302,7 @@ Deno.test("harness: a falsified property still throws PropertyFailure with a min
         gen.forAll((src: string) => {
             const [mul] = evalOf(`mul(${src}, ${src})`, new ValueEnv())
             const [orig] = evalOf(src, new ValueEnv())
-            return mul !== undefined && orig !== undefined && valueEquals(mul, orig)
+            return mul !== undefined && orig !== undefined && mul.equals(orig)
         }, { numRuns: 100, seed: 42 })
         assert(false, "must fail")
     } catch (error) {

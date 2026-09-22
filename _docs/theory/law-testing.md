@@ -115,7 +115,7 @@ depends on how closed the generator's domain is — the two mechanisms differ de
   shrunk counterexample is the artifact), while a thrown error's message becomes the failure reason
   ("law instance did not evaluate: …") — an environment/tooling bug, not a law claim to reject.
   Keeping them distinct preserves the rejection signal's meaning.
-- **Compare structurally** with `valueEquals` — the same comparison primitive the screen uses, so
+- **Compare structurally** with `Value.equals` — the same comparison primitive the screen uses, so
   the two mechanisms agree on what "holds" means.
 
 ## 5. The worked example

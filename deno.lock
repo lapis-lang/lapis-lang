@@ -1,6 +1,7 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@lapis-lang/lang-forma@*": "1.2.0",
     "jsr:@lapis-lang/lang-forma@1.2.0": "1.2.0",
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@^1.0.19": "1.0.19",

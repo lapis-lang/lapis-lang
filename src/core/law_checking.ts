@@ -58,15 +58,17 @@ import { type CheckedOpSig, type OpRegistry } from "./ops.ts"
 
 import { TypeRegistry } from "./grammar.ts"
 
-import { TokenVal, Value, ValueEnv, valueEquals, VariantVal } from "./values.ts"
+import { TokenVal, Value, ValueEnv, VariantVal } from "./values.ts"
 
 import { EvalErrorValue } from "./eval_grammar.ts"
 
-import { coefficients } from "./type_algebra.ts"
+import {
+    coefficients,
+    finiteInhabitants as finiteInhabitantsFromAlgebra,
+    MAX_FINITE_INHABITANTS,
+} from "./type_algebra.ts"
 
-import { valueSize } from "./values.ts"
-
-import { AnyType, DataType, FamilyType, PatternDataType, type Type, Variant } from "./types.ts"
+import { DataType, FamilyType, PatternDataType, type Type, Variant } from "./types.ts"
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
 
@@ -238,12 +240,12 @@ function instantiate(
     const rendered: string[] = []
     for (const [name, value] of bindings) {
         rho = rho.extend(name, value)
-        rendered.push(`${name} = ${renderValue(value)}`)
+        rendered.push(`${name} = ${value.renderDisplay()}`)
     }
     if (argumentValue !== undefined) {
         rho = rho.extend("e", argumentValue)
         rho = rho.extend("z", argumentValue)
-        rendered.push(`argument = ${renderValue(argumentValue)}`)
+        rendered.push(`argument = ${argumentValue.renderDisplay()}`)
     }
     const bindingsRendered = rendered
 
@@ -298,24 +300,13 @@ function instantiate(
 /**
  * Render a value as an LC-like term (for `LawError` and dedup keys).
  *
- * A token renders as `Type"text"` (quoted): the type name disambiguates two
- * different pattern types whose tokens carry the same text, and the quotes
- * make whitespace/boundary characters visible — a counterexample must be
- * readable unambiguously. (The render mirrors `valueEquals`'s token
- * identity: same type AND same text.)
+ * The per-kind arms live on the value subclasses as the virtual
+ * `Value.renderDisplay` — a variant renders as `Name(field, …)` recursively,
+ * a token renders as `Type"text"` (quoted), and kinds without a term reading
+ * fall back to `<kind>` (display never declines where the source form does).
+ * This module's output is the LawError text AND the exhaustion sweep's dedup
+ * key.
  */
-function renderValue(value: Value): string {
-    if (value instanceof VariantVal) {
-        const fields = [...value.fields.values()].map(renderValue)
-        return fields.length > 0
-            ? `${value.variantName}(${fields.join(", ")})`
-            : `${value.variantName}()`
-    }
-    if (value instanceof TokenVal) {
-        return `${value.dataTypeName}(${JSON.stringify(value.text)})`
-    }
-    return `<${value.kind}>`
-}
 
 // ── The screen ────────────────────────────────────────────────────────────────
 
@@ -502,8 +493,14 @@ function checkInstance(
         // this sample mix.
         return "nonEval"
     }
-    if (!valueEquals(left, right)) {
-        throw new LawError(op.name, law, instance.bindings, renderValue(left), renderValue(right))
+    if (!left.equals(right)) {
+        throw new LawError(
+            op.name,
+            law,
+            instance.bindings,
+            left.renderDisplay(),
+            right.renderDisplay(),
+        )
     }
     return "holds"
 }
@@ -550,7 +547,7 @@ function* assignments(
 function* dedupe(samples: Iterable<VariantVal>): Generator<VariantVal> {
     const seen = new Set<string>()
     for (const sample of samples) {
-        const key = renderValue(sample)
+        const key = sample.renderDisplay()
         if (!seen.has(key)) {
             seen.add(key)
             yield sample
@@ -586,7 +583,7 @@ export function makeEvalTerm(
  * declared patterns has NO inhabitants — the empty space declines the
  * screen (zero-coverage honesty, `declareCheckedLaw`).
  *
- * (The size measure is TEXT LENGTH — `valueSize`'s token arm — so the
+ * (The size measure is TEXT LENGTH — `Value.size`'s token arm — so the
  * prefix and the coefficients agree.)
  */
 function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
@@ -827,7 +824,7 @@ function filterTokenSubSpace(
                 `sub-space predicate "${spec.where}" on ${typeName} did not evaluate to a single verdict — the scope cannot certify the space`,
             )
         }
-        if (valueEquals(verdict, TRUE_VALUE)) kept.push(token)
+        if (verdict.equals(TRUE_VALUE)) kept.push(token)
     }
     return kept
 }
@@ -976,7 +973,7 @@ export function inhabitantsUpToSize(
         }
         const deduped: Value[] = [...strings]
             .map((text) => new TokenVal(type.name, text))
-            .sort((a, b) => valueSize(a) - valueSize(b))
+            .sort((a, b) => a.size() - b.size())
         return deduped
     }
     const spaces = new Map<DataType, readonly VariantVal[]>()
@@ -1090,7 +1087,7 @@ function spaceUpToSize(
                     // `patterns[0]` alone would drop every later variant's
                     // strings and silently shrink a With(p) carrier's
                     // space) — the size measure is TEXT LENGTH
-                    // (`valueSize`'s token arm), so the field's space and
+                    // (`Value.size`'s token arm), so the field's space and
                     // the coefficients agree: a size-n With(p) needs a
                     // token of EXACTLY length n−1 (the class filter below
                     // enforces the total, so the field space must be
@@ -1107,7 +1104,7 @@ function spaceUpToSize(
                 return [] as readonly Value[]
             })
             for (const combo of cartesian(fieldSpaces)) {
-                const totalSize = 1 + combo.reduce((sum, v) => sum + valueSize(v), 0)
+                const totalSize = 1 + combo.reduce((sum, v) => sum + v.size(), 0)
                 if (totalSize !== size) continue
                 const argNames = variant.fields.map((_, i) => `f${i}`)
                 const bindings = new Map<string, Value>()
@@ -1401,20 +1398,6 @@ function certifyCoverage(
 export type ScreeningRegime = "finite" | "machineFinite" | "residual" | "derivable"
 
 /**
- * The inhabitant ceiling for the `finite` regime (semantics.md §5.4: "Bool,
- * enums, records of finites (< ~2²⁰ inhabitants)" — the ceiling is set
- * below the doc's upper edge: exhaustion MEMOIZES each distinct type's
- * deduped space as real `VariantVal`s, and the memory cost is the honest
- * price of full enumeration. 2¹⁶ × ~1.5KB/value ≈ 100MB per distinct
- * carrier — the practical bound measured on the default heap; a 2²⁰-space
- * record type exhausts it (OOM, measured ~1.8GB).) A data type whose
- * inhabitant count is at or below this bound is exhaustible: the entire
- * input space is checked, making a passing check a proof. Bumping this
- * ceiling requires a heap headroom check or an external-memory sweep.
- */
-const MAX_FINITE_INHABITANTS = 2 ** 17
-
-/**
  * The instance ceiling for a full exhaustion sweep. A schema over an arity-2
  * operation quantifies over PAIRS of inhabitants, so a type at the
  * inhabitant ceiling alone could demand up to 2¹⁷ × 2¹⁷ instances — the
@@ -1431,81 +1414,16 @@ const MAX_EXHAUSTION_INSTANCES = 2 ** 20
  * Count the inhabitants of a data type, or `undefined` when the type is not
  * finitely inhabitable.
  *
- * The space of a μ-type is finite exactly when every variant field is:
- * a recursive field makes the type unbounded (a value may nest arbitrarily
- * deep), a function-typed field has no finite vocabulary, and `Any`-typed
- * fields are equally unbounded (the top type subsumes every type). A field
- * referencing another data type contributes that type's count (the product
- * through the variant's fields); parent-chain variants are summed in via
- * comb inheritance.
- *
- * Counts are saturated: any component exceeding the ceiling returns one
- * past it, so deep record chains cannot overflow the number range while the
- * caller's comparison against the ceiling still decides enumerability — a
- * value past the ceiling means "finite but not exhaustible here".
+ * The counting judgment lives on `type_algebra.ts`'s `TypeAlgebra` class
+ * (the counting classifier is the third reading of the same type equations
+ * `derivative` and `coefficients` read); this module re-exports the
+ * free-function surface its consumers and tests use, delegating to the
+ * module default instance. The full contract (the field-kind rules, the
+ * saturation arithmetic, the persistent identity-keyed memo) lives on
+ * `TypeAlgebra.inhabitants`.
  */
 export function finiteInhabitants(type: DataType): number | undefined {
-    // The cache maps data types to their count-or-not-finite verdict;
-    // `inProgress` marks types on the current traversal path — a cycle means
-    // a Family-typed field (the μ-bound), hence unbounded. (The μ-bound α is
-    // spelled as the Family singleton: a recursive field's type IS the
-    // bound-variable occurrence.)
-    const count = (
-        type: DataType,
-        cache: Map<DataType, number | undefined>,
-        inProgress: Set<DataType>,
-    ): number | undefined => {
-        const cached = cache.get(type)
-        if (cached !== undefined || cache.has(type)) return cached
-        if (inProgress.has(type)) return undefined
-        inProgress.add(type)
-        let total = 0
-        for (const variant of type.allVariants()) {
-            let product = 1
-            for (const field of variant.fields) {
-                if (field.type instanceof FamilyType) {
-                    inProgress.delete(type)
-                    cache.set(type, undefined)
-                    return undefined
-                }
-                const fieldType = field.type
-                if (fieldType instanceof AnyType) {
-                    inProgress.delete(type)
-                    cache.set(type, undefined)
-                    return undefined
-                }
-                if (!(fieldType instanceof DataType)) {
-                    // Function types (and any other non-data type) have no
-                    // finite sample vocabulary.
-                    inProgress.delete(type)
-                    cache.set(type, undefined)
-                    return undefined
-                }
-                const sub = count(fieldType, cache, inProgress)
-                if (sub === undefined) {
-                    inProgress.delete(type)
-                    cache.set(type, undefined)
-                    return undefined
-                }
-                product *= sub
-                if (product > MAX_FINITE_INHABITANTS) {
-                    inProgress.delete(type)
-                    cache.set(type, MAX_FINITE_INHABITANTS + 1)
-                    return MAX_FINITE_INHABITANTS + 1
-                }
-            }
-            total += product
-            if (total > MAX_FINITE_INHABITANTS) {
-                inProgress.delete(type)
-                cache.set(type, MAX_FINITE_INHABITANTS + 1)
-                return MAX_FINITE_INHABITANTS + 1
-            }
-        }
-        inProgress.delete(type)
-        cache.set(type, total)
-        return total
-    }
-    return count(type, new Map(), new Set())
+    return finiteInhabitantsFromAlgebra(type)
 }
 
 /**
@@ -1593,9 +1511,8 @@ export function screeningRegime(
  * recursion axis — one handler per axis variant): it admits nothing about
  * CLOSURE (the derivation's own outcome); it only decides whether the
  * derivable regime's engine gets its attempt. A gate failure routes
- * residual exactly as before this arm existed — the additive-union
- * discipline: every pre-existing routing outcome is preserved verbatim when
- * the gate declines.
+ * residual — the additive-union discipline: a routing outcome is only ever
+ * refined, never re-routed, when the gate declines.
  */
 function upgradeToDerivable(
     law: Omit<LawDecl, "provenance">,
@@ -1705,9 +1622,9 @@ export function declareCheckedLaw(
     // (D7) runs before installation — an engine bug that fabricates a bogus
     // proof becomes a loud LawError on concrete instances. A non-closing
     // derivation is a DECLINE, not a falsification: the claim falls through
-    // to the residual screen exactly as before this arm existed, and the
-    // returned regime names the mechanism that produced the outcome
-    // ("residual" — the screen established the provenance).
+    // to the residual screen, and the returned regime names the mechanism
+    // that produced the outcome ("residual" — the screen established the
+    // provenance).
     let derivation: DerivationCertificate | undefined
     if (regime === "derivable") {
         if (registries === undefined) {
@@ -1718,7 +1635,7 @@ export function declareCheckedLaw(
             const result = deriveLaw(law, op, registries.registry, omega, laws)
             if ("derivable" in result) {
                 // Not-derivable: fall back to the residual screen (the
-                // claim proceeds to screening exactly as before this PBI).
+                // claim proceeds to screening).
                 regime = "residual"
             } else {
                 // The belt-and-braces screen: the certified prefix sweep
@@ -2020,7 +1937,7 @@ function filterSubSpace(
                 `sub-space predicate "${spec.where}" (position ${position}) did not evaluate to a single verdict — the scope cannot certify the space`,
             )
         }
-        if (valueEquals(verdict, TRUE_VALUE)) kept.push(sample)
+        if (verdict.equals(TRUE_VALUE)) kept.push(sample)
     }
     return kept
 }

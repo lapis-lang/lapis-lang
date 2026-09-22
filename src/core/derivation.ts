@@ -36,7 +36,7 @@
  * 2. **Case structure** — one case per variant of the axis carrier
  *    (`allVariants()`); a case's Family-typed (μ-bound) fields carry the
  *    the IH; non-Self data-typed fields do not (the direct-recursion
- *    boundary — the ∂T machinery's #64 boundary, shared).
+ *    boundary — the same depth-≤ 1 chain rule the ∂T machinery states).
  * 3. **Closure** — every schema instance (both directions for
  *    argument-taking kinds) closes within the move set and budgets.
  *
@@ -790,8 +790,7 @@ export interface DerivationCertificate {
 /**
  * A failed derivation: the claim is not in the derivable fragment. The
  * report names the first open case (the honest edge) — a DECLINE, not a
- * falsification: the claim proceeds to the residual screen exactly as it
- * did before this engine existed.
+ * falsification: the claim proceeds to the residual screen.
  */
 export interface NotDerivable {
     readonly derivable: false

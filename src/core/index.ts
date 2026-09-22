@@ -13,15 +13,14 @@ export {
     Family,
     FamilyType,
     Field,
-    foldType,
     FunType,
     IntersectionType,
-    mapType,
     Nothing,
     NothingType,
     Observer,
     PatternDataType,
     PolymorphicType,
+    type RequiredCases,
     Token,
     TokenType,
     Type,
@@ -33,15 +32,7 @@ export {
 } from "./types.ts"
 
 // Values (lc.md §2.3)
-export {
-    SpanClosure,
-    TokenVal,
-    Value,
-    ValueEnv,
-    valueEquals,
-    valueSize,
-    VariantVal,
-} from "./values.ts"
+export { SpanClosure, TokenVal, Value, ValueEnv, VariantVal } from "./values.ts"
 
 // Laws (lc.md §2.4, §7.2 — the equational theory environment E)
 export {
@@ -178,7 +169,11 @@ export {
     type ContextSpec,
     derivative,
     MAX_COEFFICIENT,
+    MAX_FINITE_INHABITANTS,
+    type PatternLookup,
     setPatternLookup,
+    TypeAlgebra,
+    typeAlgebra,
 } from "./type_algebra.ts"
 
 // The pattern language (the AST, parser, and language-equation
@@ -205,7 +200,6 @@ export {
     DerivativeGenerator,
     type DerivativeGeneratorOptions,
     plug,
-    renderValue,
 } from "./law_testing.ts"
 
 // Evaluation grammar subclass (lc.md §3 — parse, don't evaluate separately)

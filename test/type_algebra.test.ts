@@ -9,7 +9,7 @@
 
 import { assertEquals, assertThrows } from "@std/assert"
 
-import { coefficients, type ContextSpec, derivative } from "../src/core/type_algebra.ts"
+import { coefficients, ContextSpec, derivative, typeAlgebra } from "../src/core/type_algebra.ts"
 import { createPatternType } from "./fixtures.ts"
 import {
     Any,
@@ -131,7 +131,11 @@ function spec(
     holeType: Type,
     surroundTypes: Type[],
 ): ContextSpec {
-    return { variantName, fieldName, holeType, surroundTypes }
+    // The spec is now a class (the chain rule's data edge lives on it);
+    // the module default instance constructs it, exactly as `derivative`
+    // does. The edge is never consulted in these structural-shape tests —
+    // the constructor's fields alone carry every assertion below.
+    return new ContextSpec(variantName, fieldName, holeType, surroundTypes, typeAlgebra)
 }
 
 // ── The sum rule (nullary variants) ───────────────────────────────────────────

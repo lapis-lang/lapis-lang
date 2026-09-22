@@ -102,7 +102,15 @@ import {
     SemanticPass,
 } from "@lapis-lang/lang-forma"
 
-import { CodataType, DataType, FamilyType, Field, foldType, Type } from "./types.ts"
+import {
+    CodataType,
+    DataType,
+    FamilyType,
+    Field,
+    type RequiredCases,
+    Type,
+    type TypeCases,
+} from "./types.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
@@ -772,7 +780,7 @@ export class CostEnv {
 
 /**
  * Classify a type: function-typed (FunType) vs data vs unknown — routed
- * through `foldType` (the Type universe's required-case dispatch), with the
+ * through `t.dispatch` (the Type universe's required-case dispatch), with the
  * classification degrading to `unknown` for any kind outside the core
  * universe (the engine's own marker types — `FoldRecType` — are deliberate
  * pass-local `Type` subclasses that never escape the module).
@@ -780,15 +788,15 @@ export class CostEnv {
  * The try/catch is the contract, not defense: classification is a TAG, not
  * a membership test (the membership boundary is `subtyping.ts`'s
  * `requireType`, which throws). A foreign subclass reaching a binder's
- * denotation must cost nothing and classify unknown — the old `instanceof`
- * ladder's behavior — never crash the analysis (`analyzeTerm` never
- * throws). The interception in `extendCtx` handles the marker today; this
- * keeps the classification robust against future call sites that forget it.
+ * denotation must cost nothing and classify unknown — never crash the
+ * analysis (`analyzeTerm` never throws). The interception in `extendCtx`
+ * handles the engine's own marker; this keeps the classification robust
+ * against future call sites that forget it.
  */
 function typeKind(type: Type | undefined): "data" | "function" | "unknown" {
     if (type === undefined) return "unknown"
     try {
-        return foldType(type, {
+        return type.dispatch<"data" | "function" | "unknown">({
             fun: () => "function",
             intersection: () => "unknown",
             polymorphic: () => "unknown",
@@ -928,6 +936,36 @@ class FoldRecType extends Type {
 
     override toString(): string {
         return `⟨rec ${this.carrierName}⟩`
+    }
+
+    /**
+     * The pass-local marker is OUTSIDE the core universe: a generic
+     * dispatch arm would name an undeclared case, so the marker answers
+     * itself — any case table it reaches throws with this type's name,
+     * which the engine's classification degrades to `unknown` (the
+     * try/catch contract in `typeKind`). `map` throws the same way: no
+     * structural reading of a marker exists, so there is no traversal
+     * to run.
+     */
+    override dispatch<T>(_cases: RequiredCases<T>): T {
+        throw new TypeError(
+            `FoldRecType (${this.carrierName}) is a cost-engine marker outside ` +
+                `the core Type universe — no generic case table answers for it`,
+        )
+    }
+
+    override map(_cases: TypeCases<Type>): Type {
+        throw new TypeError(
+            `FoldRecType (${this.carrierName}) is a cost-engine marker outside ` +
+                `the core Type universe — no structural map answers for it`,
+        )
+    }
+
+    override resolveFamily(_carrier: DataType): Type {
+        throw new TypeError(
+            `FoldRecType (${this.carrierName}) is a cost-engine marker outside ` +
+                `the core Type universe — no μ-bound to resolve`,
+        )
     }
 }
 
@@ -1073,7 +1111,13 @@ class CostEngine extends AbstractLC<CostShape> {
      * the type checker's σ binding.
      */
     protected override foldFieldType(field: Field, dataType: DataType): Type {
-        return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
+        // The μ-bound resolves to the carrier (the type side), then the
+        // cost engine re-marks it as the fold-recursion denotation (the
+        // cost side's opaque size — E-Fold binds the recursive field to the
+        // folded result).
+        return field.type.resolveFamily(dataType) instanceof DataType
+            ? new FoldRecType(dataType.name)
+            : field.type
     }
 
     // ── Semantic actions ──────────────────────────────────────────────────────

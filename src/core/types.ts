@@ -32,6 +32,81 @@ export abstract class Type {
 
     /** Human-readable representation for debugging. */
     abstract toString(): string
+
+    /**
+     * Dispatch this type's shape to a case table WITHOUT structural
+     * recursion — the classification-style fold: the narrowed `this` and,
+     * for composite kinds, the immediate sub-types are handed to the
+     * matching case, and whatever the analysis computes (a tag, a summary,
+     * a count) comes back.
+     *
+     * Implemented per subclass (each kind knows its own arm — the same
+     * polymorphism `equals`/`toString` already exercise); the closed
+     * universe is the class hierarchy itself, so an undeclared subclass
+     * reaching a generic consumer throws loudly from the root default.
+     *
+     * The REQUIRED-case form: a table that omits a kind is a compile error
+     * (`RequiredCases<T>`), and an omitted arm reaching the root default
+     * throws at runtime — a caller bug surfaced loudly, never a silent
+     * `undefined`.
+     *
+     * Contrast with `map` (bottom-up, defaultable cases, rebuilds types):
+     * `dispatch` is for consumers that reduce a type to a value; `map` is
+     * for consumers that transform it.
+     */
+    abstract dispatch<T>(cases: RequiredCases<T>): T
+
+    /**
+     * Map this type bottom-up: every sub-type is mapped first, then the
+     * node's case handler sees the mapped children. A handler returning
+     * `undefined` keeps the structurally-defaulted node (children
+     * substituted, shape rebuilt, unchanged when no child moved) — so a
+     * substitution only spells the kinds it transforms.
+     *
+     * Implemented per subclass, like `dispatch`: atom kinds have no
+     * traversable sub-types (their arm runs the optional handler, keeping
+     * the node unchanged when it yields `undefined`); the composite kinds
+     * (`FunType`, `IntersectionType`, `PolymorphicType`) override to map
+     * their children first. A pass-local marker outside the universe
+     * throws from both virtuals — there is no structural reading of it.
+     *
+     * Shadowing note: at a `PolymorphicType` node the handler runs AFTER
+     * the children are mapped; a shadowing handler returns the ORIGINAL
+     * node (discarding the mapped children), so a substitution's
+     * no-descend rule is expressed by returning the original binder.
+     */
+    abstract map(cases: TypeCases<Type>): Type
+
+    /**
+     * Resolve the μ-bound occurrence against a carrier: a `Family`-typed
+     * field IS the recursion, so its type is the carrier it recurses
+     * through; every other kind is itself.
+     *
+     * The μ-bound is a TYPE (the same binder/occurrence mechanism as a
+     * ∀-bound variable), so the resolution is intrinsic and lives on the
+     * subclasses, the same tier `equals`/`toString` exercise. Each pass
+     * resolves the binder against the carrier it is analyzing (the
+     * context, not the singleton, makes it that carrier) — exactly as a
+     * bound variable resolves against its context.
+     */
+    /**
+     * Resolve the μ-bound occurrence against a carrier: a `Family`-typed
+     * field IS the recursion, so its type is the carrier it recurses
+     * through; every other kind is itself.
+     *
+     * The base implementation is the identity — only the μ-bound occurrence
+     * itself resolves differently, so only `FamilyType` overrides. The
+     * μ-bound is a TYPE (the same binder/occurrence mechanism as a
+     * ∀-bound variable), so the resolution is intrinsic and lives on the
+     * subclasses, the same tier `equals`/`toString` exercise. Each pass
+     * resolves the binder against the carrier it is analyzing (the
+     * context, not the singleton, makes it that carrier) — exactly as a
+     * bound variable resolves against its context. A pass-local marker
+     * outside the universe throws (no μ-bound to resolve).
+     */
+    resolveFamily(_carrier: DataType): Type {
+        return this
+    }
 }
 
 // ── Type variable ─────────────────────────────────────────────────────────────
@@ -56,6 +131,15 @@ export class TypeVar extends Type {
     toString(): string {
         return this.name
     }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.typeVar(this)
+    }
+
+    /** An atom: no traversable sub-types; the base `map` default applies. */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.typeVar?.(this) ?? this
+    }
 }
 
 // ── Family (the μ-bound reference) ───────────────────────────────────────────
@@ -71,8 +155,8 @@ export class TypeVar extends Type {
  *
  * A field typed as the carrier's DataType instance (without `Family`) is a
  * genuine data field that happens to name the same type — a distinct,
- * non-recursive position (the re-entrancy case the enumerators handle). The
- * two are no longer confusable: the type says which one it is.
+ * non-recursive position (the re-entrancy case the enumerators handle): the
+ * type says which one it is.
  */
 export class FamilyType extends Type {
     equals(other: Type): boolean {
@@ -81,6 +165,24 @@ export class FamilyType extends Type {
 
     toString(): string {
         return "Family"
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.family(this)
+    }
+
+    /** An atom: no traversable sub-types; the base `map` default applies. */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.family?.(this) ?? this
+    }
+
+    /**
+     * THE μ-bound occurrence: resolved against the analyzing carrier —
+     * the context (the traversal consuming this singleton) supplies the
+     * carrier, exactly as a bound variable resolves against its context.
+     */
+    override resolveFamily(carrier: DataType): Type {
+        return carrier
     }
 }
 
@@ -106,6 +208,23 @@ export class FunType extends Type {
 
     toString(): string {
         return `(${this.param} → ${this.result})`
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.fun(this, this.param, this.result)
+    }
+
+    /**
+     * Bottom-up: both children mapped first, then the handler sees the
+     * mapped param/result. `undefined` keeps the structurally-defaulted
+     * node — the ORIGINAL when neither child moved (no allocation), a
+     * rebuilt `FunType` when one did.
+     */
+    override map(cases: TypeCases<Type>): Type {
+        const p = this.param.map(cases)
+        const r = this.result.map(cases)
+        return cases.fun?.(this, p, r) ??
+            (p === this.param && r === this.result ? this : new FunType(p, r))
     }
 }
 
@@ -225,6 +344,15 @@ export class DataType extends Type {
         return this.name
     }
 
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.data(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.data?.(this) ?? this
+    }
+
     /** All variants from this type and its parent chain (comb inheritance). */
     allVariants(): Variant[] {
         const result = [...this.variants]
@@ -265,6 +393,15 @@ export class PatternDataType extends Type {
 
     toString(): string {
         return this.name
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.patternData(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.patternData?.(this) ?? this
     }
 }
 
@@ -329,6 +466,15 @@ export class CodataType extends Type {
         return this.name
     }
 
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.codata(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.codata?.(this) ?? this
+    }
+
     /** All observers from this type and its parent chain. */
     allObservers(): Observer[] {
         const result = [...this.observers]
@@ -364,6 +510,15 @@ export class TokenType extends Type {
     toString(): string {
         return "Token"
     }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.token(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.token?.(this) ?? this
+    }
 }
 
 /** Singleton instance of the Token type. */
@@ -380,6 +535,15 @@ export class AnyType extends Type {
     toString(): string {
         return "Any"
     }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.any(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.any?.(this) ?? this
+    }
 }
 
 /** `Nothing` — the bottom of the subtyping lattice. Subtype of every type. */
@@ -390,6 +554,15 @@ export class NothingType extends Type {
 
     toString(): string {
         return "Nothing"
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.nothing(this)
+    }
+
+    /** An atom: the base `map` default applies (no traversable sub-types). */
+    override map(cases: TypeCases<Type>): Type {
+        return cases.nothing?.(this) ?? this
     }
 }
 
@@ -416,6 +589,22 @@ export class IntersectionType extends Type {
 
     toString(): string {
         return `(${this.left} ∧ ${this.right})`
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.intersection(this, this.left, this.right)
+    }
+
+    /**
+     * Bottom-up: both children mapped first, then the handler sees the
+     * mapped left/right. `undefined` keeps the structurally-defaulted
+     * node — the ORIGINAL when neither child moved, rebuilt otherwise.
+     */
+    override map(cases: TypeCases<Type>): Type {
+        const l = this.left.map(cases)
+        const r = this.right.map(cases)
+        return cases.intersection?.(this, l, r) ??
+            (l === this.left && r === this.right ? this : new IntersectionType(l, r))
     }
 }
 
@@ -446,6 +635,29 @@ export class PolymorphicType extends Type {
 
     toString(): string {
         return `∀${this.typeVarName} <: ${this.bound}. ${this.body}`
+    }
+
+    override dispatch<T>(cases: RequiredCases<T>): T {
+        return cases.polymorphic(this, this.bound, this.body)
+    }
+
+    /**
+     * Bottom-up: the bound and body mapped first, then the handler sees
+     * the mapped children. `undefined` keeps the structurally-defaulted
+     * node — the ORIGINAL when neither child moved, rebuilt otherwise.
+     *
+     * Shadowing note: the handler runs AFTER the children are mapped; a
+     * shadowing handler returns the ORIGINAL node (discarding the mapped
+     * children), so a substitution's no-descend rule is expressed by
+     * returning the original binder.
+     */
+    override map(cases: TypeCases<Type>): Type {
+        const b = this.bound.map(cases)
+        const body = this.body.map(cases)
+        return cases.polymorphic?.(this, b, body) ??
+            (b === this.bound && body === this.body
+                ? this
+                : new PolymorphicType(this.typeVarName, b, body))
     }
 }
 
@@ -502,21 +714,26 @@ export class TypeEnv {
     }
 }
 
-// ── Structural dispatch (foldType) ───────────────────────────────────────────
+// ── Structural dispatch (the TypeCases protocol) ─────────────────────────────
 
 /**
- * The generic structural recursion over the Type universe — the one
- * traversal every pass shares.
+ * The case protocol over the Type universe — the one dispatch every pass
+ * shares. Each case handler receives the type (narrowed) and, for the
+ * composite kinds, its recursive sub-types.
  *
- * Each case handler receives the type (narrowed) and, for the composite
- * kinds, its recursive sub-types. A case returning `undefined` delegates to
- * the structural default (recurse into sub-types, rebuild composites);
- * otherwise the returned `Type` replaces the node. Leaf kinds with no
- * handler and no sub-types return themselves.
+ * Consumers invoke the dispatch polymorphically: `t.dispatch(cases)` (the
+ * required-case classification fold) and `t.map(cases)` (the bottom-up
+ * transformation) are virtual methods on `Type`, implemented per subclass —
+ * a new Type subclass implements its own dispatch arm, so the closed
+ * universe is enforced by the class hierarchy itself. The case tables stay
+ * external: per-judgment actions are supplied per call.
  *
- * This is the shape `substituteTypeVar` (typing), the cost algebra's kind
- * classification, and the coefficient machinery's dispatch all walk — one
- * case table instead of N hand-rolled `instanceof` ladders.
+ * The handler returns are deliberately optional-result (`T | undefined`):
+ * `map` reads `undefined` as "keep the structural default" (the node
+ * unchanged for atoms, rebuilt from mapped children for composites), and
+ * `dispatch` treats it as an omitted arm (the required-case compile
+ * contract `RequiredCases<T>` makes omission a caller bug — the runtime
+ * then surfaces a missing arm as a loud TypeError from the caller's `!`).
  */
 export interface TypeCases<T> {
     typeVar?: (t: TypeVar) => T | undefined
@@ -533,146 +750,16 @@ export interface TypeCases<T> {
 }
 
 /**
- * Dispatch on the type's shape, with the structural default for unhandled
- * cases: recurse into sub-types via `map` and rebuild composite kinds. The
- * `undefined` protocol lets a case handler bail out to the default (see
- * `mapType`).
- *
- * Internally untyped (the handler return types vary per kind — a generic
- * signature would force every caller through the same cast); the typed
- * entries are `mapType` and `foldType`.
+ * The case protocol, REQUIRED-case form: a table that omits a kind is a
+ * compile error — the classification-style fold's contract (a new Type
+ * subclass forces every case table to answer for it). `dispatch` requires
+ * this form; an arm that yields `undefined` is a caller bug, not a case to
+ * default (the classification fold must never silently produce one). The
+ * `-?` strips the optionality the `TypeCases` mapping would otherwise
+ * preserve. The parameter types stay loose (`any` + rest) because the
+ * per-kind signatures vary — `dispatch`'s implementors narrow internally.
  */
-// deno-lint-ignore no-explicit-any
-function dispatchType(t: Type, cases: TypeCases<any>): unknown {
-    if (t instanceof TypeVar) {
-        return cases.typeVar?.(t) ?? t
-    }
-    if (t instanceof FamilyType) {
-        return cases.family?.(t) ?? t
-    }
-    if (t instanceof FunType) {
-        // Unreachable via `mapType` (its FunType arm runs first); this default
-        // exists only for a direct `dispatchType` call with no handler.
-        return cases.fun?.(t, t.param, t.result) ?? new FunType(t.param, t.result)
-    }
-    if (t instanceof DataType) {
-        return cases.data?.(t) ?? t
-    }
-    if (t instanceof PatternDataType) {
-        return cases.patternData?.(t) ?? t
-    }
-    if (t instanceof CodataType) {
-        return cases.codata?.(t) ?? t
-    }
-    if (t instanceof TokenType) {
-        return cases.token?.(t) ?? t
-    }
-    if (t instanceof AnyType) {
-        return cases.any?.(t) ?? t
-    }
-    if (t instanceof NothingType) {
-        return cases.nothing?.(t) ?? t
-    }
-    if (t instanceof IntersectionType) {
-        return cases.intersection?.(t, t.left, t.right) ?? new IntersectionType(t.left, t.right)
-    }
-    if (t instanceof PolymorphicType) {
-        return cases.polymorphic?.(t, t.bound, t.body) ??
-            new PolymorphicType(t.typeVarName, t.bound, t.body)
-    }
-    // Unreachable for every declared kind — an unknown subclass reaches
-    // here only if someone extends Type outside this module. Loud, not
-    // silent.
-    throw new TypeError(`foldType: unknown Type subclass ${t.constructor.name}`)
-}
-
-/**
- * Map a type bottom-up: every sub-type is mapped first, then the node's
- * case handler sees the mapped children. A handler returning `undefined`
- * keeps the structurally-defaulted node (children substituted, shape
- * rebuilt, unchanged when no child moved) — so a substitution only spells
- * the kinds it transforms.
- *
- * `FamilyType`, `DataType`, `PatternDataType`, `CodataType`, and the
- * lattice/token leaves are atoms (no traversable sub-types); their default
- * returns the node unchanged.
- *
- * Shadowing note: at a `PolymorphicType` node the handler runs AFTER the
- * children are mapped; a shadowing handler returns the ORIGINAL node
- * (discarding the mapped children), so a substitution's no-descend rule is
- * expressed by returning the original binder.
- */
-export function mapType(t: Type, cases: TypeCases<Type>): Type {
-    if (t instanceof FunType) {
-        const p = mapType(t.param, cases)
-        const r = mapType(t.result, cases)
-        return cases.fun?.(t, p, r) ?? (p === t.param && r === t.result ? t : new FunType(p, r))
-    }
-    if (t instanceof IntersectionType) {
-        const l = mapType(t.left, cases)
-        const r = mapType(t.right, cases)
-        return cases.intersection?.(t, l, r) ??
-            (l === t.left && r === t.right ? t : new IntersectionType(l, r))
-    }
-    if (t instanceof PolymorphicType) {
-        const b = mapType(t.bound, cases)
-        const body = mapType(t.body, cases)
-        return cases.polymorphic?.(t, b, body) ??
-            (b === t.bound && body === t.body ? t : new PolymorphicType(t.typeVarName, b, body))
-    }
-    // Atoms: dispatch (a handler may still transform the leaf).
-    return dispatchType(t, cases) as Type
-}
-
-/**
- * Dispatch a type's shape to a case table WITHOUT structural recursion —
- * the classification-style fold: each case receives the narrowed type and,
- * for composite kinds, its immediate sub-types, and returns whatever the
- * analysis computes (a tag, a summary, a count). Every case is REQUIRED —
- * a table that omits a kind is a compile error, which is the point: a new
- * Type subclass forces every case table to answer for it.
- *
- * Contrast with `mapType` (bottom-up, defaultable cases, rebuilds types):
- * `foldType` is for consumers that reduce a type to a value; `mapType` is
- * for consumers that transform it.
- */
-// deno-lint-ignore no-explicit-any
-export function foldType<T>(t: Type, cases: TypeCases<T> & Record<keyof TypeCases<never>, any>): T {
-    if (t instanceof FunType) {
-        return cases.fun!(t, t.param, t.result)
-    }
-    if (t instanceof IntersectionType) {
-        return cases.intersection!(t, t.left, t.right)
-    }
-    if (t instanceof PolymorphicType) {
-        return cases.polymorphic!(t, t.bound, t.body)
-    }
-    if (t instanceof TypeVar) {
-        return cases.typeVar!(t)
-    }
-    if (t instanceof FamilyType) {
-        return cases.family!(t)
-    }
-    if (t instanceof DataType) {
-        return cases.data!(t)
-    }
-    if (t instanceof PatternDataType) {
-        return cases.patternData!(t)
-    }
-    if (t instanceof CodataType) {
-        return cases.codata!(t)
-    }
-    if (t instanceof TokenType) {
-        return cases.token!(t)
-    }
-    if (t instanceof AnyType) {
-        return cases.any!(t)
-    }
-    if (t instanceof NothingType) {
-        return cases.nothing!(t)
-    }
-    // Unreachable for every declared kind — an unknown subclass reaches
-    // here only if someone extends Type outside this module. Loud, not
-    // silent.
-    throw new TypeError(`foldType: unknown Type subclass ${t.constructor.name}`)
+export type RequiredCases<T> = {
+    // deno-lint-ignore no-explicit-any
+    [K in keyof TypeCases<T>]-?: (t: any, ...rest: any[]) => T
 }

@@ -14,9 +14,111 @@ import type { Span } from "@lapis-lang/lang-forma"
 
 // ── Value ─────────────────────────────────────────────────────────────────────
 
-/** The root of the LC value hierarchy. */
+/**
+ * The root of the LC value hierarchy.
+ *
+ * Equality, size, and source rendering are intrinsic representation concerns
+ * (the same tier as `Type.equals` and `toString` in `types.ts`), so they live
+ * here as virtual methods, owned by the subclasses.
+ */
 export abstract class Value {
     abstract readonly kind: string
+
+    /**
+     * Structural equality on data values — the runtime `=` primitive's
+     * equality on data (semantics.md §7): two values are equal when they
+     * have the same constructor and equal fields, recursively.
+     *
+     * Scope (first cut): finite data values. Function values (closures) and
+     * codata values have no structural equality: closures are code, codata
+     * equality is bisimulation, and both are outside the first cut —
+     * comparing a value containing one returns `false` unless it is
+     * literally the same reference (identical closures ARE equal, which
+     * keeps `idempotent` on a closure-valued argument well-defined at the
+     * reference level). Law checking (law_checking.ts) restricts itself to
+     * operations whose parameter types are data or pattern types, so its
+     * comparisons observe the `VariantVal` and `TokenVal` parts.
+     *
+     * The base implementation is the REFERENCE rule every subclass shares
+     * unless it overrides: two distinct values of kinds without structural
+     * equality are unequal.
+     */
+    equals(other: Value): boolean {
+        return this === other
+    }
+
+    /**
+     * The structural size of a value: its node count (one per variant
+     * constructor; tokens count as their TEXT LENGTH — the language-equation
+     * reading counts per-length strings, so a token's size is the length of
+     * its raw matched text).
+     *
+     * This is the monotone measure the ∂T shrinker minimizes (a filler is a
+     * candidate only when STRICTLY smaller than the subtree it replaces) and
+     * the size the certified screen's prefix is stated in (size-≤ k classes).
+     * One definition keeps the two mechanisms agreeing on what "smaller" and
+     * "the prefix" mean.
+     *
+     * The token arm: a token's size is `text.length`. The language
+     * equation counts strings of exactly length n (`Nat = [0-9]+` gives
+     * cₙ = 10ⁿ — 10 strings of length 1), so the certificate's c₁ counts
+     * single-CHARACTER tokens; the size measure must agree or the enumeration
+     * and the coefficients disagree. (The empty string matches `[^"]*`-style
+     * patterns — size 0, honest.) The shrinker's contract is unaffected: a
+     * shorter token is still strictly smaller than a longer one.
+     *
+     * The base implementation is the conservative fallback (1 — the
+     * atomic-node measure); the data subclasses override with their own
+     * structure's measure.
+     */
+    size(): number {
+        return 1
+    }
+
+    /**
+     * Render this value as LC source — the concrete syntax an evaluator
+     * parses — or `undefined` when the value has NO valid source form.
+     * The result must always re-parse (a malformed candidate would be
+     * reported as a falsification the evaluator cannot even run), so a
+     * value whose source form cannot be reconstructed declines rather than
+     * emitting a partial render.
+     *
+     * This is the ROUND-TRIP judgment: the property harness's domain is
+     * source strings, so plugged shrink candidates render back to source
+     * and re-parse to the same value. The law checker's display renderer
+     * (`law_checking.ts`) is a SEPARATE judgment — quoting tokens
+     * (`Type"text"`) for readable counterexamples — and stays there.
+     *
+     * The base implementation declines: kinds without an LC source form
+     * (closures are code, codata values are lazy generators, error
+     * sentinels are not terms) return `undefined` — the caller either
+     * skips this candidate or falls back to regeneration.
+     */
+    renderSource(): string | undefined {
+        return undefined
+    }
+
+    /**
+     * Render this value for DISPLAY — the law checker's counterexample
+     * text: a variant renders as `Name(field, …)` recursively, a token
+     * renders as `Type"text"` (quoted — the type name disambiguates two
+     * pattern types whose tokens carry the same text, and the quotes make
+     * whitespace/boundary characters visible), and kinds without a term
+     * reading fall back to `<kind>` — a display NEVER declines where the
+     * source form would.
+     *
+     * This is the DISPLAY judgment (the counterpart of `renderSource`'s
+     * round-trip judgment): its output is human-readable LawError text
+     * AND the dedup key the exhaustion sweep uses (each distinct value
+     * seen once — the quoted-token form keeps two same-named pattern
+     * types' tokens distinct, mirroring `TokenVal.equals`'s identity).
+     * The base implementation is the `<kind>` fallback (closures are
+     * code, codata values are lazy generators, error sentinels are not
+     * terms — none has a term reading, all have a kind tag).
+     */
+    renderDisplay(): string {
+        return `<${this.kind}>`
+    }
 }
 
 // ── SpanClosure ───────────────────────────────────────────────────────────────
@@ -67,6 +169,60 @@ export class VariantVal extends Value {
     ) {
         super()
     }
+    /**
+     * Structural equality: same constructor, same carrier NAME, equal fields
+     * (same key sets, recursively equal values). The carrier's NAME — not
+     * its instance identity — is the comparison: values evaluated under
+     * distinct registries that declare the same-named type shape are
+     * structurally equal (the law checker renders and compares rendered
+     * source; the name is the structural identity the evaluator's instances
+     * are checked against).
+     */
+    override equals(other: Value): boolean {
+        if (this === other) return true
+        return other instanceof VariantVal &&
+            this.variantName === other.variantName &&
+            this.dataType.name === other.dataType.name &&
+            fieldsEqual(this.fields, other.fields)
+    }
+
+    /** The node count: 1 (this constructor) + each field's size. */
+    override size(): number {
+        let size = 1
+        for (const field of this.fields.values()) size += field.size()
+        return size
+    }
+
+    /**
+     * LC source form: `Name(field, …)` — recursively through the fields;
+     * a field subtree with no source form declines the WHOLE candidate
+     * (decline propagates: a partial render is never emitted). Field order
+     * follows the value's construction order (`fields` is insertion-ordered
+     * by field declaration).
+     */
+    override renderSource(): string | undefined {
+        const fields: string[] = []
+        for (const field of this.fields.values()) {
+            const rendered = field.renderSource()
+            if (rendered === undefined) return undefined
+            fields.push(rendered)
+        }
+        return fields.length > 0
+            ? `${this.variantName}(${fields.join(", ")})`
+            : `${this.variantName}()`
+    }
+
+    /**
+     * Display form: `Name(field, …)` recursively (fields in construction
+     * order). A non-displayable field falls back to its `<kind>` tag —
+     * display never declines (the LawError text must always be readable).
+     */
+    override renderDisplay(): string {
+        const fields = [...this.fields.values()].map((f) => f.renderDisplay())
+        return fields.length > 0
+            ? `${this.variantName}(${fields.join(", ")})`
+            : `${this.variantName}()`
+    }
 }
 
 // ── Token value ───────────────────────────────────────────────────────────────
@@ -80,7 +236,7 @@ export class VariantVal extends Value {
  * itself: an atom whose name resolves to a registered `PatternDataType`
  * parses the matched text and yields the token as a value.
  *
- * Two tokens are equal (structurally, like `valueEquals`) iff they inhabit
+ * Two tokens are equal (structurally, like `equals`) iff they inhabit
  * the SAME pattern type AND their raw text is equal. The type name is part
  * of the identity because cross-type token collisions are plausible (two
  * pattern types can share the token atom's name-lexed form) and a law's
@@ -97,6 +253,49 @@ export class TokenVal extends Value {
         readonly text: string,
     ) {
         super()
+    }
+
+    /**
+     * Two tokens are equal (structurally, like `equals`) iff they
+     * inhabit the SAME pattern type AND their raw text is equal. The type
+     * name is part of the identity because cross-type token collisions are
+     * plausible (two pattern types can share the token atom's name-lexed
+     * form) and a law's schema operands range over a typed carrier — a
+     * `PatA` token and a `PatB` token with identical text are distinct
+     * values, as distinct as two variants of different data types with the
+     * same constructor shape.
+     */
+    override equals(other: Value): boolean {
+        if (this === other) return true
+        return other instanceof TokenVal &&
+            this.dataTypeName === other.dataTypeName &&
+            this.text === other.text
+    }
+
+    /** A token's size is its TEXT LENGTH (the per-length-class reading). */
+    override size(): number {
+        return this.text.length
+    }
+
+    /**
+     * LC source form: the bare pattern-type name — the evaluator's
+     * `patternTokenProd` emits `matchedToken(name, name)`, so the text IS
+     * the name-lexed source. `Pat("x")` is NOT LC syntax; a token whose
+     * text deviates from its type name (possible only by direct
+     * construction, never by evaluation) has no source form and declines.
+     */
+    override renderSource(): string | undefined {
+        return this.text === this.dataTypeName ? this.dataTypeName : undefined
+    }
+
+    /**
+     * Display form: `Type"text"` (quoted). The type name disambiguates
+     * two pattern types whose tokens carry the same text, and the quotes
+     * make whitespace/boundary characters visible — a counterexample must
+     * be readable unambiguously (mirrors `equals`'s type+text identity).
+     */
+    override renderDisplay(): string {
+        return `${this.dataTypeName}(${JSON.stringify(this.text)})`
     }
 }
 
@@ -137,74 +336,16 @@ export class ValueEnv {
 // ── Structural value equality ─────────────────────────────────────────────────
 
 /**
- * Structural equality on data values — the runtime `=` primitive's equality
- * on data (semantics.md §7): two values are equal when they have the same
- * constructor and equal fields, recursively.
- *
- * Scope (first cut): finite data values — `VariantVal` trees, plus `TokenVal`
- * (two tokens are equal iff they inhabit the same pattern type AND their raw
- * text is equal — see `TokenVal`). Function values (closures) and codata
- * values have no structural equality: closures are code, codata equality is
- * bisimulation, and both are outside the first cut — comparing a value
- * containing one returns `false` unless it is literally the same reference
- * (identical closures ARE equal, which keeps `idempotent` on a closure-
- * valued argument well-defined at the reference level). Law checking
- * (law_checking.ts) restricts itself to operations whose parameter types
- * are data or pattern types, so its comparisons observe the `VariantVal`
- * and `TokenVal` parts.
+ * Equality is the virtual `Value.equals` (documented there — the closure
+ * reference rule, the token type+text identity, the VariantVal contract
+ * all live on the subclasses). Field-wise equality on a variant's fields
+ * (same key sets, recursively equal values).
  */
-export function valueEquals(a: Value, b: Value): boolean {
-    if (a === b) return true
-
-    if (a instanceof VariantVal && b instanceof VariantVal) {
-        return a.variantName === b.variantName &&
-            a.dataType.name === b.dataType.name &&
-            fieldsEqual(a.fields, b.fields)
-    }
-    if (a instanceof TokenVal && b instanceof TokenVal) {
-        return a.dataTypeName === b.dataTypeName && a.text === b.text
-    }
-    return false
-}
-
-/** Field-wise structural equality on a variant's fields (same key sets). */
 function fieldsEqual(a: Map<string, Value>, b: Map<string, Value>): boolean {
     if (a.size !== b.size) return false
     for (const [name, value] of a) {
         const other = b.get(name)
-        if (other === undefined || !valueEquals(value, other)) return false
+        if (other === undefined || !value.equals(other)) return false
     }
     return true
-}
-
-/**
- * The structural size of a value: its node count (one per variant
- * constructor; tokens count as their TEXT LENGTH — the language-equation
- * reading counts per-length strings, so a token's size is the length of its
- * raw matched text).
- *
- * This is the monotone measure the ∂T shrinker minimizes (a filler is a
- * candidate only when STRICTLY smaller than the subtree it replaces) and
- * the size the certified screen's prefix is stated in (size-≤ k classes).
- * One definition keeps the two mechanisms agreeing on what "smaller" and
- * "the prefix" mean.
- *
- * The token arm: a token's size is `text.length`. The language
- * equation counts strings of exactly length n (`Nat = [0-9]+` gives
- * cₙ = 10ⁿ — 10 strings of length 1), so the certificate's c₁ counts
- * single-CHARACTER tokens; the size measure must agree or the enumeration
- * and the coefficients disagree. (The empty string matches `[^"]*`-style
- * patterns — size 0, honest.) The shrinker's contract is unaffected: a
- * shorter token is still strictly smaller than a longer one.
- */
-export function valueSize(value: Value): number {
-    if (value instanceof VariantVal) {
-        let size = 1
-        for (const field of value.fields.values()) size += valueSize(field)
-        return size
-    }
-    if (value instanceof TokenVal) {
-        return value.text.length
-    }
-    return 1
 }

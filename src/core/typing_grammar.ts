@@ -48,21 +48,16 @@ import {
 
 import {
     Any,
-    AnyType,
     CodataType,
     DataType,
     FamilyType,
     FunType,
-    IntersectionType,
-    mapType,
     Nothing,
     NothingType,
     PatternDataType,
     PolymorphicType,
-    TokenType,
     type Type,
     TypeEnv,
-    TypeVar,
     TypeVarEnv,
 } from "./types.ts"
 
@@ -70,7 +65,7 @@ import { AbstractLC, type LCShape } from "./grammar.ts"
 
 import { type OpSig, OpWellFormedness } from "./ops.ts"
 
-import { isSubtype, join } from "./subtyping.ts"
+import { isSubtype, isTypeValue, join } from "./subtyping.ts"
 
 // ── Shape for type checking ───────────────────────────────────────────────────
 
@@ -112,16 +107,16 @@ class TypeCheckCtx {
  * an occurrence of the variable there must still be substituted
  * (`∀A <: A. A` under `A := Any` becomes `∀A <: Any. A`).
  *
- * Routed through `mapType` — the type universe's one structural traversal;
+ * Routed through `type.map` — the type universe's one structural traversal;
  * only the kinds that can hold the variable are spelled. The polymorphic
  * handler composes the shadowing rule explicitly (bound mapped, body
  * original — identity-reused when nothing moved); the non-shadowing case
- * returns `undefined`, delegating to mapType's structural default: the
+ * returns `undefined`, delegating to the structural default: the
  * original binder is reused when no child moved (no allocation), rebuilt
  * only when a child moved.
  */
 function substituteTypeVar(type: Type, varName: string, replacement: Type): Type {
-    return mapType(type, {
+    return type.map({
         typeVar: (tv) => (tv.name === varName ? replacement : tv),
         polymorphic: (pt, bound) => {
             if (pt.typeVarName !== varName) return undefined
@@ -144,18 +139,14 @@ function substituteTypeVar(type: Type, varName: string, replacement: Type): Type
  * or non-Type values from a typing rule).
  */
 function isWellFormedType(t: Type | undefined): boolean {
-    return t !== undefined && t !== null &&
-        (t instanceof FunType ||
-            t instanceof DataType ||
-            t instanceof CodataType ||
-            t instanceof AnyType ||
-            t instanceof NothingType ||
-            t instanceof TypeVar ||
-            t instanceof TokenType ||
-            t instanceof IntersectionType ||
-            t instanceof PatternDataType ||
-            t instanceof PolymorphicType ||
-            t instanceof FamilyType)
+    // The shared closed-universe membership test (subtyping.ts's
+    // `isTypeValue` — the ONE definition both the lattice boundary and
+    // this grammar-edge check read): a new Type subclass cannot satisfy
+    // one consumer while being refused by the other. The undefined/null
+    // pre-check is the grammar edge's own shape (a failed premise can
+    // leave the slot empty); the nullability is exactly what
+    // `isTypeValue` rejects.
+    return t !== undefined && t !== null && isTypeValue(t)
 }
 
 // ── The type-checking grammar ─────────────────────────────────────────────────
@@ -384,7 +375,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const argType = args[i]
             if (argType === undefined) return Any
             if (argType instanceof NothingType) hasNothingArg = true
-            const expected = field.type instanceof FamilyType ? dataType : field.type
+            const expected = field.type.resolveFamily(dataType)
             if (!isSubtype(argType, expected)) return Any
         }
 
@@ -445,7 +436,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const field = variant.fields[i]!
             const argType = args[i]
             if (argType === undefined) return false
-            const expected = field.type instanceof FamilyType ? dataType : field.type
+            const expected = field.type.resolveFamily(dataType)
             if (!isSubtype(argType, expected)) return false
         }
         return true
@@ -568,9 +559,8 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // ── Fold with parseToFixpoint for circular attribute flow ─────────────────
     //
     // Override foldProd to capture handler body spans and use parseToFixpoint
-    // to iteratively refine σ (the fold result type). This replaces the
-    // Any-placeholder workaround: recursive fields are bound to the current
-    // σ estimate, and σ is refined until convergence.
+    // to iteratively refine σ (the fold result type): recursive fields are
+    // bound to the current σ estimate, and σ is refined until convergence.
 
     // fold [T] e {Cᵢ(xⱼ) → tᵢ}  — T-Fold with parseToFixpoint
     @rule
@@ -669,7 +659,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                     handlerCtx = new TypeCheckCtx(
                         handlerCtx.gamma.extend(
                             bindingList[i]!,
-                            field.type instanceof FamilyType ? dataType : field.type,
+                            field.type.resolveFamily(dataType),
                         ),
                         handlerCtx.delta,
                     )

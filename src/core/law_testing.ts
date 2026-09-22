@@ -32,9 +32,9 @@ import {
     type GrammarShape,
 } from "@lapis-lang/lang-forma"
 
-import { type ContextSpec, derivative } from "./type_algebra.ts"
+import { typeAlgebra } from "./type_algebra.ts"
 import { type EvalTerm, samplesFor } from "./law_checking.ts"
-import { TokenVal, type Value, ValueEnv, valueSize, VariantVal } from "./values.ts"
+import { ValueEnv, VariantVal } from "./values.ts"
 import { DataType, type Type } from "./types.ts"
 
 // ── Context paths ─────────────────────────────────────────────────────────────
@@ -54,23 +54,6 @@ import { DataType, type Type } from "./types.ts"
 export type ContextPath = readonly (readonly [string, string])[]
 
 /**
- * The context specs admissible at a node of the given carrier type, indexed
- * for path-walking: variant name → field name → spec.
- */
-function specIndex(carrier: DataType): Map<string, Map<string, ContextSpec>> {
-    const index = new Map<string, Map<string, ContextSpec>>()
-    for (const spec of derivative(carrier)) {
-        let byField = index.get(spec.variantName)
-        if (!byField) {
-            byField = new Map()
-            index.set(spec.variantName, byField)
-        }
-        byField.set(spec.fieldName, spec)
-    }
-    return index
-}
-
-/**
  * Enumerate every admissible context path of a structured value.
  *
  * A path is admissible when each step lands on a field the carrier's
@@ -85,7 +68,7 @@ export function contextPaths(value: VariantVal): ContextPath[] {
     const paths: ContextPath[] = []
 
     const walk = (node: VariantVal, carrier: DataType, prefix: ContextPath): void => {
-        const index = specIndex(carrier)
+        const index = typeAlgebra.specFor(carrier)
         for (const [fieldName, fieldValue] of node.fields) {
             const spec = index.get(node.variantName)?.get(fieldName)
             if (spec === undefined) continue
@@ -93,9 +76,11 @@ export function contextPaths(value: VariantVal): ContextPath[] {
             // this step) is itself a context — replace the whole field.
             const here: ContextPath = [...prefix, [node.variantName, fieldName] as const]
             paths.push(here)
-            // The chain rule, one level: when the hole's type is the field
-            // subtree's own carrier type, the descent may continue INSIDE
-            // that subtree — the path extends with contexts of the subtree
+            // The chain rule, one level — read off the spec's data edge
+            // (the algebra's derivative for the hole's own structure, the
+            // rule as DATA): when the hole's type is the field subtree's
+            // own carrier type, the descent may continue INSIDE that
+            // subtree — the path extends with contexts of the subtree
             // (taken under the subtree's carrier). Identity comparison: the
             // evaluator stamps every value's `dataType` from the same
             // registry the carrier came from, so reference equality is exact
@@ -142,53 +127,6 @@ export function plug(
     const fields = new Map(value.fields)
     fields.set(fieldName!, patched)
     return new VariantVal(value.variantName, value.dataType, fields)
-}
-
-/**
- * Render a value as LC source — the harness's property domain is source
- * strings, so plugged candidates render back to the concrete syntax the
- * evaluator parses. Returns `undefined` when the value has NO valid source
- * form: the result must always re-parse (a malformed candidate would be
- * reported as a falsification the evaluator cannot even run).
- *
- - A `VariantVal` renders as `Name(field, …)` — recursively; a variant
-   whose field subtree is not renderable declines the whole candidate
-   (decline propagates: a partial render is never emitted).
- - A `TokenVal` renders as its bare type name — the token's source form in
-   this grammar (`patternTokenProd` emits `matchedToken(name, name)`: the
-   text IS the name-lexed source). A token whose text differs from its type
-   name (possible only by direct construction, never by evaluation) declines.
- - Closures, codata values, and error sentinels decline: they have no
-   LC source form this renderer can emit.
- *
- * Field order follows the value's construction order (`VariantVal.fields`
- * is insertion-ordered by field declaration), mirroring how the law
- * checker's own renderer prints values (law_checking.ts — display-only;
- * THIS renderer is round-trip-checked).
- */
-export function renderValue(value: Value): string | undefined {
-    if (value instanceof VariantVal) {
-        const fields: string[] = []
-        for (const field of value.fields.values()) {
-            const rendered = renderValue(field)
-            if (rendered === undefined) return undefined
-            fields.push(rendered)
-        }
-        return fields.length > 0
-            ? `${value.variantName}(${fields.join(", ")})`
-            : `${value.variantName}()`
-    }
-    if (value instanceof TokenVal) {
-        // The token's source form is the bare pattern-type name (the
-        // evaluator's `patternTokenProd` emits `matchedToken(name, name)` —
-        // text IS the name-lexed source). `Pat("x")` is NOT LC syntax; a
-        // token whose text deviates from the name-lexed form has no source
-        // form and declines.
-        return value.text === value.dataTypeName ? value.dataTypeName : undefined
-    }
-    // Closures, codata values, error sentinels: no LC source form — decline
-    // (the caller either skips this candidate or falls back to regeneration).
-    return undefined
 }
 
 // ── The ∂T shrinker ───────────────────────────────────────────────────────────
@@ -306,7 +244,7 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
             // derivative — the chain rule's value-level reading).
             const holeType = this.holeTypeAt(path)
             if (!(holeType instanceof DataType)) continue
-            const size = valueSize(subtree)
+            const size = subtree.size()
             let holeFillers = fillersByHoleType.get(holeType)
             if (holeFillers === undefined) {
                 holeFillers = this.fillers(holeType, pool)
@@ -315,7 +253,7 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
             for (const filler of holeFillers) {
                 // Strictly smaller than the subtree at THIS hole — the
                 // monotone filter is per-path (the pool itself is not).
-                if (valueSize(filler) >= size) continue
+                if (filler.size() >= size) continue
                 const patched = plug(value, path, filler)
                 if (patched === undefined) continue
                 // Round-trip-checked render: a candidate whose subtree is
@@ -324,7 +262,7 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
                 // source the evaluator would fail on (an unparseable
                 // candidate would surface as a non-evaluation, i.e. a fake
                 // falsification the runner reports).
-                const rendered = renderValue(patched)
+                const rendered = patched.renderSource()
                 if (rendered === undefined) continue
                 if (rendered === source) continue
                 if (seen.has(rendered)) continue
@@ -344,12 +282,15 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
      * spec index — step i consults the spec for the CURRENT carrier (the
      * carrier the walk has descended into), and a spec whose holeType is a
      * data type different from the current carrier opens the chain rule
-     * (the next carrier is the hole's type).
+     * (the next carrier is the hole's type). The indexes come from the
+     * algebra's memoized `specFor` (identity-keyed per carrier): the walk
+     * consults the SAME spec objects `contextPaths` descended, not a
+     * per-step rebuild.
      */
     private holeTypeAt(path: ContextPath): Type | undefined {
         let carrier: DataType = this.carrier
         for (const [variantName, fieldName] of path) {
-            const spec = specIndex(carrier).get(variantName)?.get(fieldName)
+            const spec = typeAlgebra.specFor(carrier).get(variantName)?.get(fieldName)
             if (spec === undefined) return undefined
             const next = spec.holeType
             if (!(next instanceof DataType)) return undefined
@@ -379,7 +320,7 @@ export class DerivativeGenerator<S extends GrammarShape = GrammarShape>
             // excluded HERE: a filler that cannot render can never produce a
             // valid candidate, so keeping it would only waste plug+render
             // work per path.
-            const key = renderValue(v)
+            const key = v.renderSource()
             if (key === undefined) return
             if (seen.has(key)) return
             seen.add(key)
