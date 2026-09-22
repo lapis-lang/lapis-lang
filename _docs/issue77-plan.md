@@ -1,9 +1,10 @@
 # PBI #77 — Persistent Type structures: Implementation Plan
 
-> **Status:** Implemented. Implements [issue #77](https://github.com/lapis-lang/lapis-lang/issues/77) —
-> persistent `DataType`/`CodataType` construction (immutable, builder-knotted self-reference),
-> deleting the two-phase `seal()` ceremony and `TypeAlgebra`'s `requireSealedCarrier` precondition
-> machinery. Gate verified after implementation (`deno check` / 456 tests / lint / fmt, branch
+> **Status:** Implemented. Implements
+> [issue #77](https://github.com/lapis-lang/lapis-lang/issues/77) — persistent
+> `DataType`/`CodataType` construction (immutable, builder-knotted self-reference), deleting the
+> two-phase `seal()` ceremony and `TypeAlgebra`'s `requireSealedCarrier` precondition machinery.
+> Gate verified after implementation (`deno check` / 456 tests / lint / fmt, branch
 > `mlhaufe/issue77`).
 
 ## 1. Summary

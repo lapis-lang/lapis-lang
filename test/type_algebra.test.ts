@@ -13,12 +13,14 @@ import { coefficients, ContextSpec, derivative, typeAlgebra } from "../src/core/
 import { createPatternType } from "./fixtures.ts"
 import {
     Any,
+    CodataType,
     DataType,
     Family,
     Field,
     FunType,
     IntersectionType,
     NothingType,
+    Observer,
     TokenType,
     Type,
     Variant,
@@ -53,9 +55,43 @@ Deno.test("persist: the published definition is frozen, including through a reta
         () => fields.push(new Field("evil", Any)),
         TypeError,
     )
+    assert(Object.isFrozen(t))
     assert(Object.isFrozen(t.variants))
     assert(t.variants.every((v) => Object.isFrozen(v.fields)))
     assertEquals(t.variants.length, 1)
+})
+
+Deno.test("persist: the whole carrier is frozen, not only the variants array", () => {
+    const parent = DataType.define("ProbeParent").addVariant(new Variant("Inherited", [])).build()
+    const t = DataType.define("Probe", parent).addVariant(new Variant("Base", [])).build()
+    // The carrier itself is frozen: name, parent, and the private variants
+    // slot reject post-publication writes (the identity-keyed caches rely
+    // on the instance's shape never changing after publication).
+    assert(Object.isFrozen(t))
+    assertThrows(() => {
+        ;(t as { name: string }).name = "Evil"
+    }, TypeError)
+    assertThrows(() => {
+        ;(t as { parent: DataType | null }).parent = null
+    }, TypeError)
+})
+
+Deno.test("persist: the published codata carrier is frozen, not only the observers array", () => {
+    const parent = CodataType.define("ProbeCodataParent")
+        .addObserver(new Observer("inherited", Any))
+        .build()
+    const c = CodataType.define("ProbeCodata", parent)
+        .addObserver(new Observer("head", Any))
+        .build()
+    // The ν-side mirrors the μ-side: the whole carrier is frozen on
+    // publication — name, parent, and the private observers slot.
+    assert(Object.isFrozen(c))
+    assertThrows(() => {
+        ;(c as { name: string }).name = "Evil"
+    }, TypeError)
+    assertThrows(() => {
+        ;(c as { parent: CodataType | null }).parent = null
+    }, TypeError)
 })
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

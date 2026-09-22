@@ -441,6 +441,12 @@ export class DataType extends Type {
         builders.forEach((b, i) => {
             instances[i]!._variants = Object.freeze(resolveVariantFields(b.variants, group))
         })
+        // Publication closes the definition: the freeze covers the whole
+        // carrier (name, parent, the variants slot) — not just the arrays —
+        // so a retained alias cannot mutate a published instance through
+        // ordinary property writes. The last step of buildAll, after the
+        // knot resolution has installed the final variants.
+        for (const t of instances) Object.freeze(t)
         return instances
     }
 
@@ -639,6 +645,9 @@ export class CodataType extends Type {
         builders.forEach((b, i) => {
             instances[i]!._observers = Object.freeze(resolveObserverFields(b.observers, group))
         })
+        // Publication closes the definition (see `DataType.buildAll`): the
+        // freeze covers the whole carrier, the last step of buildAll.
+        for (const t of instances) Object.freeze(t)
         return instances
     }
 
