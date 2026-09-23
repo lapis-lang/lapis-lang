@@ -19,6 +19,7 @@ const expectedTyping = [
     ["T-App", ["app"], ["fn : σ → τ  ∧  arg <: σ"], ["result : τ"]],
     ["T-Cofold", ["cofold"], [], ["result : σ"]],
     ["T-Fold", ["fold"], [], ["result : σ (join of handler body types)"]],
+    ["T-FoldMatch", ["typePatternFold"], [], ["result : σ (join of handler body types)"]],
     ["T-Let", ["let_"], ["def : σ  ∧  σ <: τ"], ["result : τ'"]],
     ["T-Obs", ["obs"], [], ["result : Gₖ(T)[α:=T]"]],
     ["T-Op", ["opApp"], ["Ω(op) = σ₁→...→σₙ→τ  ∧  arity matches"], ["result : τ"]],
@@ -34,6 +35,7 @@ const expectedEval = [
     ["E-App", ["app"], ["fn : ⟨x, σ, span, ρ⟩"], ["result : w"]],
     ["E-Cofold", ["cofold"], ["scrutinee : codataVal"], ["result : w"]],
     ["E-Fold", ["fold"], ["scrutinee : Cₖ(vⱼ)"], ["result : w"]],
+    ["E-FoldMatch", ["patternFold"], ["scrutinee : match(pₖ)"], ["result : w"]],
     ["E-Lam", ["lam"], [], ["result : ⟨x, σ, span, ρ⟩"]],
     ["E-Let", ["let_"], ["def : v"], ["result : w"]],
     ["E-Obs", ["obs"], ["scrutinee : codataVal"], ["result : w"]],
@@ -47,12 +49,14 @@ const expectedEval = [
 /**
  * Project a FormattedInferenceRule onto the compared shape.
  *
- * `production` is omitted from the shape: `LCTypeCheck` contracts don't carry
- * a `production` key, so it is `undefined` for all typing rules. `LCEval`
- * contracts do carry `production` (via `@rule({ rule, production })` on
- * overridden productions or `production` in `@ensures` metadata), but it is
- * verified separately in `metatheory.test.ts`. The method linkage is
- * asserted via `methods` instead.
+ * `production` is omitted from the shape: the method linkage is asserted via
+ * `methods` instead. Most `LCTypeCheck` contracts don't carry a `production`
+ * key (the checker's production overrides own their premises in the parse
+ * path); T-FoldMatch's contract is the one typing rule that does (its
+ * judgment runs through a private method the base-action shape cannot name).
+ * `LCEval` contracts carry `production` routinely (via
+ * `@rule({ rule, production })` on overridden productions or `production` in
+ * `@ensures` metadata), verified separately in `metatheory.test.ts`.
  */
 function shape(rule: FormattedInferenceRule) {
     return {

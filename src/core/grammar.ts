@@ -14,6 +14,7 @@
  *             | ^α <: σ. t                   type abstraction (Λα <: σ. t)
  *             | let x:σ = t in t             let-binding
  *             | fold [σ] t {handlers}        fold (catamorphism)
+ *             | fold [σ] t {patternHandlers} pattern-matched fold (T/E-FoldMatch)
  *             | unfold [σ] t {generators}    unfold (anamorphism)
  *             | cofold [σ] t {handler}       cofold (codata elimination)
  *             | t t                          application (left-assoc)
@@ -27,14 +28,18 @@
  *
  *   Handlers: C(x₁ x₂ ...) → t              fold handler (variant + bindings)
  *
+ *   Pattern handler: match("pᵢ") → t         pattern-matched fold handler
+ *                                            (no binding position — the body
+ *                                            references `match : Token`)
+ *
  *   Generators: o → t                        unfold generator (observer + body)
  *
  *   Cofold handler: o(x₁ x₂ ...) → t         cofold handler (observer + bindings)
  *
  * Productions:
  *
- *   exprProd      = lambdaProd | typeAbsProd | letProd | foldProd | unfoldProd
- *                 | cofoldProd | obsProd
+ *   exprProd      = lambdaProd | typeAbsProd | letProd | patternFoldProd
+ *                 | foldProd | unfoldProd | cofoldProd | obsProd
  *   obsProd       = appProd ( "." ident | "[" type "]" )*
  *   appProd       = typeAppProd ( ws1 typeAppProd )*
  *   typeAppProd   = atomProd ( "[" type "]" )*
@@ -318,6 +323,27 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected abstract opApp(opName: string, args: S["atom"][]): S["atom"]
 
     /**
+     * A pattern-matched fold: `fold [T] e { match("pᵢ") → tᵢ }` — the
+     * elimination form over a pattern-matched data type (T/E-FoldMatch, lc.md
+     * §5.2b + §3.1). The action receives the carrier (the registered
+     * `PatternDataType` the annotation resolves to), the scrutinee, the
+     * handlers — each carrying the pattern's CANONICAL source (the same
+     * `patternToString` identity the introduction form carries, so dispatch
+     * and exhaustiveness key on canonical form everywhere) — and the result
+     * type slot (the checker's σ; `Any` at the base grammar, as `fold()`
+     * receives). There is NO binding position: the handler body references
+     * `match`, the fixed binding (`match : Token`, lc.md §5.2b's `tᵢ : Token
+     * → σ`) — the base production extends the context with it before parsing
+     * the body, exactly as `foldHandler` extends with field types.
+     */
+    protected abstract patternFold(
+        dataType: PatternDataType,
+        scrutinee: S["expr"],
+        handlers: { patternSource: string; body: S["expr"] }[],
+        resultType: Type,
+    ): S["expr"]
+
+    /**
      * A matched token: `Ident` resolving to a registered `PatternDataType`.
      * The action receives both the type name and the raw matched text (they
      * coincide in this grammar-based lexer — the token's source IS its
@@ -481,6 +507,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.lambdaProd(ctx),
             this.typeAbsProd(ctx),
             this.letProd(ctx),
+            this.patternFoldProd(ctx),
             this.foldProd(ctx),
             this.unfoldProd(ctx),
             this.cofoldProd(ctx),
@@ -653,6 +680,113 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         })
     }
 
+    // fold [T] e { match("pᵢ") → tᵢ, ... }  — the pattern-matched fold
+    // (T/E-FoldMatch, lc.md §5.2b + §3.1)
+    //
+    // Ordered BEFORE `foldProd`: the two productions are lexically IDENTICAL
+    // up to the annotation's type gate (both `fold [T] e { … }`), so the
+    // ordering — not lexical shape — decides which branch owns a source. This
+    // branch owns pattern-typed carriers (a `PatternDataType` annotation) and
+    // REJECTS every other kind (`empty`); `foldProd`, now reached only with a
+    // non-pattern annotation, keeps its own gate as a caller-bug guard. The
+    // base grammar never throws on a user program — a wrong-kind annotation is
+    // a failed parse, not a crash.
+    @rule
+    protected patternFoldProd(ctx: unknown): Parser<S["expr"]> {
+        return seq(
+            this.kw("fold"),
+            this.ws1,
+            char("["),
+            this.ws,
+            this.typeProd(this.typeVarCtx(ctx)),
+            this.ws,
+            char("]"),
+            this.ws,
+        ).bind(([, , , , ty]) => {
+            // The annotation must be a PatternDataType — the wrong-kind branch
+            // rejects (the caller falls through to `foldProd`'s reading; a
+            // failed premise is `empty`, never a throw out of the parse).
+            if (!(ty instanceof PatternDataType)) {
+                return empty<S["expr"]>()
+            }
+            const patternType = ty
+            return this.exprProd(ctx)
+                .bind((scrutinee) =>
+                    seq(this.ws, char("{"), this.ws)
+                        .bind(() =>
+                            this.patternFoldHandlers(patternType, ctx)
+                                .bind((handlers) =>
+                                    seq(this.ws, char("}"))
+                                        .map(() =>
+                                            this.patternFold(
+                                                patternType,
+                                                scrutinee,
+                                                handlers,
+                                                Any,
+                                            )
+                                        )
+                                )
+                        )
+                )
+        })
+    }
+
+    // Pattern-fold handlers: match("pᵢ") → tᵢ, ...
+    @rule
+    protected patternFoldHandlers(
+        dataType: PatternDataType,
+        ctx: unknown,
+    ): Parser<{ patternSource: string; body: S["expr"] }[]> {
+        return sepBy(
+            this.patternFoldHandler(dataType, ctx),
+            seq(this.ws, char(","), this.ws),
+        )
+    }
+
+    // match("pᵢ") → tᵢ  (pattern-fold handler)
+    //
+    // The handler head is the CONSTRUCTOR (T-Pattern's premise: `input
+    // matches pₖ ∈ {pᵢ}`) spelled exactly as the introduction form — the same
+    // `match` + tight paren + quoted pattern shape, and the SAME gate walk
+    // (`patternTypeName`: parses, anchored, declared on a registered pattern
+    // type, references resolve). One additional premise: the pattern is
+    // declared on THIS fold's carrier — a pattern owned by a different
+    // registered type would be unmatchable (the scrutinee's `isSubtype` to the
+    // carrier can never reach it) and would corrupt the exhaustiveness
+    // accounting, so the branch rejects it. The handler carries the CANONICAL
+    // source (the gate's resolution), not the raw spelling — dispatch,
+    // exhaustiveness, and the evaluator's handler lookup all key canonical
+    // form.
+    //
+    // The body parses under `match : Token` (lc.md §5.2b: `tᵢ : Token → σ`) —
+    // the fixed binding, extended through the context hook exactly as a fold
+    // handler's field bindings are. A user binder named `match` in an outer
+    // scope is shadowed for the body, the usual lexical rule.
+    @rule
+    protected patternFoldHandler(
+        dataType: PatternDataType,
+        ctx: unknown,
+    ): Parser<{ patternSource: string; body: S["expr"] }> {
+        return seq(
+            this.kw("match"),
+            char("("), // tight paren — the pattern form's discipline
+            this.ws,
+            this.patternString,
+            this.ws,
+            char(")"),
+            this.ws,
+            this.arrow,
+            this.ws,
+        ).bind(([, , , patternSource]) => {
+            const resolved = this.patternTypeName(patternSource as string)
+            if (resolved === undefined || resolved.typeName !== dataType.name) {
+                return empty<{ patternSource: string; body: S["expr"] }>()
+            }
+            return this.exprProd(this.extendCtx(ctx, "match", Token))
+                .map((body) => ({ patternSource: resolved.source, body }))
+        })
+    }
+
     // fold [T] e { C(x₁ x₂) → t, ... }
     @rule
     protected foldProd(ctx: unknown): Parser<S["expr"]> {
@@ -666,8 +800,17 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            assert(ty instanceof DataType, "fold type must be a DataType")
-            const dataType = ty as DataType
+            // The annotation must be a DataType. `patternFoldProd` is ordered
+            // BEFORE this branch, so a pattern-typed annotation is consumed
+            // there; a wrong-kind annotation (e.g. `fold [Stream] ...` —
+            // codata) REJECTS the branch like any other failed premise — an
+            // `assert` here would throw out of the parse instead of rejecting
+            // it (the caller-bug guard lives on the checker's/evaluator's
+            // action overrides, where the premise is formally owned).
+            if (!(ty instanceof DataType)) {
+                return empty<S["expr"]>()
+            }
+            const dataType = ty
             return this.exprProd(ctx)
                 .bind((scrutinee) =>
                     seq(this.ws, char("{"), this.ws)

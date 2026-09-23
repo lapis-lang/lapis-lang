@@ -84,7 +84,16 @@ import { type CheckedOpSig, OpRegistry } from "./ops.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
-import { CodataType, DataType, FamilyType, Nothing, type Type, TypeEnv, Variant } from "./types.ts"
+import {
+    CodataType,
+    DataType,
+    FamilyType,
+    Nothing,
+    PatternDataType,
+    type Type,
+    TypeEnv,
+    Variant,
+} from "./types.ts"
 
 // ── The symbolic term AST ─────────────────────────────────────────────────────
 
@@ -395,6 +404,26 @@ class DerivationReader extends AbstractLC<ReaderShape> {
         }
     }
 
+    /**
+     * Pattern-matched fold — the derivation fragment is a fold-skeleton
+     * language over VARIANT carriers; a pattern-matched carrier has no variant
+     * cases to skeletonize (the same rejection the token forms take — the
+     * fragment's move set is variant-carrier folds only). The diagnostic
+     * quotes the construct's shape; extending the skeleton to pattern carriers
+     * is future work for the derivation engine, not this rule.
+     */
+    protected override patternFold(
+        _dataType: PatternDataType,
+        _scrutinee: Term,
+        _handlers: { patternSource: string; body: Term }[],
+        _resultType: Type,
+    ): Term {
+        throw new DefinitionShapeError(
+            "",
+            'pattern-matched fold (`fold [T] e { match("…") → t }` — a pattern-type elimination)',
+        )
+    }
+
     protected override unfold(
         _codataType: CodataType,
         _seed: Term,
@@ -461,18 +490,36 @@ class DerivationReader extends AbstractLC<ReaderShape> {
         )
     }
 
-    // The action surface, exposed: the two token-form rejections are
-    // diagnostics-only (the parse driver swallows their throws, so the parse
-    // path never propagates them — `readDefShape`'s pre-scan names the
-    // construct instead). `readRejectedConstruct` invokes them DIRECTLY —
-    // the seam a test or future consumer uses to reach the real diagnostics
-    // without reimplementing the actions' message shape.
+    // The action surface, exposed: the two token-form rejections and the
+    // pattern-fold rejection are diagnostics-only (the parse driver swallows
+    // their throws, so the parse path never propagates them —
+    // `readDefShape`'s pre-scan names the construct instead; for the pattern
+    // fold the pre-scan's `match`-lexeme entry ALWAYS fires first, so the
+    // action's own diagnostic is reachable only directly).
+    // `readRejectedConstruct` invokes them DIRECTLY — the seam a test or
+    // future consumer uses to reach the real diagnostics without
+    // reimplementing the actions' message shape.
     exposedMatchedToken(dataTypeName: string, text: string): Term {
         return this.matchedToken(dataTypeName, text)
     }
 
     exposedMatchedPattern(dataTypeName: string, rawSource: string): Term {
         return this.matchedPattern(dataTypeName, rawSource, rawSource)
+    }
+
+    exposedPatternFold(
+        dataType: PatternDataType,
+        handlers: { patternSource: string }[],
+    ): Term {
+        return this.patternFold(
+            dataType,
+            { k: "var", name: "tok" },
+            handlers.map((h) => ({
+                patternSource: h.patternSource,
+                body: { k: "var", name: "tok" } as Term,
+            })),
+            Nothing,
+        )
     }
 }
 
@@ -485,15 +532,34 @@ class DerivationReader extends AbstractLC<ReaderShape> {
  * consumer uses to reach the diagnostics without a grammar subclass).
  */
 export function readRejectedConstruct(
-    kind: "token" | "pattern",
+    kind: "token" | "pattern" | "patternFold",
     args: readonly string[],
 ): never {
     const reader = new DerivationReader(new TypeRegistry(), new OpRegistry())
-    if (kind === "token") {
-        reader.exposedMatchedToken(args[0]!, args[1] ?? "")
+    // Each kind dispatches to ITS OWN diagnostic and the branch ends there:
+    // no fall-through, so a caller passing `kind` cannot reach a different
+    // construct's diagnostic by accident (the earlier branches' throws are
+    // the only exits before the final arm).
+    switch (kind) {
+        case "token":
+            reader.exposedMatchedToken(args[0]!, args[1] ?? "")
+            break
+        case "patternFold":
+            // args[0]: the carrier's name (looked up in a fresh empty registry —
+            // the diagnostic never reads it, the parameter only shapes the
+            // signature the diagnostic rides).
+            reader.exposedPatternFold(
+                new PatternDataType(args[0]!, []),
+                [{ patternSource: args[1] ?? "" }],
+            )
+            break
+        case "pattern":
+            reader.exposedMatchedPattern(args[0]!, args[1] ?? "")
+            break
     }
-    reader.exposedMatchedPattern(args[0]!, args[1] ?? "")
-    throw new Error("unreachable")
+    // The exposed methods ALWAYS throw (each names its construct); reaching
+    // this line means a new `kind` member was added without an arm.
+    throw new Error(`unreachable: no diagnostic dispatch for kind "${kind}"`)
 }
 
 /**
