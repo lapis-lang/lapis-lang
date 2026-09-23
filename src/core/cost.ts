@@ -37,7 +37,8 @@
  * input without a static size bound on the intermediate.
  *
  * A **size-sensitive position** is where a value's size drives cost: a fold's
- * scrutinee (the invocation count is the input's node count), an operation
+ * scrutinee (the invocation count is the input's node count) and the pattern
+ * fold's scrutinee (the dispatch's input — the token's own size), an operation
  * application's argument positions (the callee's cost is driven by its
  * parameters' sizes), an application's function position (the applied body's
  * cost is consumed per application), and an observation's generator (the
@@ -107,6 +108,7 @@ import {
     DataType,
     FamilyType,
     Field,
+    PatternDataType,
     type RequiredCases,
     Type,
     type TypeCases,
@@ -218,6 +220,24 @@ function renderMonomial(m: Monomial): string {
         .map(([v, e]) => e === 1 ? `|${v}|` : `|${v}|^${e}`)
         .join("·")
     return m.coefficient === 1 ? factors : `${m.coefficient}·${factors}`
+}
+
+/**
+ * The ONE token variable a summary's size names, when it does: a size that is
+ * exactly the single monomial `1·|v|` with `v` a `token(…)` variable (the
+ * token introductions' shape) renders to that variable's full name; anything
+ * else — a constant, a multi-monomial sum, a product, an opaque — carries no
+ * token identity and returns `undefined` (the callers' conservative charge
+ * applies).
+ */
+function renderTokenVariable(size: SizeExpr): string | undefined {
+    if (size.isOpaque) return undefined
+    if (size.monomials.length !== 1) return undefined
+    const m = size.monomials[0]!
+    if (m.coefficient !== 1 || m.factors.size !== 1) return undefined
+    const [variable, exponent] = [...m.factors.entries()][0]!
+    if (exponent !== 1) return undefined
+    return variable.startsWith("token(") ? variable : undefined
 }
 
 /**
@@ -518,12 +538,17 @@ function classifyExpr(expr: SizeExpr): GrowthClass {
  * codata ELIMINATION (the `cofold [T] e` form). Neither is a fold's
  * recursion result — conflating them with `fold` would mislabel the
  * flag's producer end (an application of an unfold's result is an
- * ordinary first-order data flow, not the flagged recursion shape).
+ * ordinary first-order data flow, not the flagged recursion shape). The
+ * same reasoning gives the pattern-matched fold its own kind: `foldMatch`
+ * names a single-step elimination (the token dispatches to ONE handler,
+ * whose body runs once — no invocation count, no `#foldRec`), a cost
+ * shape `fold` (the invocation-count recurrence) never has.
  */
 export type Provenance =
     | { readonly kind: "param"; readonly name: string }
     | { readonly kind: "op"; readonly name: string }
     | { readonly kind: "fold"; readonly name: string }
+    | { readonly kind: "foldMatch"; readonly name: string }
     | { readonly kind: "unfold"; readonly name: string }
     | { readonly kind: "cofold"; readonly name: string }
     | { readonly kind: "constructor"; readonly name: string }
@@ -551,6 +576,7 @@ export interface CostEdge {
     /** The position kind at the consumer. */
     readonly position:
         | "fold scrutinee"
+        | "pattern fold scrutinee"
         | "op argument"
         | "application function"
         | "observation generator"
@@ -1043,6 +1069,24 @@ function foldRecDenotation(carrierName: string, name: string): Denotation {
     }
 }
 
+/**
+ * The `match` binding's denotation inside a pattern-fold handler: the token
+ * value (data — its size variable is the engine's match-route token variable,
+ * `token(T:<p>)` — the SAME variable `matchedPattern` produces for a token of
+ * this type and pattern, so op instantiations inside the handler body at
+ * `match` agree with a direct analysis of the token; the bare-atom route's
+ * `token(T)` is a different value's size, never the binding's).
+ */
+function tokenDenotation(dataTypeName: string, patternSource: string): Denotation {
+    const source = sanitizeNameComponent(patternSource)
+    return {
+        type: undefined,
+        kind: "data",
+        size: SizeExpr.variable(`token(${dataTypeName}:${source})`),
+        provenance: { kind: "token", name: dataTypeName },
+    }
+}
+
 // ── The cost engine (the grammar-subclass vehicle) ────────────────────────────
 
 /** The engine's parse shape: expr = CostSummary, atom = CostSummary. */
@@ -1171,6 +1215,27 @@ class CostEngine extends AbstractLC<CostShape> {
         // the two by the DECLARED field type: Family resolves to the carrier
         // (== dataType); a genuine data field names its own type.
         return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
+    }
+
+    /**
+     * The `match` binding inside a pattern-fold handler body: the TOKEN's
+     * identity, not a generic parameter. The size variable is the engine's
+     * per-pattern token variable (`token(T:<p>)` — the SAME variable
+     * `matchedPattern`'s cost summary produces for a token of this type and
+     * pattern), so a body that references `match` keeps the token's
+     * size/dispatch identity in the engine's own analysis (and in nested
+     * folds' re-reads) — the same identity `tokenDenotation` gives the
+     * CostPass's tree re-read, the two vehicles agreeing by construction.
+     */
+    protected override patternFoldBinding(
+        ctx: unknown,
+        dataTypeName: string,
+        canonicalSource: string,
+    ): unknown {
+        if (ctx instanceof CostEnv) {
+            return ctx.extend("match", tokenDenotation(dataTypeName, canonicalSource))
+        }
+        return super.patternFoldBinding(ctx, dataTypeName, canonicalSource)
     }
 
     // ── Semantic actions ──────────────────────────────────────────────────────
@@ -1517,7 +1582,97 @@ class CostEngine extends AbstractLC<CostShape> {
         }
     }
 
-    /** ^α<:σ. t — type abstraction (erasure): the body's summary. */
+    /**
+     * fold [T] e { match("pᵢ") → tᵢ } — the pattern-matched fold (single
+     * step, no recursion): the token scrutinee dispatches to ONE handler,
+     * whose body runs once. The cost is the scrutinee's cost plus that
+     * handler's cost; there is no invocation count, no `#foldRec` variable,
+     * no recurrence — a `PatternDataType` has no fields, so nothing
+     * substitutes. The records ride along from the scrutinee AND the fired
+     * handler (the same record-carrying discipline the variant fold
+     * applies); the token edge records the dispatch.
+     */
+    protected override patternFold(
+        dataType: PatternDataType,
+        scrutinee: CostSummary,
+        handlers: { patternSource: string; body: CostSummary }[],
+        _resultType: Type,
+    ): CostSummary {
+        void _resultType
+        // The FIRED handler: dispatch by the scrutinee's token identity. A
+        // match-route token names its pattern in its size variable
+        // (`token(T:<p>)` — matchedPattern's naming), so the handler whose
+        // canonical source sanitizes to the same component is the one the
+        // fold fires. A token whose size is NOT a single such variable (the
+        // bare-atom route's `token(T)`, an opaque or multi-monomial
+        // scrutinee) carries no dispatch identity — the conservative charge
+        // (EVERY handler's records and cost) stands, the same over-approximation
+        // discipline the variant fold applies to non-uniform handlers: a
+        // false precise bound would be worse than a sound over-charge.
+        const scrutineeVar = renderTokenVariable(scrutinee.resultSize)
+        const fired = scrutineeVar === undefined
+            ? undefined
+            : handlers.find((h) =>
+                `token(${dataType.name}:${sanitizeNameComponent(h.patternSource)})` ===
+                    scrutineeVar
+            )
+        const charged = fired !== undefined ? [fired] : handlers
+
+        // The charged handlers' records ride along with the scrutinee's (the
+        // handler bodies were analyzed under the production's environment; a
+        // handler-internal application of an opaque value records its flag
+        // edge inside the body — dropping it would launder a flagged feedback
+        // into a certified report).
+        const edges: CostEdge[] = [...scrutinee.edges]
+        const unresolved: UnresolvedCost[] = [...scrutinee.unresolved]
+        const latencies: LatencyReport[] = [...scrutinee.latencies]
+        let perNodeWork = SizeExpr.ZERO
+        let perNodeDepth = DepthExpr.ZERO
+        for (const h of charged) {
+            edges.push(...h.body.edges)
+            unresolved.push(...h.body.unresolved)
+            latencies.push(...h.body.latencies)
+            perNodeWork = perNodeWork.plus(h.body.cost)
+            perNodeDepth = perNodeDepth.max(h.body.depth)
+        }
+
+        // The dispatch edge: the token → this fold.
+        edges.push({
+            producer: scrutinee.provenance,
+            consumer: { kind: "foldMatch", name: dataType.name },
+            position: "pattern fold scrutinee",
+            consumerSite: `fold [${dataType.name}]`,
+            bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
+            isFlagged: scrutinee.resultSize.isOpaque,
+        })
+
+        // The result: EXACT only when the dispatch is exact (a single fired
+        // handler — the body's own result). A conservative charge (multiple
+        // handlers) means the fired arm is unknowable statically: the result
+        // could be ANY charged body's — larger, or function-typed — so the
+        // size is opaque and the kind unknown (a charged[0]-precise bound
+        // would underbound the result and miss the opacity/feedback behavior
+        // a later handler carries).
+        const result = charged.length === 1
+            ? { size: charged[0]!.body.resultSize, kind: charged[0]!.body.resultKind }
+            : {
+                size: SizeExpr.opaque(
+                    `the dispatch identity is not discoverable — the result is one of ${charged.length} handler bodies`,
+                ),
+                kind: "unknown" as const,
+            }
+
+        return {
+            cost: scrutinee.cost.plus(perNodeWork),
+            depth: scrutinee.depth.max(perNodeDepth),
+            resultSize: result.size,
+            provenance: { kind: "foldMatch", name: dataType.name },
+            resultKind: result.kind,
+            edges,
+            unresolved,
+            latencies,
+        }
+    }
     protected override typeAbs(_tyVar: string, _bound: Type, body: CostSummary): CostSummary {
         return body
     }
@@ -2459,6 +2614,80 @@ export class CostPass extends SemanticPass<CostPassShape> {
     }
 
     /**
+     * spanPatternFoldHandler: the checker's pattern-fold handler record
+     * (canonical pattern source, body span) — the same identity-summary
+     * discipline spanFoldHandler applies; the pattern fold's assembly
+     * consumes the values.
+     */
+    protected spanPatternFoldHandler(
+        node: DerivationNode,
+        _children: readonly DeferredSummary[],
+    ): DeferredSummary {
+        void node
+        return passthroughSummary
+    }
+
+    /**
+     * patternFoldProd: the pattern-matched fold's assembly from the tree's
+     * records: the carrier (the typeProd descendant's value — a
+     * PatternDataType), the scrutinee (the first expr child), the handler
+     * records (patternSource/bodySpan). The fired handler's body re-reads
+     * from its span through the shared engine under the AMBIENT environment
+     * extended with the token denotation (`match` bound — the engine's own
+     * token sizing applies). There is no handler-environment walk (no
+     * fields to bind) and no recursion substitution. When the tree did not
+     * keep the records (a fragmented forest), the node's own source span
+     * re-reads through the engine — the fallback that keeps the report the
+     * algebra's (the same discipline foldProd applies).
+     */
+    protected patternFoldProd(
+        node: DerivationNode,
+        children: readonly DeferredSummary[],
+    ): DeferredSummary {
+        const carrierNode = collectDescendants(node, "typeProd")[0]
+        const carrier = carrierNode?.value
+        const scrutineeNode = firstExprChild(node)
+        const scrutinee = scrutineeNode === undefined ? undefined : this.defer(scrutineeNode)
+        const childFlow = children.length === 1 ? children[0]! : undefined
+        return (env) => {
+            const carrierName = carrier instanceof Type ? dataTypeNameOfType(carrier) : undefined
+            const patternType = carrierName === undefined
+                ? undefined
+                : this.registry.lookup(carrierName)
+            const scrutineeSummary = scrutinee === undefined ? emptySummary() : scrutinee(env)
+            if (!(patternType instanceof PatternDataType)) {
+                return childFlow === undefined ? scrutineeSummary : childFlow(env)
+            }
+            const records = collectDescendants(node, "spanPatternFoldHandler")
+                .map((h) => h.value as SpanPatternFoldRecord | undefined)
+                .filter((r): r is SpanPatternFoldRecord => r !== undefined)
+            if (records.length === 0) {
+                // No records on this tree: re-read the fold's span through
+                // the engine (the honest structure source).
+                const slice = this.nodeSourceSlice(node)
+                return slice === undefined
+                    ? scrutineeSummary
+                    : this.engine.analyze(slice, env) ?? scrutineeSummary
+            }
+            // The assembly feeds patternFoldSummaryFrom, which mirrors the
+            // engine's own dispatch (a `token(T:<p>)`-shaped scrutinee fires
+            // exactly its handler; any other shape charges every handler
+            // conservatively). Each body re-reads under the ambient
+            // environment extended with the token denotation — the binding's
+            // size variable is the engine's per-pattern token variable, so
+            // the body's arithmetic and a direct token analysis agree.
+            const handlers = records.map((r) => ({
+                patternSource: r.patternSource,
+                body: this.engine.analyze(
+                    this.engineSource().slice(r.bodySpan.start, r.bodySpan.end),
+                    env.extend("match", tokenDenotation(patternType.name, r.patternSource)),
+                ) ?? emptySummary(),
+            }))
+            return patternFoldSummaryFrom(patternType, scrutineeSummary, handlers)
+        }
+    }
+
+    /**
      * foldProd: the fold's assembly from the tree's records: the carrier
      * (the typeProd descendant's value), the scrutinee (the first expr
      * child), the handler records (variantName/bindings/bodySpan). Bodies
@@ -2591,6 +2820,12 @@ export class CostPass extends SemanticPass<CostPassShape> {
 interface SpanFoldRecord {
     readonly variantName: string
     readonly bindings: string[]
+    readonly bodySpan: { start: number; end: number }
+}
+
+/** The checker's `spanPatternFoldHandler` record shape. */
+interface SpanPatternFoldRecord {
+    readonly patternSource: string
     readonly bodySpan: { start: number; end: number }
 }
 
@@ -2765,6 +3000,74 @@ function foldSummaryFrom(
     }
 }
 
+/**
+ * The pattern-matched fold's summary composition — the no-`Family` mirror of
+ * `foldSummaryFrom`: the scrutinee's records plus the CHARGED handlers'
+ * records plus the dispatch edge. The dispatch mirrors the engine's own
+ * patternFold: a scrutinee whose size is exactly one `token(T:<p>)` variable
+ * fires the handler whose canonical source sanitizes to the same component
+ * (exact — the token names its pattern); any other scrutinee shape charges
+ * EVERY handler conservatively (the over-approximation discipline the
+ * variant fold applies to non-uniform handlers — a false precise bound would
+ * be worse than a sound over-charge). No `#foldRec`, no recurrence — a
+ * `PatternDataType` has no fields, so nothing substitutes.
+ */
+function patternFoldSummaryFrom(
+    dataType: PatternDataType,
+    scrutinee: CostSummary,
+    handlers: { patternSource: string; body: CostSummary }[],
+): CostSummary {
+    const scrutineeVar = renderTokenVariable(scrutinee.resultSize)
+    const fired = scrutineeVar === undefined
+        ? undefined
+        : handlers.find((h) =>
+            `token(${dataType.name}:${sanitizeNameComponent(h.patternSource)})` ===
+                scrutineeVar
+        )
+    const charged = fired !== undefined ? [fired] : handlers
+    const edges: CostEdge[] = [...scrutinee.edges]
+    const unresolved: UnresolvedCost[] = [...scrutinee.unresolved]
+    const latencies: LatencyReport[] = [...scrutinee.latencies]
+    let perNodeWork = SizeExpr.ZERO
+    let perNodeDepth = DepthExpr.ZERO
+    for (const handler of charged) {
+        edges.push(...handler.body.edges)
+        unresolved.push(...handler.body.unresolved)
+        latencies.push(...handler.body.latencies)
+        perNodeWork = perNodeWork.plus(handler.body.cost)
+        perNodeDepth = perNodeDepth.max(handler.body.depth)
+    }
+    edges.push({
+        producer: scrutinee.provenance,
+        consumer: { kind: "foldMatch", name: dataType.name },
+        position: "pattern fold scrutinee",
+        consumerSite: `fold [${dataType.name}]`,
+        bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
+        isFlagged: scrutinee.resultSize.isOpaque,
+    })
+    // The result mirrors the engine's patternFold: EXACT (the fired body's
+    // own result) only when the dispatch is exact; a conservative charge's
+    // result is opaque/unknown (any charged body could produce it).
+    const result = charged.length === 1
+        ? { size: charged[0]!.body.resultSize, kind: charged[0]!.body.resultKind }
+        : {
+            size: SizeExpr.opaque(
+                `the dispatch identity is not discoverable — the result is one of ${charged.length} handler bodies`,
+            ),
+            kind: "unknown" as const,
+        }
+    return {
+        cost: scrutinee.cost.plus(perNodeWork),
+        depth: scrutinee.depth.max(perNodeDepth),
+        resultSize: result.size,
+        provenance: { kind: "foldMatch", name: dataType.name },
+        resultKind: result.kind,
+        edges,
+        unresolved,
+        latencies,
+    }
+}
+
 // ── Tree-reading utilities ────────────────────────────────────────────────
 
 /** The node's direct children with the given label. */
@@ -2816,7 +3119,11 @@ function leafText(node: DerivationNode | undefined): string | undefined {
     return best
 }
 
-/** The carrier's name from a type value (`undefined` for non-μ types). */
+/** The carrier's name from a type value (`undefined` for the rest). */
 function dataTypeNameOfType(type: Type): string | undefined {
-    return type instanceof DataType ? type.name : undefined
+    // PatternDataType is NOT a DataType (a disjoint Type subclass — a pattern
+    // type has no variants), so the pattern-fold carrier's name must be read
+    // here too; missing it would send the CostPass's pattern-fold assembly to
+    // the fallback on every real tree.
+    return type instanceof DataType || type instanceof PatternDataType ? type.name : undefined
 }

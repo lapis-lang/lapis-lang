@@ -33,6 +33,7 @@ Deno.test("metatheory: LCEval produces evaluation rules from contract metadata",
         "E-App",
         "E-Cofold",
         "E-Fold",
+        "E-FoldMatch",
         "E-Lam",
         "E-Let",
         "E-Obs",
@@ -80,8 +81,18 @@ Deno.test("metatheory: rules are classified as value-rules or step-rules", () =>
     // Value-rules (no premises): lambda, unfold, type abstraction, pattern
     assertEquals(valueRules, ["E-Lam", "E-Pattern", "E-TAbs", "E-Unfold"])
 
-    // Step-rules (with premises): application, let, fold, obs, cofold, typeApp, op
-    assertEquals(stepRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-Op", "E-TApp"])
+    // Step-rules (with premises): application, let, fold, pattern fold, obs,
+    // cofold, typeApp, op
+    assertEquals(stepRules, [
+        "E-App",
+        "E-Cofold",
+        "E-Fold",
+        "E-FoldMatch",
+        "E-Let",
+        "E-Obs",
+        "E-Op",
+        "E-TApp",
+    ])
 })
 
 // ── Progress ──────────────────────────────────────────────────────────────────
@@ -122,13 +133,22 @@ Deno.test("metatheory: Preservation holds — step-rules preserve types (static)
     }
 })
 
-Deno.test("metatheory: Preservation — all 7 step-rules checked", () => {
+Deno.test("metatheory: Preservation — all 8 step-rules checked", () => {
     const rules = collectRules(LCEval)
     const staticRules = collectRules(LCTypeCheck)
     const result = checkPreservation(rules, staticRules)
 
     const checkedRules = result.checks.map((c) => c.rule).sort()
-    assertEquals(checkedRules, ["E-App", "E-Cofold", "E-Fold", "E-Let", "E-Obs", "E-Op", "E-TApp"])
+    assertEquals(checkedRules, [
+        "E-App",
+        "E-Cofold",
+        "E-Fold",
+        "E-FoldMatch",
+        "E-Let",
+        "E-Obs",
+        "E-Op",
+        "E-TApp",
+    ])
 })
 
 // ── Combined verification ─────────────────────────────────────────────────────
@@ -198,6 +218,7 @@ Deno.test("metatheory: LCTypeCheck rules are still collected correctly", () => {
         "T-App",
         "T-Cofold",
         "T-Fold",
+        "T-FoldMatch",
         "T-Let",
         "T-Obs",
         "T-Op",

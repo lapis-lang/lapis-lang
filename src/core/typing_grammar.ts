@@ -16,6 +16,11 @@
  *   T-Let:      Γ ⊢ t : σ  ∧  σ <: τ  ∧  Γ, x:τ ⊢ u : τ'  ⟹  Γ ⊢ let x:τ=t in u : τ'
  *   T-Variant:  Γ ⊢ tⱼ : Fₖ(T)[α:=T]  ⟹  Γ ⊢ Cₖ(tⱼ) : T
  *   T-Fold:     Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ  ⟹  Γ ⊢ fold [T] e {...} : σ
+ *   T-FoldMatch: Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Token→σ  ⟹  Γ ⊢ fold [T] e {match("pᵢ") → tᵢ} : σ
+ *               (pattern-matched fold — every handler body types as Token→σ for
+ *               ONE COMMON σ (lc.md §5.2b's shared conclusion; divergence is a
+ *               rejected branch); no fixpoint: a PatternDataType has no fields,
+ *               so there is no σ recirculation)
  *   T-Obs:      Γ ⊢ e : T  ⟹  Γ ⊢ e.oₖ : Gₖ(T)[α:=T]
  *   T-Unfold:   Γ ⊢ s : Σ  ∧  Γ ⊢ gⱼ : Σ→Gⱼ(Σ)[α:=Σ]  ⟹  Γ ⊢ unfold [T] s {...} : T
  *   T-Cofold:   Γ ⊢ e : T  ∧  Γ ⊢ t : Πⱼ(Gⱼ(σ)[α:=σ])→σ  ⟹  Γ ⊢ cofold [T] e {...} : σ
@@ -56,6 +61,7 @@ import {
     NothingType,
     PatternDataType,
     PolymorphicType,
+    Token,
     type Type,
     TypeEnv,
     TypeVarEnv,
@@ -65,7 +71,9 @@ import { AbstractLC, type LCShape } from "./grammar.ts"
 
 import { type OpSig, OpWellFormedness } from "./ops.ts"
 
-import { isSubtype, isTypeValue, join } from "./subtyping.ts"
+import { isSubtype, isTypeValue, join, typeEquals } from "./subtyping.ts"
+
+import { patternToString } from "./pattern_lang.ts"
 
 // ── Shape for type checking ───────────────────────────────────────────────────
 
@@ -147,6 +155,20 @@ function isWellFormedType(t: Type | undefined): boolean {
     // leave the slot empty); the nullability is exactly what
     // `isTypeValue` rejects.
     return t !== undefined && t !== null && isTypeValue(t)
+}
+
+/**
+ * One span-captured pattern-fold handler record (T-FoldMatch's handler
+ * shape): the pattern's CANONICAL source (the gate's resolution — the same
+ * key the exhaustiveness check and the evaluator's dispatch read), the
+ * body's source span (the evaluator replays it under the fold's ambient
+ * environment), and the body's TYPE (checked once under `match : Token` —
+ * the checker needs no re-parse, there is no σ to refine).
+ */
+interface SpanPatternFoldHandler {
+    readonly patternSource: string
+    readonly bodySpan: Span
+    readonly bodyType: Type
 }
 
 // ── The type-checking grammar ─────────────────────────────────────────────────
@@ -551,6 +573,223 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         let sigma = handlers[0]!.body
         for (let i = 1; i < handlers.length; i++) {
             sigma = join(sigma, handlers[i]!.body)
+        }
+
+        return sigma
+    }
+
+    /**
+     * T-FoldMatch's semantic action — UNREACHABLE. The checker's
+     * `patternFoldProd` override owns the whole production (span-captured
+     * handlers feeding `typePatternFold`), the same ownership
+     * `foldProd`'s override takes for T-Fold (the base action would discard
+     * the body types the one-pass judgment needs). Kept as a loud guard for
+     * the abstract-action contract.
+     */
+    protected patternFold(
+        _dataType: PatternDataType,
+        _scrutinee: Type,
+        _handlers: { patternSource: string; body: Type }[],
+        _resultType: Type,
+    ): Type {
+        throw new Error("LCTypeCheck.patternFold: unreachable — patternFoldProd is overridden")
+    }
+
+    // ── T-FoldMatch: pattern-matched fold (one-pass — no fixpoint) ────────────
+    //
+    // A `PatternDataType` has NO fields and NO Family positions — the fold is
+    // depth-1 and there is no σ to recirculate: each handler body is a closed
+    // judgment `Γ, match:Token ⊢ tᵢ : σᵢ` checked ONCE, and the fold's result
+    // is the handlers' COMMON σ (lc.md §5.2b: every body types as `Token → σ`
+    // for one σ; a divergent branch rejects). No `parseToFixpoint`, no span
+    // re-parsing of bodies — the spans are captured for the COST PASS's
+    // benefit (the CostPass slices the bodies from the checker's tree; the
+    // checker itself never re-reads them — the evaluator captures its own
+    // spans).
+    //
+    // The handler heads are GATED by this override's own handler production
+    // (`spanPatternFoldHandler`, below — the checker's production override
+    // owns the whole parse, so the base `patternFoldHandler` never runs
+    // here): the same `patternTypeName` walk the `match("p")` introduction
+    // form runs, plus the carrier-name premise. The established shape: the
+    // gate owns registry-side premises, the judgment (`typePatternFold`) owns
+    // context-side ones.
+
+    /**
+     * Parse the pattern-matched fold production, capturing handler body
+     * spans (the shape T-Fold's override captures; the checker never
+     * re-parses them — there is no σ to refine — but the record shape is
+     * shared with the evaluator's span-capture idiom).
+     */
+    // fold [T] e { match("pᵢ") → tᵢ }  — T-FoldMatch (one-pass join)
+    @rule
+    protected override patternFoldProd(ctx: unknown): Parser<Type> {
+        return seq(
+            this.kw("fold"),
+            this.ws1,
+            char("["),
+            this.ws,
+            this.typeProd(this.typeVarCtx(ctx)),
+            this.ws,
+            char("]"),
+            this.ws,
+        ).bind(([, , , , ty]) => {
+            // Premise: the annotation must be a PatternDataType. A wrong-kind
+            // annotation rejects the branch (`empty<Type>()`) like any other
+            // failed premise — an `assert` here would throw out of the parse
+            // instead of rejecting it.
+            if (!(ty instanceof PatternDataType)) {
+                return empty<Type>()
+            }
+            const patternType = ty
+            return this.exprProd(ctx)
+                .bind((scrutineeType) =>
+                    seq(this.ws, char("{"), this.ws)
+                        .bind(() =>
+                            this.spanPatternFoldHandlers(patternType, ctx as TypeCheckCtx)
+                                .bind((spanHandlers) =>
+                                    seq(this.ws, char("}"))
+                                        .map(() =>
+                                            this.typePatternFold(
+                                                patternType,
+                                                scrutineeType,
+                                                spanHandlers,
+                                            )
+                                        )
+                                        // T-FoldMatch premises are checked inside
+                                        // typePatternFold; a failure is `undefined`
+                                        // — reject the branch.
+                                        .bind((result) =>
+                                            result === undefined
+                                                ? empty<Type>()
+                                                : epsilon<Type>(result)
+                                        )
+                                )
+                        )
+                )
+        })
+    }
+
+    /** Parse pattern-fold handlers, capturing body spans (no re-parse needed). */
+    // match("pᵢ") → tᵢ, ...  — pattern-fold handlers (span-captured)
+    @rule
+    protected spanPatternFoldHandlers(
+        dataType: PatternDataType,
+        ctx: TypeCheckCtx,
+    ): Parser<SpanPatternFoldHandler[]> {
+        return sepBy(
+            this.spanPatternFoldHandler(dataType, ctx),
+            seq(this.ws, char(","), this.ws),
+        )
+    }
+
+    // match("pᵢ") → tᵢ  — single pattern-fold handler (span-captured)
+    //
+    // The base production's gate (`patternFoldHandler`) already proves the
+    // pattern is declared on the carrier and canonicalizes the source; the
+    // checker's override re-runs the same production shape so the body's TYPE
+    // is computed under `match : Token` (the base AST-builder action discards
+    // types). The gate premises are re-checked here — the override does not
+    // inherit the base's bind chain (the same re-check discipline the fold
+    // override's spanFoldHandler applies).
+    @rule
+    protected spanPatternFoldHandler(
+        dataType: PatternDataType,
+        ctx: TypeCheckCtx,
+    ): Parser<SpanPatternFoldHandler> {
+        return seq(
+            this.kw("match"),
+            char("("),
+            this.ws,
+            this.patternString,
+            this.ws,
+            char(")"),
+            this.ws,
+            this.arrow,
+            this.ws,
+        ).bind(([, , , patternSource]) => {
+            const resolved = this.patternTypeName(patternSource as string)
+            if (resolved === undefined || resolved.typeName !== dataType.name) {
+                return empty<SpanPatternFoldHandler>()
+            }
+            // The body's context: `match : Token` (the fixed binding,
+            // lc.md §5.2b's `tᵢ : Token → σ`).
+            const handlerCtx = this.extendCtx(ctx, "match", Token) as TypeCheckCtx
+            return this.exprProd(handlerCtx)
+                .map((bodyType, span) => ({
+                    patternSource: resolved.source,
+                    bodySpan: { start: span.start, end: span.end },
+                    bodyType,
+                }))
+        })
+    }
+
+    /**
+     * T-FoldMatch's premises, checked in order (a failure at any step is
+     * `undefined` — the caller rejects the branch):
+     *
+     * 1. scrutinee : T — `isSubtype(scrutineeType, T)`.
+     * 2. exhaustiveness — every declared pattern of T has a handler, keyed on
+     *    CANONICAL pattern source (the same key the registry's reverse index
+     *    and the evaluator's dispatch use; a raw-spelling key would make
+     *    exhaustiveness depend on which spelling was registered).
+     * 3. Nothing propagation — a scrutinee of type Nothing makes the fold
+     *    uninhabited (principle of explosion; checked after the structural
+     *    premises so a genuine type error is never masked).
+     * 4. ONE COMMON σ — every handler body (each already checked under
+     *    `match : Token` in spanPatternFoldHandler) types at the SAME
+     *    `Token → σ` (lc.md §5.2b's single-σ conclusion; the preservation
+     *    argument reads that σ). The fold's result is that σ. Exhaustiveness
+     *    with a ≥1-pattern carrier guarantees ≥1 handlers; a zero-pattern
+     *    carrier has no tokens (its fold is unreachable) and rejects here.
+     */
+    @ensures(
+        (
+            _self: LCTypeCheck,
+            _args: [PatternDataType, Type, SpanPatternFoldHandler[]],
+            _old,
+            result: Type | undefined,
+        ) => result === undefined || isWellFormedType(result),
+        {
+            rule: "T-FoldMatch",
+            role: "conclusion",
+            formula: "result : σ (the handlers' common Token→σ)",
+            production: "patternFoldProd",
+        },
+    )
+    private typePatternFold(
+        dataType: PatternDataType,
+        scrutineeType: Type,
+        spanHandlers: SpanPatternFoldHandler[],
+    ): Type | undefined {
+        // Premise 1: scrutinee : T
+        if (!isSubtype(scrutineeType, dataType)) return undefined
+
+        // Premise 2: exhaustiveness — every declared pattern has a handler.
+        // Keyed on CANONICAL source (patternToString), the same normalization
+        // the registry's reverse index and the handler gate apply: a raw
+        // spelling key would make exhaustiveness depend on which spelling was
+        // registered.
+        const declared = dataType.patterns.map((p) => patternToString(p))
+        const handlerSources = new Set(spanHandlers.map((h) => h.patternSource))
+        for (const source of declared) {
+            if (!handlerSources.has(source)) return undefined
+        }
+
+        // Premise 3: Nothing propagation (principle of explosion).
+        if (scrutineeType instanceof NothingType) return Nothing
+
+        // Premise 4: ONE COMMON σ — every handler body types at the SAME
+        // `Token → σ` (lc.md §5.2b: `Γ ⊢ tᵢ : Token → σ (for each pattern
+        // pᵢ)` — one σ, not a lattice-joined one; the preservation argument
+        // reads that σ). A branch whose body diverges from the first body's
+        // type rejects the fold (an empty forest — the branch-reject shape,
+        // never a laundered `Any`).
+        if (spanHandlers.length === 0) return undefined
+
+        const sigma = spanHandlers[0]!.bodyType
+        for (let i = 1; i < spanHandlers.length; i++) {
+            if (!typeEquals(spanHandlers[i]!.bodyType, sigma)) return undefined
         }
 
         return sigma

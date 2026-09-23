@@ -91,6 +91,24 @@ precedence over patterns when both could match.
 
 User-defined types (e.g., `Complex`, `Rational`) declare their own patterns.
 
+**Elimination (pattern-matched fold):** a fold over a pattern-matched data type eliminates the
+token, not a variant. The annotation names the pattern-matched carrier — a registered
+`PatternDataType` (e.g., the `NatPat = [0-9]+` pattern type, distinct from a variant-based `data`
+type; a variant-carrier fold takes the §4.1 form instead). In the LC core's concrete syntax the
+handler head re-spells the constructor — the same `match("p")` form the introduction uses — and the
+body references the fixed binding `match` (the matched token, typed at `Token`); there is no
+binding-list position (a pattern has no fields):
+
+```lapis
+fold [NatPat] tok { match("[0-9]+") -> toNumber(match), ... }
+```
+
+The handler's pattern must be declared on the fold's carrier (the same gate the introduction form
+runs — anchored, resolvable, declared), exhaustiveness covers every declared pattern keyed
+canonically, and dispatch compares the token's canonical source. See [`lc.md`](./lc.md) §5.2b
+(T-FoldMatch) and §3.1 (E-FoldMatch). The surface language's declarative fold form (§5.1) elaborates
+to this form when the carrier is a pattern type.
+
 ### 1.4 Comments
 
 Comments are `"..."` (double-quoted strings that are consumed and discarded). This is the Smalltalk
