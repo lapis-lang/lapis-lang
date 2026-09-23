@@ -1367,21 +1367,26 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * A pattern-matched construction types as the pattern-matched type whose
      * declared pattern the form names (lc.md §5.1 T-Pattern).
      *
-     * The premises — the source parses, it is anchored, and it is DECLARED on
-     * a registered `PatternDataType` — are enforced by the base
-     * `patternMatchProd`'s gate (`patternTypeName`), so a violation here is a
-     * caller bug, not an input error: it fails LOUDLY (`assert`) rather than
-     * degrading to `Any`, the same shape as `matchedToken`. A silent `Any`
-     * would type an undeclared pattern's construction, and under an `Any`
-     * annotation the wrong type satisfies S-Refl — the absorption shape the
-     * production-path overrides exist to close.
+     * The premises — the source parses, it is anchored, it is DECLARED on a
+     * registered `PatternDataType`, and its type references resolve — are
+     * enforced by the base `patternMatchProd`'s gate (`patternTypeName`), so a
+     * violation here is a caller bug, not an input error: it fails LOUDLY
+     * (`assert`) rather than degrading to `Any`, the same shape as
+     * `matchedToken`. A silent `Any` would type an undeclared pattern's
+     * construction, and under an `Any` annotation the wrong type satisfies
+     * S-Refl — the absorption shape the production-path overrides exist to
+     * close.
      */
     @ensures(
-        (_self: LCTypeCheck, _args: [string, string], _old, result: Type) =>
+        (_self: LCTypeCheck, _args: [string, string, string], _old, result: Type) =>
             isWellFormedType(result),
         { rule: "T-Pattern", role: "conclusion", formula: "result : T" },
     )
-    protected matchedPattern(dataTypeName: string, _patternSource: string): Type {
+    protected matchedPattern(
+        dataTypeName: string,
+        _patternSource: string,
+        _rawSource: string,
+    ): Type {
         const resolved = this.registry.lookup(dataTypeName)
         assert(
             resolved instanceof PatternDataType,

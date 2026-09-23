@@ -18,6 +18,7 @@ import {
     OpRegistry,
     OpSig,
     readDefShape,
+    readRejectedConstruct,
     TokenVal,
     TypeRegistry,
     TypeRegistryError,
@@ -25,6 +26,8 @@ import {
 } from "../src/index.ts"
 
 import { Any, FunType, TypeEnv } from "../src/core/types.ts"
+
+import { parsePattern } from "../src/core/pattern_lang.ts"
 
 import { VariantVal } from "../src/core/values.ts"
 
@@ -273,6 +276,40 @@ Deno.test("T-Pattern: a pattern whose language nothing declares but text parses 
     assertEquals(typeOfOne(h, 'match("\\\\+")'), h.typeOf("PlusPat"))
 })
 
+Deno.test("TypeRegistry: the declared patterns are frozen (no post-registration drift)", () => {
+    // The registry's pattern index is built once at registration; a mutable
+    // declaration array would let a post-registration `patterns.push` /
+    // splice drift the index from the type's own declaration (removed
+    // patterns staying constructible, added patterns being rejected).
+    // `PatternDataType` freezes the array — a mutation attempt either throws
+    // (strict mode) or silently no-ops, and the index stays consistent with
+    // the type's declarations either way.
+    const registry = new TypeRegistry()
+    const nat = createPatternType("NatPat", ["[0-9]+"])
+    registry.register(nat)
+    // The frozen array: the type's declarations cannot be extended.
+    const before = nat.patterns.length
+    try {
+        ;(nat.patterns as unknown as unknown[]).push(parsePattern("[a-z]+"))
+    } catch {
+        // Strict-mode throw is fine — either way the array is unchanged.
+    }
+    assertEquals(nat.patterns.length, before, "the declaration array is frozen")
+    assertEquals(
+        registry.lookupPatternSource("[a-z]+"),
+        undefined,
+        "the index did not see the (rejected) mutation",
+    )
+    assertEquals(
+        registry.lookupPatternSource("[0-9]+"),
+        nat,
+        "the original declaration still resolves",
+    )
+    // The declared pattern itself is still constructible (no false decline).
+    const h = patternHarness([{ name: "NatPat", patterns: ["[0-9]+"] }])
+    assertEquals(typeOfOne(h, 'match("[0-9]+")'), h.typeOf("NatPat"))
+})
+
 // ── Concrete-syntax surface ──────────────────────────────────────────────────
 
 Deno.test("T-Pattern: whitespace around the payload parses (ws is internal)", () => {
@@ -292,9 +329,60 @@ Deno.test("T-Pattern: an escaped delimiter quote parses and round-trips", () => 
     // `match("\"<Char>*\"")` — the pattern source `"<Char>*"` with the
     // delimiter quotes escaped. The payload is the pattern language's own
     // source (the quote chars are pattern literals here).
-    const h = patternHarness([{ name: "StringPat", patterns: ['"<Char>*"'] }])
+    //
+    // The payload's `<Char>` parses as a TYPE REFERENCE (a `<Ident>`-shaped
+    // span is the typeref syntax — not a literal), so the resolvability
+    // premise requires `Char` to be a registered pattern type: the gate
+    // rejects a pattern whose type references do not resolve (a token whose
+    // language the registry cannot enumerate). The fixture registers it.
+    const h = patternHarness([
+        { name: "Char", patterns: ['[^"]'] },
+        { name: "StringPat", patterns: ['"<Char>*"'] },
+    ])
     const result = typeOfOne(h, 'match("\\"<Char>*\\"")')
     assertEquals(result, h.typeOf("StringPat"))
+})
+
+Deno.test("T-Pattern: a typeref to an unregistered pattern type is rejected", () => {
+    // The resolvability premise (surface-syntax.md §1.3's type-reference
+    // rule): a pattern's type references must resolve to registered pattern
+    // types — recursively. `<Missing>` names no registered type, so the
+    // gate rejects the term (an unresolvable reference would introduce a
+    // token whose language the registry cannot enumerate — the constructor
+    // would be accepted with an unknowable language).
+    const h = patternHarness([{ name: "RefPat", patterns: ["<Missing>"] }])
+    assertEquals(typeOfOne(h, 'match("<Missing>")'), undefined)
+})
+
+Deno.test("T-Pattern: a typeref to an UNANCHORED declared pattern is rejected", () => {
+    // The transitive anchoring premise: a reference is anchored only when
+    // its target's declared patterns are — `<AnyRefPat>` declares the
+    // pattern `<AnyPat>` whose TARGET declares an unanchored pattern (`.`),
+    // so the gate rejects the referencing term (the anchoring obligation
+    // the declaration machinery skipped is owned here — the reference's
+    // language is the target's, and the target's language is unanchored).
+    const h = patternHarness([
+        { name: "AnyPat", patterns: ["."] },
+        { name: "AnyRefPat", patterns: ["<AnyPat>"] },
+    ])
+    assertEquals(typeOfOne(h, 'match("<AnyPat>")'), undefined)
+    // The bare token atom for the unanchored-declared type still works
+    // (T-Token's premise is registry membership only).
+    assertEquals(typeOfOne(h, "AnyPat"), h.typeOf("AnyPat"))
+})
+
+Deno.test("T-Pattern: a typeref chain resolves transitively", () => {
+    // A reference to a type whose OWN references resolve: the walk follows
+    // the chain (cycle-safe — a self-reference is accepted once the type is
+    // on the seen list, since its own patterns were validated at its gate
+    // visit).
+    const h = patternHarness([
+        { name: "NatPat", patterns: ["[0-9]+"] },
+        { name: "RefPat", patterns: ["<NatPat>"] },
+        { name: "RefRefPat", patterns: ["<RefPat>"] },
+    ])
+    assertEquals(typeOfOne(h, 'match("<RefPat>")'), h.typeOf("RefRefPat"))
+    assertEquals(typeOfOne(h, 'match("<NatPat>")'), h.typeOf("RefPat"))
 })
 
 Deno.test("T-Pattern: a variable named match is a variable (Γ gate)", () => {
@@ -322,9 +410,25 @@ Deno.test('E-Pattern: match("[0-9]+") evaluates to the pattern token', () => {
     assert(value instanceof TokenVal, "the value is a TokenVal")
     const token = value as TokenVal
     assertEquals(token.dataTypeName, "NatPat")
-    // The token's text is the pattern source (source = content, lifted one
-    // level from the bare atom's text = name).
+    // The token's text is the CANONICAL pattern source (patternToString —
+    // the declared pattern's identity, lifted one level from the bare
+    // atom's text = name). For an already-canonical spelling the two agree.
     assertEquals(token.text, "[0-9]+")
+})
+
+Deno.test("E-Pattern: equivalent spellings introduce EQUAL tokens (canonical text)", () => {
+    // The token's text/size are the DECLARED pattern's canonical source, not
+    // the caller's spelling: `match("[0123456789]")` and `match("[0-9]")`
+    // against the same declaration introduce EQUAL tokens (same type name,
+    // same canonical text, same size) — the constructor is the pattern, and
+    // the pattern's identity is its canonical form.
+    const h = patternHarness([{ name: "DigitPat", patterns: ["[0123456789]"] }])
+    const a = evalOne(h, 'match("[0123456789]")') as TokenVal
+    const b = evalOne(h, 'match("[0-9]")') as TokenVal
+    assertEquals(a.text, b.text, "both carry the canonical source")
+    assertEquals(a.text, "[0-9]", "the class renders as its collapsed ranges")
+    assertEquals(a.size(), b.size(), "sizes agree (the canonical source's length)")
+    assertEquals(a.equals(b), true)
 })
 
 Deno.test("E-Pattern: the token identity — two parses are equal values", () => {
@@ -332,7 +436,7 @@ Deno.test("E-Pattern: the token identity — two parses are equal values", () =>
     const a = evalOne(h, 'match("[0-9]+")')
     const b = evalOne(h, 'match("[0-9]+")')
     assertEquals(a?.equals(b as TokenVal), true)
-    // size = the pattern source's length (the token's text-length measure).
+    // size = the canonical source's length (the token's text-length measure).
     assertEquals(a?.size(), "[0-9]+".length)
 })
 
@@ -494,43 +598,51 @@ Deno.test("T-Pattern: the derivation fragment rejects the construction", () => {
     )
 })
 
-Deno.test("T-Pattern: the derivation diagnostic escapes the quoted payload", () => {
-    // The diagnostic quotes the payload as LC SOURCE — the delimiter
+Deno.test("T-Pattern: the derivation diagnostic escapes the quoted payload (real reader)", () => {
+    // The diagnostic quotes the RAW payload as LC SOURCE — the delimiter
     // characters (`"`, `\`) are escaped exactly as `TokenVal.renderSource`
     // escapes them, so the message shows the spelling the definition
     // carries and is re-parsable. A raw interpolation would close the
     // string at the first inner `"` — malformed and misleading.
     //
-    // The action is reached directly (the readDefShape path's pre-scan
-    // shadows the interpolated diagnostic with its static text — the
-    // driver swallows per-branch action throws), through an exposed
-    // reader subclass invoking the protected action directly.
-    class ExposedReader {
-        // The action contract is what the test pins: escape + shape.
-        static diagnosticFor(source: string): string {
-            const escaped = source.replace(/["\\]/g, "\\$&")
-            return `pattern-matched construction (\`match("${escaped}")\` — a pattern-type constructor)`
-        }
-    }
-    // The quoted payload `"<Char>*"` (a StringPat-style pattern) — raw
-    // interpolation would render `match(""<Char>*"")`; the escaped render
-    // is the re-parsable spelling.
+    // The REAL reader action is exercised (not a reimplementation): the
+    // parse driver swallows per-branch action throws, so
+    // `readRejectedConstruct` — the derivation module's diagnostic seam —
+    // invokes `DerivationReader.matchedPattern` directly.
     const raw = '"<Char>*"'
+    const error = assertThrows(
+        () => readRejectedConstruct("pattern", ["Pat", raw]),
+        DefinitionShapeError,
+    )
+    // The quoted payload renders escaped — the re-parsable spelling.
     assertEquals(
-        ExposedReader.diagnosticFor(raw),
+        error.message,
         'pattern-matched construction (`match("\\"<Char>*\\"")` — a pattern-type constructor)',
     )
     // A backslash-bearing payload escapes too.
+    const backslash = assertThrows(
+        () => readRejectedConstruct("pattern", ["Pat", "a\\b"]),
+        DefinitionShapeError,
+    )
     assertEquals(
-        ExposedReader.diagnosticFor("a\\b"),
+        backslash.message,
         'pattern-matched construction (`match("a\\\\b")` — a pattern-type constructor)',
     )
     // A plain payload passes through unchanged (the common case stays
-    // readable).
+    // readable), and the bare-token diagnostic rides the same seam.
+    const plain = assertThrows(
+        () => readRejectedConstruct("pattern", ["Pat", "[0-9]+"]),
+        DefinitionShapeError,
+    )
     assertEquals(
-        ExposedReader.diagnosticFor("[0-9]+"),
+        plain.message,
         'pattern-matched construction (`match("[0-9]+")` — a pattern-type constructor)',
     )
+    const token = assertThrows(
+        () => readRejectedConstruct("token", ["Pat", "Pat"]),
+        DefinitionShapeError,
+    )
+    assertEquals(token.message, "matched token (`Pat` — a pattern-type atom)")
 })
 
 Deno.test("E-Pattern: the evaluator's value is distinct from a variant value", () => {

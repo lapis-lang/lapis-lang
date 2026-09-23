@@ -1239,12 +1239,16 @@ export class LCEval extends AbstractLC<EvalShape> {
 
     /**
      * E-Pattern: `match("p")` evaluates to the matched token — the pattern's
-     * source as a `TokenVal` of the pattern-matched type. The token is an
-     * axiom of the operational semantics (lc.md §1): no subterm evaluation,
-     * the value IS the carried text. The text here is the PATTERN SOURCE (the
-     * canonical constructor name — source = content, lifted one level from
-     * the bare token atom's text = name); a later revision introducing real
-     * matched text would extend the form, not this value shape.
+     * CANONICAL source as a `TokenVal` of the pattern-matched type. The token
+     * is an axiom of the operational semantics (lc.md §1): no subterm
+     * evaluation, the value IS the carried text. The text here is the
+     * canonical pattern source (`patternToString` — the declared pattern's
+     * identity, lifted one level from the bare token atom's text = name): the
+     * token names the DECLARED pattern, so two spellings of one AST introduce
+     * equal tokens (`size()` included — the canonical source's length), and
+     * the token's text re-parses to the very pattern it was introduced with.
+     * A later revision introducing real matched text would extend the form,
+     * not this value shape.
      *
      * Value-rule (no premises — the premises on the pattern are enforced by
      * the base `patternMatchProd` gate, not Γ/ρ judgments), like E-Lam and
@@ -1262,7 +1266,8 @@ export class LCEval extends AbstractLC<EvalShape> {
      * conclusion the rule model reads and the production linkage.
      */
     @ensures(
-        (_self: LCEval, _args: [string, string], _old, result: Value) => result instanceof TokenVal,
+        (_self: LCEval, _args: [string, string, string], _old, result: Value) =>
+            result instanceof TokenVal,
         {
             rule: "E-Pattern",
             role: "conclusion",
@@ -1270,7 +1275,11 @@ export class LCEval extends AbstractLC<EvalShape> {
             production: "patternMatchProd",
         },
     )
-    protected matchedPattern(dataTypeName: string, patternSource: string): Value {
+    protected matchedPattern(
+        dataTypeName: string,
+        patternSource: string,
+        _rawSource: string,
+    ): Value {
         return new TokenVal(dataTypeName, patternSource, "pattern")
     }
 }

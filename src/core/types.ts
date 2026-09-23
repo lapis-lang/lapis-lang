@@ -565,13 +565,24 @@ function resolveObserverFields(
  * the language-equation reading (`pattern_lang.ts` — concatenation multiplies,
  * alternation sums, Kleene star inverts (1−P)) reads the structure, and
  * rendering back to source is the AST's `toString`.
+ *
+ * The declared patterns are IMMUTABLE: the constructor copies the argument
+ * into a frozen array, so a registered type's declarations cannot be
+ * mutated after the fact — the registry's reverse index (the pattern source
+ * → type map, built once at registration) would otherwise drift from the
+ * type's own declaration (a post-registration `patterns.push` or splice
+ * would leave removed patterns constructible and added patterns rejected).
+ * A revised declaration set constructs a fresh `PatternDataType` (and a
+ * fresh registry — registration is final).
  */
 export class PatternDataType extends Type {
+    readonly patterns: readonly PatternAST[]
     constructor(
         readonly name: string,
-        readonly patterns: PatternAST[],
+        patterns: readonly PatternAST[],
     ) {
         super()
+        this.patterns = Object.freeze([...patterns])
     }
 
     equals(other: Type): boolean {

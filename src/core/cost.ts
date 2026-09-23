@@ -1599,9 +1599,10 @@ class CostEngine extends AbstractLC<CostShape> {
     /**
      * match("p") — pattern-matched construction: the same cost shape as the
      * bare token atom. Producing the token is O(1); the RESULT size is the
-     * pattern's source length (the value's own size measure —
-     * `TokenVal.size` is its text length), a static quantity the pattern
-     * source fixes. No subterms, no edges, no recursion.
+     * pattern's CANONICAL source length (the value's own size measure —
+     * `TokenVal.size` is its text length, and the token's text is the
+     * canonical source the gate resolves), a static quantity the declared
+     * pattern fixes. No subterms, no edges, no recursion.
      *
      * The size variable is named per-pattern (`token(T:<p>)`, vs the bare
      * atom's `token(T)`): the two introduction routes carry DIFFERENT static
@@ -1609,7 +1610,9 @@ class CostEngine extends AbstractLC<CostShape> {
      * the pattern source), so the variables name the value the route fixes —
      * two routes producing one type's tokens do not share a size variable
      * because their `TokenVal.size` values differ (the name-lexed form's
-     * length vs the pattern source's length).
+     * length vs the pattern source's length). The canonical source — not the
+     * caller's spelling — names the variable, so two spellings of one AST
+     * share the variable (their tokens are equal, sizes included).
      *
      * The pattern source is ARBITRARY pattern text (metacharacters, quoted
      * literals, control characters), while every other variable name in the
@@ -1622,7 +1625,11 @@ class CostEngine extends AbstractLC<CostShape> {
      * hex-escape), so the name is unambiguous in the merge keys and the
      * rendered certificate whatever the pattern contains.
      */
-    protected override matchedPattern(dataTypeName: string, patternSource: string): CostSummary {
+    protected override matchedPattern(
+        dataTypeName: string,
+        patternSource: string,
+        _rawSource: string,
+    ): CostSummary {
         const source = sanitizeNameComponent(patternSource)
         return {
             cost: SizeExpr.ONE,

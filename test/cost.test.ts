@@ -47,7 +47,12 @@ import {
     type TypeCases,
     Variant,
 } from "../src/core/types.ts"
-import { createNatStreamType, createNatType, createOpFixtures } from "./fixtures.ts"
+import {
+    createNatStreamType,
+    createNatType,
+    createOpFixtures,
+    createPatternType,
+} from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
@@ -113,6 +118,49 @@ Deno.test("SizeExpr: a hostile variable name survives merge and render", () => {
     // Substitute by exact match (the recurrence driver's discipline).
     const substituted = x.substitute(sanitizeNameComponent("a^,|b"), SizeExpr.ONE)
     assertEquals(substituted.render(), "1")
+})
+
+Deno.test("matchedPattern: the match form analyzes through the engine and the pass", () => {
+    // The `CostEngine.matchedPattern` integration: a registered
+    // `PatternDataType`'s match form parses and analyzes — the cost is the
+    // O(1) token production, the result size is the CANONICAL source's
+    // length named by the sanitized per-pattern variable, and the
+    // `CostPass` tree walk agrees with the engine's own parse (the two
+    // vehicles' agreement the pattern branch inherits from the shared
+    // base production).
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
+    const registry = new TypeRegistry()
+    registry.register(natPat)
+    const omega = new OpRegistry()
+    const report = analyzeTerm('match("[0-9]+")', registry, omega)
+    assert(report !== undefined, "the match form analyzes")
+    assertEquals(report.cost.render(), "1")
+    // The canonical source `[0-9]+` — ASCII metacharacters sanitize to
+    // `\x5b`/`\x5d` (the brackets are outside the safe alphabet).
+    assertEquals(report.resultSize.render(), "|token(NatPat:\\x5b0-9\\x5d+)|")
+    // The size is a named static quantity (degree 1 in its own variable —
+    // the classifier reads any named variable as "linear" in itself).
+    assertEquals(report.growth, "linear")
+    assertEquals(report.verdict, "certified")
+    assertEquals(report.flags.length, 0)
+    // The provenance names the token's pattern type.
+    assert(report.edges.length === 0, "a token has no feedback edges")
+
+    // The bare token atom's variable — a DIFFERENT route, a different text:
+    const bare = analyzeTerm("NatPat", registry, omega)
+    assertEquals(bare?.resultSize.render(), "|token(NatPat)|")
+
+    // The CostPass integration: the checker's derivation tree walks to the
+    // same summary (the pattern branch is the shared base production — the
+    // tree and the engine agree by construction).
+    const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(omega)
+    const tree = tc.parseToTree('match("[0-9]+")').trees[0]
+    assert(tree !== undefined)
+    const pass = new CostPass(registry, omega)
+    const passReport = pass.evaluateReport(tree)
+    assert(passReport !== undefined)
+    assertEquals(passReport.cost.render(), report.cost.render())
+    assertEquals(passReport.resultSize.render(), report.resultSize.render())
 })
 
 Deno.test("SizeExpr: plus merges monomials (2|x| + |x| = 3|x|)", () => {

@@ -116,70 +116,9 @@ export const LC_RESERVED_WORDS: readonly string[] = [
 
 // ── Pattern anchoring (the T-Pattern lexer premise) ─────────────────────────────
 
-/**
- * Whether a pattern AST is ANCHORED — it must start with a specific literal
- * character or character class (surface-syntax.md §1.3). The rejected shapes
- * the spec names are `.*` (a bare leading `.`) and the classic-regex
- * prefix-repetition anchors (`*`/`?` as the first token — unrepresentable in
- * this postfix fragment, where `*`/`?`/`+` are postfix on an atom).
- *
- * The checkable form of the premise: the pattern's FIRST ATOM — the first
- * leaf, descending through the postfix wrappers — must be a literal char, a
- * class, or a type reference. A leading `.` (any) rejects. The wrapper
- * reading is what makes the canonical carriers anchorable: `Nat = [0-9]+`
- * (design-decisions.md's bootstrapping example) is a PLUS wrapping a class —
- * its first leaf IS a class, so it is anchored; `".*"` is a concat whose
- * first leaf is the literal quote char — anchored while bare `.*` is not.
- * A concatenation anchors at its FIRST part (the first atom decides where
- * the match must start). A type reference `<T>` is anchored — it resolves to
- * another declared pattern, whose own anchoring the declaration machinery
- * checked; at the term layer the reference is taken as anchored (its
- * language is the referenced type's, which T-Pattern cannot re-litigate
- * without unfolding the registry — the declaration check owns that).
- */
-function isAnchoredPattern(ast: ReturnType<typeof parsePattern>): boolean {
-    switch (ast.kind) {
-        case "char":
-        case "class":
-        case "typeref":
-            return true
-        case "any":
-            // A leading `.` matches any character from any position — the
-            // shape the spec rejects (`not \`.*\``).
-            return false
-        case "concat": {
-            // The first part decides where the match must start. The parser
-            // never produces an empty concat (`parseRepeat` pushes at least
-            // one atom before the `concat` node is built — an exhausted
-            // source throws in `parseAtom` first), but a future producer
-            // that did would crash on the `!` — so the arm treats empty as
-            // unanchored (a pattern matching NOTHING cannot anchor a match)
-            // rather than trusting the cross-module invariant blindly.
-            const first = ast.parts[0]
-            return first === undefined ? false : isAnchoredPattern(first)
-        }
-        case "star":
-        case "plus":
-        case "opt":
-            // A postfix wrapper is transparent for anchoring: the pattern
-            // starts at its inner's first atom (`[0-9]+` anchors at the
-            // class; `".*"` anchors at the quote).
-            return isAnchoredPattern(ast.inner)
-        default: {
-            // Exhaustiveness: the narrowing to `never` is a compile error the
-            // moment `PatternAST` grows a kind without an arm here; at
-            // runtime the throw surfaces an undeclared kind loudly (the same
-            // loud-unknown policy `Type.dispatch`'s root default applies — a
-            // silent `undefined` would classify the new kind as unanchored
-            // and quietly reject every pattern using it).
-            const unknown: never = ast
-            throw new TypeError(
-                `unknown pattern AST kind: ${JSON.stringify((unknown as { kind: string }).kind)}` +
-                    " — isAnchoredPattern is not exhaustive over PatternAST",
-            )
-        }
-    }
-}
+// The anchoring walk lives on the abstract grammar as a METHOD
+// (`isResolvableAndAnchored`, below — it needs the registry to propagate
+// the anchoring through type references transitively).
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
 
@@ -389,12 +328,19 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     /**
      * A pattern-matched construction: `match("p")` — the explicit introduction
      * form for a pattern-matched data type (T-Pattern, lc.md §5.1). The action
-     * receives the type the declared pattern belongs to and the pattern's
-     * source. The premise (the pattern is declared on a registered
-     * `PatternDataType`, and anchored) is enforced by `patternMatchProd`'s
-     * gate before this action is reached.
+     * receives the type the declared pattern belongs to, the pattern's
+     * CANONICAL source (`patternToString` — the declared pattern's identity,
+     * so two spellings of one AST yield identical tokens), and the raw
+     * spelling the term carried (diagnostics). The premises (the pattern is
+     * declared on a registered `PatternDataType`, anchored, and its type
+     * references resolve) are enforced by `patternMatchProd`'s gate before
+     * this action is reached.
      */
-    protected abstract matchedPattern(dataTypeName: string, patternSource: string): S["atom"]
+    protected abstract matchedPattern(
+        dataTypeName: string,
+        patternSource: string,
+        rawSource: string,
+    ): S["atom"]
 
     // ── Context extension hook (for type checker / evaluator subclasses) ──────
 
@@ -993,19 +939,25 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             char(")"),
         ).bind(([, , , patternSource]) => {
             const source = patternSource as string
-            const typeName = this.patternTypeName(source)
-            if (typeName === undefined) {
+            const resolved = this.patternTypeName(source)
+            if (resolved === undefined) {
                 return empty<S["atom"]>()
             }
-            return epsilon(this.matchedPattern(typeName, source))
+            // The CANONICAL source rides along: the token's text (its size,
+            // its equality, its cost variable) is the DECLARED pattern's
+            // identity — two spellings of one AST (`[0123456789]` and
+            // `[0-9]`) introduce EQUAL tokens, whichever spelling the term
+            // carried. The raw spelling stays available for diagnostics.
+            return epsilon(this.matchedPattern(resolved.typeName, resolved.source, source))
         })
     }
 
     /**
-     * Resolve a pattern source to the name of the registered `PatternDataType`
-     * that declares it. The source parses through `parsePattern` (the SAME
-     * parse the declaration machinery uses) and compares canonically —
-     * `patternToString` normalization — against the registry's pattern index.
+     * Resolve a pattern source to the registered `PatternDataType` that
+     * declares it — the owner's name AND the pattern's canonical source. The
+     * source parses through `parsePattern` (the SAME parse the declaration
+     * machinery uses) and compares canonically — `patternToString`
+     * normalization — against the registry's pattern index.
      *
      * Premises checked here (the T-Pattern gate, lc.md §5.1):
      * 1. the source parses as a pattern (a malformed source is a REJECTION —
@@ -1017,11 +969,20 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
      * 3. the pattern is ANCHORED (surface-syntax.md §1.3: it must start with a
      *    specific literal or class — a leading `.`/`*`/`+`/`?`-driven shape
      *    would match from any position; the explicit form names its pattern,
-     *    so the lexer-side premise is checkable at parse time).
+     *    so the lexer-side premise is checkable at parse time),
+     * 4. every TYPE REFERENCE in the pattern resolves to a registered
+     *    pattern type (recursively — a `<Missing>` reference produces a
+     *    token whose language the registry cannot enumerate, and a reference
+     *    chain that is itself anchored only passes when each target's own
+     *    declared patterns are anchored — the declaration machinery's
+     *    obligation, enforced at the gate because the registry's own
+     *    registration accepts parsed ASTs as given).
      *
      * `undefined` — any failed premise; the caller rejects the branch.
      */
-    protected patternTypeName(patternSource: string): string | undefined {
+    protected patternTypeName(
+        patternSource: string,
+    ): { typeName: string; source: string } | undefined {
         let ast: ReturnType<typeof parsePattern>
         try {
             ast = parsePattern(patternSource)
@@ -1030,7 +991,11 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             // term is ill-typed), never a thrown error out of the parse.
             return undefined
         }
-        if (!isAnchoredPattern(ast)) {
+        // The combined gate walk: every type reference resolves AND the
+        // anchoring propagates through references transitively (a reference
+        // is anchored iff its target's declared patterns are). Cycle-safe
+        // via the seen set.
+        if (!this.isResolvableAndAnchored(ast, new Set())) {
             return undefined
         }
         const canonical = patternToString(ast)
@@ -1038,7 +1003,67 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         if (!resolved) {
             return undefined
         }
-        return resolved.name
+        return { typeName: resolved.name, source: canonical }
+    }
+
+    /**
+     * The gate's combined walk: RESOLVABILITY (every type reference names a
+     * registered pattern type — the registry can enumerate the pattern's
+     * language) and TRANSITIVE ANCHORING (the pattern's first atom is a
+     * literal or class, through the postfix wrappers AND through type
+     * references — a reference's language is its target's, so a reference to
+     * a type declaring an unanchored pattern is unanchored itself). The two
+     * premises share one walk because they share the same structure and the
+     * same cycle guard (surface-syntax.md §1.3 — both are lexer-side
+     * obligations the declaration machinery may have skipped: the registry
+     * accepts parsed ASTs as given, so the term gate owns them).
+     */
+    private isResolvableAndAnchored(
+        ast: ReturnType<typeof parsePattern>,
+        seen: Set<string>,
+    ): boolean {
+        switch (ast.kind) {
+            case "char":
+            case "class":
+                return true
+            case "any":
+                // A leading `.` matches any character from any position —
+                // the shape the spec rejects (surface-syntax.md §1.3).
+                return false
+            case "concat": {
+                // The first part decides where the match must start. The
+                // parser never produces an empty concat (a concat node
+                // requires at least one parsed atom — an exhausted source
+                // throws in `parseAtom` first), but the arm treats empty as
+                // unanchored (a pattern matching NOTHING anchors nothing)
+                // rather than trusting the cross-module invariant blindly.
+                const first = ast.parts[0]
+                return first === undefined ? false : this.isResolvableAndAnchored(first, seen)
+            }
+            case "star":
+            case "plus":
+            case "opt":
+                // A postfix wrapper is transparent for anchoring: the
+                // pattern starts at its inner's first atom (`[0-9]+` anchors
+                // at the class; `".*"` anchors at the quote).
+                return this.isResolvableAndAnchored(ast.inner, seen)
+            case "typeref": {
+                if (seen.has(ast.name)) return true
+                seen.add(ast.name)
+                const resolved = this.registry.lookup(ast.name)
+                if (!(resolved instanceof PatternDataType)) {
+                    // An unresolvable reference: no registered type owns the
+                    // name — the language is unknowable (the constructor
+                    // would be accepted with a language the registry cannot
+                    // enumerate).
+                    return false
+                }
+                // The reference's language is the target's: anchored iff the
+                // target's declared patterns all are (the transitive
+                // obligation — a chain ending in `.` is unanchored).
+                return resolved.patterns.every((p) => this.isResolvableAndAnchored(p, seen))
+            }
+        }
     }
 
     // The quoted pattern string: "…" with `\` escapes.

@@ -103,6 +103,7 @@ export {
     MAX_UNFOLDS_PER_CASE,
     type NotDerivable,
     readDefShape,
+    readRejectedConstruct,
     renderTerm,
     SCHEMA_VARIABLE_NAMES,
     type Term,
