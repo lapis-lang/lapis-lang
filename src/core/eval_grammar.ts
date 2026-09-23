@@ -1236,4 +1236,50 @@ export class LCEval extends AbstractLC<EvalShape> {
     protected matchedToken(dataTypeName: string, text: string): Value {
         return new TokenVal(dataTypeName, text)
     }
+
+    /**
+     * E-Pattern: `match("p")` evaluates to the matched token — the pattern's
+     * CANONICAL source as a `TokenVal` of the pattern-matched type. The token
+     * is an axiom of the operational semantics (lc.md §1): no subterm
+     * evaluation, the value IS the carried text. The text here is the
+     * canonical pattern source (`patternToString` — the declared pattern's
+     * identity, lifted one level from the bare token atom's text = name): the
+     * token names the DECLARED pattern, so two spellings of one AST introduce
+     * equal tokens (`size()` included — the canonical source's length), and
+     * the token's text re-parses to the very pattern it was introduced with.
+     * A later revision introducing real matched text would extend the form,
+     * not this value shape.
+     *
+     * Value-rule (no premises — the premises on the pattern are enforced by
+     * the base `patternMatchProd` gate, not Γ/ρ judgments), like E-Lam and
+     * E-Unfold: the conclusion is the token value. The production is NOT
+     * overridden — the inherited base production runs unchanged (its virtual
+     * `matchedPattern` dispatches to the implementation below), so the gate
+     * lives in exactly one place and the checker (which shares the same base
+     * production) and this evaluator can never diverge. The rule-model
+     * linkage comes from the contract's `production` key — the mechanism
+     * E-TAbs/E-TApp use for their non-overridden productions.
+     *
+     * The action is only reached on the verified path — the base production
+     * commits its conclusion via `epsilon` after the gate, the established
+     * production-path shape (#56) — so this contract encodes both the
+     * conclusion the rule model reads and the production linkage.
+     */
+    @ensures(
+        (_self: LCEval, _args: [string, string, string], _old, result: Value) =>
+            result instanceof TokenVal,
+        {
+            rule: "E-Pattern",
+            role: "conclusion",
+            formula: "result : TokenVal",
+            production: "patternMatchProd",
+        },
+    )
+    protected matchedPattern(
+        dataTypeName: string,
+        patternSource: string,
+        _rawSource: string,
+    ): Value {
+        return new TokenVal(dataTypeName, patternSource, "pattern")
+    }
 }

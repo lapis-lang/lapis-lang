@@ -103,13 +103,20 @@ export {
     MAX_UNFOLDS_PER_CASE,
     type NotDerivable,
     readDefShape,
+    readRejectedConstruct,
     renderTerm,
     SCHEMA_VARIABLE_NAMES,
     type Term,
 } from "./derivation.ts"
 
 // Grammar — concrete syntax for LC (parse, don't validate)
-export { AbstractLC, LC_RESERVED_WORDS, type LCShape, TypeRegistry } from "./grammar.ts"
+export {
+    AbstractLC,
+    LC_RESERVED_WORDS,
+    type LCShape,
+    TypeRegistry,
+    TypeRegistryError,
+} from "./grammar.ts"
 
 // Cost algebra (semantics.md §5.5 — static cost/depth analysis; certified
 // bounds for the stratified fragment, flags on value-size feedback)
@@ -134,7 +141,9 @@ export {
     OpSummaryStore,
     type Provenance,
     renderCostReport,
+    sanitizeNameComponent,
     SizeExpr,
+    unescapeNameComponent,
     type UnresolvedCost,
 } from "./cost.ts"
 

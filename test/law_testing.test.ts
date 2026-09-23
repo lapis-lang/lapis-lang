@@ -176,8 +176,12 @@ Deno.test("renderSource: a token renders as its bare type name and round-trips",
 })
 
 Deno.test("renderSource: a deviant token (text ≠ type name) declines", () => {
-    // Only constructible directly (the evaluator always stamps text = name);
-    // the decline keeps such a value from becoming a malformed candidate.
+    // The route decides the source form: only a token introduced by the
+    // `match("p")` form (the "pattern" route) renders the match form. A
+    // direct-constructed token with arbitrary text — the law checker's
+    // enumerated matched texts are TEXTS, not pattern sources — has no
+    // source form: `match("<text>")` would not re-evaluate, and the
+    // round-trip judgment never emits a malformed candidate.
     assertEquals(new TokenVal("Pat", "x").renderSource(), undefined)
 })
 

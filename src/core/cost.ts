@@ -146,6 +146,59 @@ export interface Monomial {
     readonly factors: ReadonlyMap<string, number>
 }
 
+/**
+ * The SAFE ALPHABET for a size-variable name — the character set the
+ * algebra's internal name machinery assumes. Two consumers parse names
+ * structurally, and both assume a restricted character set:
+ *
+ * - `monomialKey` joins factors with `,` and appends `^e`; `fromMerged`
+ *   reconstructs the factors by `split(",")` then `split("^")` — so a name
+ *   containing `,` or `^` would be MIS-PARSED back (a `,` splits one name
+ *   into two factors; a `^` splits it into a truncated name and an
+ *   exponent), silently corrupting the merge and the substitution.
+ * - `renderMonomial` wraps the name in `|…|` — a `|` in the name makes the
+ *   rendered certificate ambiguous to read.
+ *
+ * Everything else (`:` separators, `(` `)` groupings, whitespace, control
+ * characters, quotes, backslashes) is unsafe for one consumer or another —
+ * or merely unreadable in a report. The sanitizer below escapes every
+ * character OUTSIDE the safe set to `\xHH`, so any input string becomes a
+ * valid, unambiguous, round-trippable variable name.
+ */
+const SAFE_NAME_CHARS = /^[A-Za-z0-9_.\-+#]*$/
+
+/**
+ * Sanitize one component of a variable name into the safe alphabet: every
+ * character outside it (see `SAFE_NAME_CHARS`) is hex-escaped (`\xNN`), so
+ * the result is always a valid, unambiguous, and round-trippable name —
+ * `unescapeNameComponent` reconstructs the original.
+ *
+ * Deterministic and injective (the escape alphabet `\x` + hex digits cannot
+ * collide with an unescaped safe string, since raw `\` is itself escaped),
+ * so `substitute`'s exact-match discipline and the monomial merge keys stay
+ * correct for any input.
+ */
+export function sanitizeNameComponent(raw: string): string {
+    return [...raw]
+        .map((c) =>
+            SAFE_NAME_CHARS.test(c) ? c : `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`
+        )
+        .join("")
+}
+
+/**
+ * The inverse of `sanitizeNameComponent` (diagnostics: a sanitized name read
+ * back to the component that produced it). Not used by the algebra itself —
+ * the algebra never parses names back — but exported so report consumers can
+ * recover the readable form.
+ */
+export function unescapeNameComponent(safe: string): string {
+    return safe.replace(
+        /\\x([0-9a-f]{2})/g,
+        (_m, h: string) => String.fromCharCode(parseInt(h, 16)),
+    )
+}
+
 /** A monomial's canonical merge key (coefficient-independent). */
 function monomialKey(m: Monomial): string {
     if (m.factors.size === 0) return ":"
@@ -1529,12 +1582,59 @@ class CostEngine extends AbstractLC<CostShape> {
         return instantiateOpSummary(op, summary, args)
     }
 
-    /** match(pₖ) — a matched token: a named size variable (the text is unknown). */
+    /** match("p") — a matched token: a named size variable (the text is unknown). */
     protected override matchedToken(dataTypeName: string, _text: string): CostSummary {
         return {
             cost: SizeExpr.ONE,
             depth: DepthExpr.constant(1),
             resultSize: SizeExpr.variable(`token(${dataTypeName})`),
+            provenance: { kind: "token", name: dataTypeName },
+            resultKind: "data",
+            edges: [],
+            unresolved: [],
+            latencies: [],
+        }
+    }
+
+    /**
+     * match("p") — pattern-matched construction: the same cost shape as the
+     * bare token atom. Producing the token is O(1); the RESULT size is the
+     * pattern's CANONICAL source length (the value's own size measure —
+     * `TokenVal.size` is its text length, and the token's text is the
+     * canonical source the gate resolves), a static quantity the declared
+     * pattern fixes. No subterms, no edges, no recursion.
+     *
+     * The size variable is named per-pattern (`token(T:<p>)`, vs the bare
+     * atom's `token(T)`): the two introduction routes carry DIFFERENT static
+     * texts (the bare atom's text is the type name; the match form's text is
+     * the pattern source), so the variables name the value the route fixes —
+     * two routes producing one type's tokens do not share a size variable
+     * because their `TokenVal.size` values differ (the name-lexed form's
+     * length vs the pattern source's length). The canonical source — not the
+     * caller's spelling — names the variable, so two spellings of one AST
+     * share the variable (their tokens are equal, sizes included).
+     *
+     * The pattern source is ARBITRARY pattern text (metacharacters, quoted
+     * literals, control characters), while every other variable name in the
+     * algebra comes from a restricted grammar — and the algebra's internal
+     * machinery parses names structurally (the monomial merge key splits on
+     * `,`/`^`; the renderer wraps in `|…|`). The source is therefore
+     * sanitized into the safe alphabet (`sanitizeNameComponent` — ASCII
+     * pattern characters like `[0-9]+` pass through unescaped and stay
+     * human-readable; quotes, backslashes, and control characters
+     * hex-escape), so the name is unambiguous in the merge keys and the
+     * rendered certificate whatever the pattern contains.
+     */
+    protected override matchedPattern(
+        dataTypeName: string,
+        patternSource: string,
+        _rawSource: string,
+    ): CostSummary {
+        const source = sanitizeNameComponent(patternSource)
+        return {
+            cost: SizeExpr.ONE,
+            depth: DepthExpr.constant(1),
+            resultSize: SizeExpr.variable(`token(${dataTypeName}:${source})`),
             provenance: { kind: "token", name: dataTypeName },
             resultKind: "data",
             edges: [],

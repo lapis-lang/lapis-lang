@@ -434,6 +434,66 @@ class DerivationReader extends AbstractLC<ReaderShape> {
             `matched token (\`${dataTypeName}\` — a pattern-type atom)`,
         )
     }
+
+    /**
+     * match("p") — pattern-matched construction. The derivation fragment is a
+     * fold-skeleton language over VARIANT carriers; a pattern-matched
+     * construction has no variant cases to skeletonize (the same rejection the
+     * bare token atom takes), so the fragment rejects it loudly.
+     *
+     * The diagnostic quotes the RAW payload as LC SOURCE — delimiter-escaped
+     * (the same `"`/`\` escaping `TokenVal.renderSource` applies), so the
+     * message shows the spelling the definition actually carries. A payload
+     * containing quotes/backslashes interpolated raw would render a string
+     * that closes at the first inner `"` — malformed and misleading (the
+     * pre-scan's shadowed sibling diagnostic included; the action's message
+     * is also the one a future direct-action consumer would see).
+     */
+    protected override matchedPattern(
+        _dataTypeName: string,
+        _patternSource: string,
+        rawSource: string,
+    ): Term {
+        const escaped = rawSource.replace(/["\\]/g, "\\$&")
+        throw new DefinitionShapeError(
+            "",
+            `pattern-matched construction (\`match("${escaped}")\` — a pattern-type constructor)`,
+        )
+    }
+
+    // The action surface, exposed: the two token-form rejections are
+    // diagnostics-only (the parse driver swallows their throws, so the parse
+    // path never propagates them — `readDefShape`'s pre-scan names the
+    // construct instead). `readRejectedConstruct` invokes them DIRECTLY —
+    // the seam a test or future consumer uses to reach the real diagnostics
+    // without reimplementing the actions' message shape.
+    exposedMatchedToken(dataTypeName: string, text: string): Term {
+        return this.matchedToken(dataTypeName, text)
+    }
+
+    exposedMatchedPattern(dataTypeName: string, rawSource: string): Term {
+        return this.matchedPattern(dataTypeName, rawSource, rawSource)
+    }
+}
+
+/**
+ * A diagnostic-only read: the reader's semantic-action surface, exposed for
+ * tests and future consumers — `matchedToken`/`matchedPattern` throw their
+ * `DefinitionShapeError` diagnostics when invoked (the parse driver swallows
+ * per-branch action throws, so the parse path never propagates them; this
+ * free function invokes the actions DIRECTLY, the seam a test or a future
+ * consumer uses to reach the diagnostics without a grammar subclass).
+ */
+export function readRejectedConstruct(
+    kind: "token" | "pattern",
+    args: readonly string[],
+): never {
+    const reader = new DerivationReader(new TypeRegistry(), new OpRegistry())
+    if (kind === "token") {
+        reader.exposedMatchedToken(args[0]!, args[1] ?? "")
+    }
+    reader.exposedMatchedPattern(args[0]!, args[1] ?? "")
+    throw new Error("unreachable")
 }
 
 /**
@@ -452,6 +512,7 @@ const REJECTED_CONSTRUCTS: readonly (readonly [string, string])[] = [
     ["cofold", "cofold (codata elimination)"],
     ["let", "let-binding (`let x:σ = t in u`)"],
     ["^", "type abstraction (`^α<:σ. t` — polymorphism)"],
+    ["match", 'pattern-matched construction (`match("…")` — a pattern-type constructor)'],
 ]
 
 /** Whether a source contains the lexeme as a word (bounded on both sides). */

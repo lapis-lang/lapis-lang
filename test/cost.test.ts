@@ -33,8 +33,10 @@ import {
     OpSig,
     OpSummaryStore,
     renderCostReport,
+    sanitizeNameComponent,
     SizeExpr,
     TypeRegistry,
+    unescapeNameComponent,
 } from "../src/index.ts"
 import {
     DataType,
@@ -45,7 +47,12 @@ import {
     type TypeCases,
     Variant,
 } from "../src/core/types.ts"
-import { createNatStreamType, createNatType, createOpFixtures } from "./fixtures.ts"
+import {
+    createNatStreamType,
+    createNatType,
+    createOpFixtures,
+    createPatternType,
+} from "./fixtures.ts"
 
 import { assert, assertEquals } from "@std/assert"
 
@@ -57,6 +64,103 @@ Deno.test("SizeExpr: constants, variables, and rendering", () => {
     assertEquals(SizeExpr.constant(7).render(), "7")
     assertEquals(SizeExpr.variable("x").render(), "|x|")
     assertEquals(SizeExpr.variablePow("x", 3).render(), "|x|^3")
+})
+
+Deno.test("sanitizeNameComponent: the safe alphabet passes through unescaped", () => {
+    // Identifiers, digits, and the algebra's own structural characters stay
+    // readable: a canonical ASCII pattern like `[0-9]+`... is NOT safe (`[` and
+    // `]` are bracketed out of the alphabet), but a plain ident-like component
+    // is. The token variable's TYPE name (`NatPat`) always passes through.
+    assertEquals(sanitizeNameComponent("NatPat"), "NatPat")
+    assertEquals(sanitizeNameComponent("p0"), "p0")
+    assertEquals(sanitizeNameComponent("#foldRec"), "#foldRec")
+})
+
+Deno.test("sanitizeNameComponent: unsafe characters hex-escape to a safe name", () => {
+    // The pattern metacharacters and the algebra's structural characters
+    // escape: `[`, `]`, `^`, `,`, `|`, `:`, `"`, `\`, whitespace.
+    assertEquals(sanitizeNameComponent("[0-9]+"), "\\x5b0-9\\x5d+")
+    assertEquals(sanitizeNameComponent("a^b"), "a\\x5eb")
+    assertEquals(sanitizeNameComponent("a,b"), "a\\x2cb")
+    assertEquals(sanitizeNameComponent('a"b'), "a\\x22b")
+    assertEquals(sanitizeNameComponent("a b"), "a\\x20b")
+    assertEquals(sanitizeNameComponent("a\\b"), "a\\x5cb")
+    // A control character (the newline a quoted payload may carry).
+    assertEquals(sanitizeNameComponent("a\nb"), "a\\x0ab")
+})
+
+Deno.test("sanitizeNameComponent: injective — distinct inputs, distinct names", () => {
+    // The escape alphabet cannot collide with an unescaped safe string: the
+    // raw `\` of an escape is itself escaped, so `unescape` is the exact
+    // inverse and `substitute`'s exact-match discipline stays correct.
+    const pairs: [string, string][] = [
+        ["[0-9]+", "0123456789"],
+        ['"<Char>*"', "^,|:"],
+        ["a\\b", "a\\x5cb"],
+    ]
+    for (const [a, b] of pairs) {
+        const sa = sanitizeNameComponent(a)
+        const sb = sanitizeNameComponent(b)
+        assert(sa !== sb, `distinct inputs must not collide: ${a} vs ${b}`)
+        assertEquals(unescapeNameComponent(sa), a, "unescape is the exact inverse")
+        assertEquals(unescapeNameComponent(sb), b)
+    }
+})
+
+Deno.test("SizeExpr: a hostile variable name survives merge and render", () => {
+    // The end-to-end hazard: a variable named from arbitrary pattern text
+    // (`a^2,b`) goes through plus (the monomial merge key splits factors on
+    // `,` and appends `^e`) — a raw name would mis-parse in fromMerged and
+    // corrupt the substitution. The sanitized name is structurally sound.
+    const x = SizeExpr.variable(sanitizeNameComponent("a^,|b"))
+    const sum = x.plus(x)
+    assertEquals(sum.render(), "2·|a\\x5e\\x2c\\x7cb|")
+    // Substitute by exact match (the recurrence driver's discipline).
+    const substituted = x.substitute(sanitizeNameComponent("a^,|b"), SizeExpr.ONE)
+    assertEquals(substituted.render(), "1")
+})
+
+Deno.test("matchedPattern: the match form analyzes through the engine and the pass", () => {
+    // The `CostEngine.matchedPattern` integration: a registered
+    // `PatternDataType`'s match form parses and analyzes — the cost is the
+    // O(1) token production, the result size is the CANONICAL source's
+    // length named by the sanitized per-pattern variable, and the
+    // `CostPass` tree walk agrees with the engine's own parse (the two
+    // vehicles' agreement the pattern branch inherits from the shared
+    // base production).
+    const natPat = createPatternType("NatPat", ["[0-9]+"])
+    const registry = new TypeRegistry()
+    registry.register(natPat)
+    const omega = new OpRegistry()
+    const report = analyzeTerm('match("[0-9]+")', registry, omega)
+    assert(report !== undefined, "the match form analyzes")
+    assertEquals(report.cost.render(), "1")
+    // The canonical source `[0-9]+` — ASCII metacharacters sanitize to
+    // `\x5b`/`\x5d` (the brackets are outside the safe alphabet).
+    assertEquals(report.resultSize.render(), "|token(NatPat:\\x5b0-9\\x5d+)|")
+    // The size is a named static quantity (degree 1 in its own variable —
+    // the classifier reads any named variable as "linear" in itself).
+    assertEquals(report.growth, "linear")
+    assertEquals(report.verdict, "certified")
+    assertEquals(report.flags.length, 0)
+    // The provenance names the token's pattern type.
+    assert(report.edges.length === 0, "a token has no feedback edges")
+
+    // The bare token atom's variable — a DIFFERENT route, a different text:
+    const bare = analyzeTerm("NatPat", registry, omega)
+    assertEquals(bare?.resultSize.render(), "|token(NatPat)|")
+
+    // The CostPass integration: the checker's derivation tree walks to the
+    // same summary (the pattern branch is the shared base production — the
+    // tree and the engine agree by construction).
+    const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(omega)
+    const tree = tc.parseToTree('match("[0-9]+")').trees[0]
+    assert(tree !== undefined)
+    const pass = new CostPass(registry, omega)
+    const passReport = pass.evaluateReport(tree)
+    assert(passReport !== undefined)
+    assertEquals(passReport.cost.render(), report.cost.render())
+    assertEquals(passReport.resultSize.render(), report.resultSize.render())
 })
 
 Deno.test("SizeExpr: plus merges monomials (2|x| + |x| = 3|x|)", () => {

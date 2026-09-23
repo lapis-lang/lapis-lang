@@ -68,7 +68,7 @@
 | Core op symbols (Ω + `op` application) | ✅ Complete        | `OpRegistry` (Ω, acyclic by construction), `opProd` term form, T-Op/E-Op — operation identity survives elaboration; 42 tests in `test/ops.test.ts`                                                                                                                                                                           | #49          |
 | Production-path premise enforcement    | ✅ Complete        | All typing rules enforce premises in their production overrides (`varProd`, `variantProd`, `obsProd`, `foldProd`, `unfoldProd`, `cofoldProd` join `appProd`/`typeAppProd`/`letProd`/`opProd`); `isSubtype`/`join`/`meet` guard `undefined`; no `undefined`/sentinel-`Any` in the forest; 44 tests in `test/premises.test.ts` | #56          |
 | T-FoldMatch + E-FoldMatch              | ❌ Not implemented | `fold [T] e {pᵢ → tᵢ}` — pattern-matched fold (elimination)                                                                                                                                                                                                                                                                  | #23          |
-| T-Pattern                              | ❌ Not implemented | `match(pₖ)` — pattern-matched construction (introduction)                                                                                                                                                                                                                                                                    | #24          |
+| T-Pattern                              | ✅ Complete        | `match("p")` — pattern-matched construction (introduction); the quoted-pattern form + T-Pattern/E-Pattern; 29 tests in `test/pattern_match.test.ts`                                                                                                                                                                          | #24          |
 | Surface language elaboration           | ❌ Not started     | `DerivationTree` + `SemanticPass` pipeline for surface → LC core                                                                                                                                                                                                                                                             | #25          |
 | Dead code / consolidation              | ❌ Not started     | Remove or justify LCAST AST builder, consolidate `index.ts` exports                                                                                                                                                                                                                                                          | #15–#17, #26 |
 
@@ -695,16 +695,37 @@ with the current status, milestone, and dependencies.
 
 #### PBI #24: T-Pattern — pattern-matched construction (introduction)
 
-- **Status:** Open
+- **Status:** Complete — 487 tests green (`deno check` / `test` / `lint` / `fmt` clean). Plan:
+  `_docs/issue24-plan.md`.
 - **Assignee:** @mlhaufe
 - **Goal:** Implement `match(pₖ)` — pattern-matched construction. Patterns are introduced by the
   lexer and used by `T-FoldMatch` (#23).
-- **Tasks:**
-  1. Add pattern syntax to the lexer/grammar.
-  2. Add `T-Pattern` to `typing_grammar.ts`.
-  3. Add tests.
-- **Files:** `src/core/grammar.ts`, `src/core/typing_grammar.ts`, test files
-- **Depends on:** Nothing (can start immediately, but #23 depends on it).
+- **Result:** The explicit `match("p")` form (`patternMatchProd`): a quoted pattern source, gated on
+  the type registry (the pattern is DECLARED on a registered `PatternDataType`, canonically compared
+  via `patternToString`), and ANCHORED (the first leaf — descending through the postfix wrappers —
+  is a literal/class/typeref, never `.`; the reading that makes the canonical carriers anchorable:
+  `Nat = [0-9]+` anchors at its class). T-Pattern (`matchedPattern` + `@ensures` contract) types the
+  term at the declaring pattern type; E-Pattern evaluates to a `TokenVal` carrying the pattern
+  source (source = content, lifted one level from the bare token atom's text = name — the token
+  stays an axiom of the operational semantics, `E-Pattern` is a value-rule). The registry grew a
+  pattern index (`lookupPatternSource` — canonical source → type, declaration order tie-break);
+  `TokenVal.renderSource` renders a match-introduced token as the `match("…")` form
+  (delimiter-escaped, round-trip verified). The `match` reservation in `BUILTIN_CALL_FORMS` is now
+  load-bearing (the form it reserved exists): the op gate declines and the pattern branch owns the
+  call shape, positionally disjoint from variable application by the tight paren. The derivation
+  fragment and the cost engine implement `matchedPattern` (fragment rejection / the token-cost
+  summary shape). 29 tests in `test/pattern_match.test.ts`: well-typedness, canonical comparison,
+  anchoring (including wrapper transparency), malformed/ empty source rejections, the
+  delimiter-escape spelling, E-Pattern evaluation + token identity + round-trip, the
+  op-gate/Ω-reservation interaction (an op whose definition uses the form declares AND evaluates
+  through the definition window with the real well-formedness checker), and the sibling token atom's
+  unchanged behavior.
+- **Files:** `src/core/grammar.ts`, `src/core/typing_grammar.ts`, `src/core/eval_grammar.ts`,
+  `src/core/values.ts`, `src/core/cost.ts`, `src/core/derivation.ts`, `src/core/ops.ts`,
+  `test/pattern_match.test.ts` (new), `test/metadata.test.ts`, `test/metatheory.test.ts`,
+  `test/law_testing.test.ts`, `_docs/theory/lc.md`, `_docs/issue24-plan.md` (new), this document.
+- **Depends on:** Nothing (was ready; the #19 dependency is discharged — T-Pattern has no
+  sub-terms). Unblocks #23 (T-FoldMatch consumes the introduction form).
 
 #### PBI #25: Surface language elaboration pipeline (`DerivationTree` + `SemanticPass`)
 
@@ -807,9 +828,9 @@ v0.3.0 — Laws
   #35 (unification evaluation)   ← depends on #31; informs #22 (no milestone)
       ↓
 v0.4.0 — Patterns & surface
-  #24 (T-Pattern)                ← no dependency, can start anytime
+  #24 (T-Pattern)                ← complete (2026-09-22)
       ↓
-  #23 (T-FoldMatch + E-FoldMatch) ← depends on #24
+  #23 (T-FoldMatch + E-FoldMatch) ← depends on #24 (the only blocker left)
       ↓
   #25 (surface elaboration)      ← depends on #23, #24
       ↓
@@ -839,7 +860,7 @@ v0.4.0 — Patterns & surface
 - [ ] Law/properties machinery designed and implemented (#22)
 - [ ] Property-based law testing via `forAll` + grammar-aware shrinking (#33)
 - [ ] Unification evaluation for law-solving (#35)
-- [ ] T-Pattern: pattern-matched construction (#24)
+- [x] T-Pattern: pattern-matched construction (#24)
 - [ ] T-FoldMatch + E-FoldMatch: pattern-matched fold (#23)
 - [ ] Surface language elaboration pipeline (#25)
 - [ ] Unparse + round-trip verification (#34)
