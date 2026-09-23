@@ -15,11 +15,11 @@ the token bound to `match`. Two rules implement it — **T-FoldMatch** (typing, 
 
 The shape is deliberately the "easy fold": a `PatternDataType` has **no fields and no `Family`
 positions** — the fold is depth-1. There is no recursive-field substitution walk, no σ fixpoint, no
-`Family` handling: T-FoldMatch is fixpoint-free (each handler body types at its own σᵢ… see D2 below
-— there is not even a join), and E-FoldMatch is a single-step extraction. The novelty here is not
-the control flow; it is that `data`'s declaration _is_ a grammar production and this fold is its
-semantic action — the third consumer of the `PatternDataType` machinery after the token gate (#24)
-and the law-checking sample vocabulary.
+`Family` handling: T-FoldMatch is fixpoint-free (each handler body types once under `match : Token`,
+and the fold's σ is the bodies' COMMON result type — see D2 below), and E-FoldMatch is a single-step
+extraction. The novelty here is not the control flow; it is that `data`'s declaration _is_ a grammar
+production and this fold is its semantic action — the third consumer of the `PatternDataType`
+machinery after the token gate (#24) and the law-checking sample vocabulary.
 
 ## 2. Formal rules (authoritative source: `_docs/theory/lc.md`)
 
@@ -93,17 +93,17 @@ Options:
 - **(b) Require all bodies to be equal** (S-Refl per body against the first) — stricter, no lattice
   dependence.
 
-**(a) is chosen** — `join` is already the established way a judgment with multiple branches produces
-one conclusion type, and `join` of two unrelated `DataType`s produces a well-formed supertype (or
-fails the branch when no common supertype exists — the same rejection shape T-Fold's join already
-has; `join` on types with no upper bound returns `Any`, which is the honest top for an unconstrained
-pair, matching T-If-style joins elsewhere in the checker).
+**(b) is chosen** — lc.md §5.2b's formal rule demands every handler body types as `Token → σ` for
+the SAME σ (the shared conclusion its preservation argument reads), so a body diverging from the
+first body's type rejects the fold (an empty forest — the branch-reject shape, never a laundered
+`Any`). The join of unrelated types would admit a fold whose fired branch is unknowable — a
+semantics change the authoritative rule does not license.
 
 So T-FoldMatch typing is: parse handlers (capturing spans + extended contexts, exactly T-Fold's
 `spanFoldHandler` shape), check each body ONCE (no re-parse — there is no σ to refine; `match`'s
-type is statically `Token`), join the body types, and emit that σ. **No `parseToFixpoint`
-involvement.** The σ slot in the base `fold()` action signature is filled with the joined type (for
-the AST builder's shape; see D4).
+type is statically `Token`), require every body to equal the first body's type (`typeEquals` — one
+common σ), and emit that σ. **No `parseToFixpoint` involvement.** The σ slot in the base `fold()`
+action signature is filled with that common type (for the AST builder's shape; see D4).
 
 **Premises, checked in this order** (a failure at any step rejects the branch — `empty<Type>()`,
 never a throw; the established production-path shape):
@@ -117,7 +117,7 @@ never a throw; the established production-path shape):
 4. `scrutineeType` is not `NothingType` → result `Nothing` (principle of explosion, checked after
    the structural premises exactly as T-Fold does).
 5. Each handler body types under `Γ, match: Token` — a failed body rejects the branch (loud parse
-   rejection; the body's type feeds the join).
+   rejection; the body's type feeds the common-σ check).
 
 **Result:** `σ = join(type(t₁), …, type(tₙ))`, well-formedness guaranteed by `join`'s own contract.
 
@@ -301,7 +301,7 @@ laundering the repo's review findings flag. (The `CostEngine` — the denotation
 | File                             | Delta                                                                                                                                                                                                                                                                                                                                                                                                |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/core/grammar.ts`            | `patternFoldProd` (base, ordered before `foldProd` in `exprProd`); `patternFoldHandler` (head gate via `patternTypeName` + carrier-name check, body under `extendCtx(…, "match", Token)`); abstract `patternFold` action; header comment's production list updated. `foldProd`'s `assert` → branch-reject (`empty`) on wrong-kind annotation (asserts stay in subclasses).                           |
-| `src/core/typing_grammar.ts`     | Override `patternFoldProd` (`@rule`): span-capture handlers under `match:Token` contexts; `evalPatternFold`-style action: premises 1–5 (§3 D2), join, `@requires`/`@ensures` T-FoldMatch contracts. Exhaustiveness via canonical-source set difference. Nothing-propagation arm (D2.4).                                                                                                              |
+| `src/core/typing_grammar.ts`     | Override `patternFoldProd` (`@rule`): span-capture handlers under `match:Token` contexts; `evalPatternFold`-style action: premises 1–5 (§3 D2), common-σ check, `@requires`/`@ensures` T-FoldMatch contracts. Exhaustiveness via canonical-source set difference. Nothing-propagation arm (D2.4).                                                                                                    |
 | `src/core/eval_grammar.ts`       | Override `patternFoldProd` (`@rule({rule:"E-FoldMatch", production:"patternFoldProd"})`): `spanPatternFoldHandlers` (body spans), `evalPatternFold`: TokenVal dispatch + carrier check + canonical-source handler lookup + `extend("match", scrutinee)` + `_forward` body; `@requires`/`@ensures` E-FoldMatch contracts; `patternFold` action override (unreachable-throw shape like `LCEval.fold`). |
 | `src/core/cost.ts`               | `CostPass.patternFoldProd` override (record-reading assembly, §3 D7); `spanPatternFoldHandler` passthrough; `patternFoldSummaryFrom` (no-`Family` mirror of `foldSummaryFrom`); `CostEngine.patternFold` denotation override (reject/throw shape — the engine is the reader for `evaluateReport`, and pattern-fold denotations ride the same re-read fallback).                                      |
 | `src/core/derivation.ts`         | `DerivationReader.patternFold` → `DefinitionShapeError` (loud, fragment boundary); no symbolic `Term` form.                                                                                                                                                                                                                                                                                          |

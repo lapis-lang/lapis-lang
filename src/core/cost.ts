@@ -1217,6 +1217,27 @@ class CostEngine extends AbstractLC<CostShape> {
         return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
     }
 
+    /**
+     * The `match` binding inside a pattern-fold handler body: the TOKEN's
+     * identity, not a generic parameter. The size variable is the engine's
+     * per-pattern token variable (`token(T:<p>)` — the SAME variable
+     * `matchedPattern`'s cost summary produces for a token of this type and
+     * pattern), so a body that references `match` keeps the token's
+     * size/dispatch identity in the engine's own analysis (and in nested
+     * folds' re-reads) — the same identity `tokenDenotation` gives the
+     * CostPass's tree re-read, the two vehicles agreeing by construction.
+     */
+    protected override patternFoldBinding(
+        ctx: unknown,
+        dataTypeName: string,
+        canonicalSource: string,
+    ): unknown {
+        if (ctx instanceof CostEnv) {
+            return ctx.extend("match", tokenDenotation(dataTypeName, canonicalSource))
+        }
+        return super.patternFoldBinding(ctx, dataTypeName, canonicalSource)
+    }
+
     // ── Semantic actions ──────────────────────────────────────────────────────
 
     /**
@@ -1625,19 +1646,33 @@ class CostEngine extends AbstractLC<CostShape> {
             isFlagged: scrutinee.resultSize.isOpaque,
         })
 
+        // The result: EXACT only when the dispatch is exact (a single fired
+        // handler — the body's own result). A conservative charge (multiple
+        // handlers) means the fired arm is unknowable statically: the result
+        // could be ANY charged body's — larger, or function-typed — so the
+        // size is opaque and the kind unknown (a charged[0]-precise bound
+        // would underbound the result and miss the opacity/feedback behavior
+        // a later handler carries).
+        const result = charged.length === 1
+            ? { size: charged[0]!.body.resultSize, kind: charged[0]!.body.resultKind }
+            : {
+                size: SizeExpr.opaque(
+                    `the dispatch identity is not discoverable — the result is one of ${charged.length} handler bodies`,
+                ),
+                kind: "unknown" as const,
+            }
+
         return {
             cost: scrutinee.cost.plus(perNodeWork),
             depth: scrutinee.depth.max(perNodeDepth),
-            resultSize: charged[0]?.body.resultSize ?? scrutinee.resultSize,
+            resultSize: result.size,
             provenance: { kind: "foldMatch", name: dataType.name },
-            resultKind: charged[0]?.body.resultKind ?? "unknown",
+            resultKind: result.kind,
             edges,
             unresolved,
             latencies,
         }
     }
-
-    /** ^α<:σ. t — type abstraction (erasure): the body's summary. */
     protected override typeAbs(_tyVar: string, _bound: Type, body: CostSummary): CostSummary {
         return body
     }
@@ -3010,12 +3045,23 @@ function patternFoldSummaryFrom(
         bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
         isFlagged: scrutinee.resultSize.isOpaque,
     })
+    // The result mirrors the engine's patternFold: EXACT (the fired body's
+    // own result) only when the dispatch is exact; a conservative charge's
+    // result is opaque/unknown (any charged body could produce it).
+    const result = charged.length === 1
+        ? { size: charged[0]!.body.resultSize, kind: charged[0]!.body.resultKind }
+        : {
+            size: SizeExpr.opaque(
+                `the dispatch identity is not discoverable — the result is one of ${charged.length} handler bodies`,
+            ),
+            kind: "unknown" as const,
+        }
     return {
         cost: scrutinee.cost.plus(perNodeWork),
         depth: scrutinee.depth.max(perNodeDepth),
-        resultSize: charged[0]?.body.resultSize ?? scrutinee.resultSize,
+        resultSize: result.size,
         provenance: { kind: "foldMatch", name: dataType.name },
-        resultKind: charged[0]?.body.resultKind ?? "unknown",
+        resultKind: result.kind,
         edges,
         unresolved,
         latencies,

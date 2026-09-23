@@ -17,8 +17,10 @@
  *   T-Variant:  Γ ⊢ tⱼ : Fₖ(T)[α:=T]  ⟹  Γ ⊢ Cₖ(tⱼ) : T
  *   T-Fold:     Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ  ⟹  Γ ⊢ fold [T] e {...} : σ
  *   T-FoldMatch: Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Token→σ  ⟹  Γ ⊢ fold [T] e {match("pᵢ") → tᵢ} : σ
- *               (pattern-matched fold — σ is the join of the handler body types;
- *               no fixpoint: a PatternDataType has no fields, so no σ recirculation)
+ *               (pattern-matched fold — every handler body types as Token→σ for
+ *               ONE COMMON σ (lc.md §5.2b's shared conclusion; divergence is a
+ *               rejected branch); no fixpoint: a PatternDataType has no fields,
+ *               so there is no σ recirculation)
  *   T-Obs:      Γ ⊢ e : T  ⟹  Γ ⊢ e.oₖ : Gₖ(T)[α:=T]
  *   T-Unfold:   Γ ⊢ s : Σ  ∧  Γ ⊢ gⱼ : Σ→Gⱼ(Σ)[α:=Σ]  ⟹  Γ ⊢ unfold [T] s {...} : T
  *   T-Cofold:   Γ ⊢ e : T  ∧  Γ ⊢ t : Πⱼ(Gⱼ(σ)[α:=σ])→σ  ⟹  Γ ⊢ cofold [T] e {...} : σ
@@ -69,7 +71,7 @@ import { AbstractLC, type LCShape } from "./grammar.ts"
 
 import { type OpSig, OpWellFormedness } from "./ops.ts"
 
-import { isSubtype, isTypeValue, join } from "./subtyping.ts"
+import { isSubtype, isTypeValue, join, typeEquals } from "./subtyping.ts"
 
 import { patternToString } from "./pattern_lang.ts"
 
@@ -598,10 +600,12 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // A `PatternDataType` has NO fields and NO Family positions — the fold is
     // depth-1 and there is no σ to recirculate: each handler body is a closed
     // judgment `Γ, match:Token ⊢ tᵢ : σᵢ` checked ONCE, and the fold's result
-    // is the join of the body types. No `parseToFixpoint`, no span re-parsing
-    // of bodies — the spans are captured for the COST PASS's benefit (the
-    // CostPass slices the bodies from the checker's tree; the checker itself
-    // never re-reads them — the evaluator captures its own spans).
+    // is the handlers' COMMON σ (lc.md §5.2b: every body types as `Token → σ`
+    // for one σ; a divergent branch rejects). No `parseToFixpoint`, no span
+    // re-parsing of bodies — the spans are captured for the COST PASS's
+    // benefit (the CostPass slices the bodies from the checker's tree; the
+    // checker itself never re-reads them — the evaluator captures its own
+    // spans).
     //
     // The handler heads are GATED by this override's own handler production
     // (`spanPatternFoldHandler`, below — the checker's production override
@@ -726,13 +730,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      *
      * 1. scrutinee : T — `isSubtype(scrutineeType, T)`.
      * 2. exhaustiveness — every declared pattern of T has a handler, keyed on
-     *    canonical pattern source (the same key the registry's reverse index
-     *    and the evaluator's dispatch use).
+     *    CANONICAL pattern source (the same key the registry's reverse index
+     *    and the evaluator's dispatch use; a raw-spelling key would make
+     *    exhaustiveness depend on which spelling was registered).
      * 3. Nothing propagation — a scrutinee of type Nothing makes the fold
      *    uninhabited (principle of explosion; checked after the structural
      *    premises so a genuine type error is never masked).
-     * 4. the handler bodies' types (already computed under `match : Token` in
-     *    spanPatternFoldHandler) join to σ.
+     * 4. ONE COMMON σ — every handler body (each already checked under
+     *    `match : Token` in spanPatternFoldHandler) types at the SAME
+     *    `Token → σ` (lc.md §5.2b's single-σ conclusion; the preservation
+     *    argument reads that σ). The fold's result is that σ. Exhaustiveness
+     *    with a ≥1-pattern carrier guarantees ≥1 handlers; a zero-pattern
+     *    carrier has no tokens (its fold is unreachable) and rejects here.
      */
     @ensures(
         (
@@ -744,7 +753,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         {
             rule: "T-FoldMatch",
             role: "conclusion",
-            formula: "result : σ (join of handler body types)",
+            formula: "result : σ (the handlers' common Token→σ)",
             production: "patternFoldProd",
         },
     )
@@ -770,17 +779,17 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Premise 3: Nothing propagation (principle of explosion).
         if (scrutineeType instanceof NothingType) return Nothing
 
-        // Premise 4: σ is the join of the handler body types (each checked
-        // under `match : Token`). The join is well-defined over ≥1 handlers —
-        // and ≥1 handlers is guaranteed by exhaustiveness when the carrier
-        // declares ≥1 pattern; a zero-pattern carrier has no tokens (its fold
-        // is unreachable, but vacuously exhaustive — typing it would be a
-        // judgment over an empty handler set, so it rejects here).
+        // Premise 4: ONE COMMON σ — every handler body types at the SAME
+        // `Token → σ` (lc.md §5.2b: `Γ ⊢ tᵢ : Token → σ (for each pattern
+        // pᵢ)` — one σ, not a lattice-joined one; the preservation argument
+        // reads that σ). A branch whose body diverges from the first body's
+        // type rejects the fold (an empty forest — the branch-reject shape,
+        // never a laundered `Any`).
         if (spanHandlers.length === 0) return undefined
 
-        let sigma = spanHandlers[0]!.bodyType
+        const sigma = spanHandlers[0]!.bodyType
         for (let i = 1; i < spanHandlers.length; i++) {
-            sigma = join(sigma, spanHandlers[i]!.bodyType)
+            if (!typeEquals(spanHandlers[i]!.bodyType, sigma)) return undefined
         }
 
         return sigma

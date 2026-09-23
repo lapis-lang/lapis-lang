@@ -19,7 +19,7 @@ const expectedTyping = [
     ["T-App", ["app"], ["fn : σ → τ  ∧  arg <: σ"], ["result : τ"]],
     ["T-Cofold", ["cofold"], [], ["result : σ"]],
     ["T-Fold", ["fold"], [], ["result : σ (join of handler body types)"]],
-    ["T-FoldMatch", ["typePatternFold"], [], ["result : σ (join of handler body types)"]],
+    ["T-FoldMatch", ["typePatternFold"], [], ["result : σ (the handlers' common Token→σ)"]],
     ["T-Let", ["let_"], ["def : σ  ∧  σ <: τ"], ["result : τ'"]],
     ["T-Obs", ["obs"], [], ["result : Gₖ(T)[α:=T]"]],
     ["T-Op", ["opApp"], ["Ω(op) = σ₁→...→σₙ→τ  ∧  arity matches"], ["result : τ"]],

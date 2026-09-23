@@ -375,6 +375,26 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     /**
+     * Extend the context for a pattern-fold handler's fixed `match` binding
+     * (lc.md §5.2b's `tᵢ : Token → σ`). The binding carries the handler's
+     * CANONICAL pattern source alongside the Token type, so a subclass can
+     * bind the TOKEN's identity (its per-pattern size variable
+     * `token(T:<p>)`), not just the kind. The base returns the plain
+     * `extendCtx(ctx, "match", Token)` extension (the checker's shape — the
+     * binding's Γ type is Token); the cost engine overrides this to give the
+     * binding its pattern-specific size identity (the same variable
+     * `matchedPattern`'s cost summary produces — a body that references
+     * `match` keeps the token's size/dispatch identity).
+     */
+    protected patternFoldBinding(
+        ctx: unknown,
+        _dataTypeName: string,
+        _canonicalSource: string,
+    ): unknown {
+        return this.extendCtx(ctx, "match", Token)
+    }
+
+    /**
      * Whether `name` is bound as a TERM VARIABLE in the inherited context
      * (Γ for the type checker, ρ for the evaluator). The base grammar has no
      * term context, so this returns `false`.
@@ -782,7 +802,10 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             if (resolved === undefined || resolved.typeName !== dataType.name) {
                 return empty<{ patternSource: string; body: S["expr"] }>()
             }
-            return this.exprProd(this.extendCtx(ctx, "match", Token))
+            // The body parses under `match : Token` — through the binding
+            // hook, which carries the CANONICAL source (a subclass may bind
+            // the token's identity, not just the type).
+            return this.exprProd(this.patternFoldBinding(ctx, dataType.name, resolved.source))
                 .map((body) => ({ patternSource: resolved.source, body }))
         })
     }

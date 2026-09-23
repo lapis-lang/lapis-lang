@@ -123,23 +123,35 @@ Deno.test("T-FoldMatch: the handler body sees match : Token (the binding is live
     )
 })
 
-Deno.test("T-FoldMatch: multi-handler fold joins the body types (distinct joinables)", () => {
+Deno.test("T-FoldMatch: multi-handler fold requires ONE common result type (lc.md §5.2b)", () => {
     const h = patternHarness([{ name: "NatPat", patterns: ["[0-9]+", "[0-9]*[02468]"] }])
-    // The bodies have DISTINCT types: one returns the token (Token), one a
-    // function over it (Token → Token). The fold's σ is the JOIN — Token →
-    // Token here (Token <: Token → Token is false; Token → Token absorbs via
-    // S-Top) — not simply the first handler's type. Swapping the order must
-    // yield the same σ (join is commutative in this instance).
+    // lc.md §5.2b's rule: every handler body types as `Token → σ` for ONE σ —
+    // NOT a lattice join. Two handlers whose bodies AGREE (both return the
+    // token: Token) type as Token.
     const r1 = typeOfOne(
         h,
-        'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match, match("[0-9]*[02468]") → \\m:Token. m }',
+        'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match, match("[0-9]*[02468]") → match }',
     )
-    const r2 = typeOfOne(
-        h,
-        'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:Token. m, match("[0-9]*[02468]") → match }',
+    assert(r1 instanceof TokenType)
+    // DIVERGENT bodies (one returns the token, one a function over it) reject
+    // the fold — the branch is an empty forest, never a laundered `Any` (the
+    // join-shaped acceptance the rule forbids). BOTH orders are pinned: the
+    // common-type check starts at the FIRST handler's body, and either
+    // direction of divergence must reject.
+    assertEquals(
+        typeOfOne(
+            h,
+            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match, match("[0-9]*[02468]") → \\m:Token. m }',
+        ),
+        undefined,
     )
-    assertEquals(r1?.constructor?.name, r2?.constructor?.name)
-    assert(r1 !== undefined)
+    assertEquals(
+        typeOfOne(
+            h,
+            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:Token. m, match("[0-9]*[02468]") → match }',
+        ),
+        undefined,
+    )
 })
 
 Deno.test("T-FoldMatch: exhaustiveness — a missing declared pattern rejects", () => {
@@ -313,19 +325,28 @@ Deno.test("E-FoldMatch: the token dispatches to its handler and binds match", ()
     assertEquals(tok.text, "[0-9]+")
 })
 
-Deno.test("E-FoldMatch: each declared pattern routes to its own handler", () => {
+Deno.test("E-FoldMatch: each declared pattern routes to its own handler (identity observed)", () => {
     const h = patternHarness([{ name: "NatPat", patterns: ["[0-9]+", "[0-9]*[02468]"] }])
-    // Both patterns' tokens evaluate: dispatch keys the canonical source.
+    // lc.md §5.2b demands ONE common result type, so the two bodies cannot
+    // return differently-TYPED results — the distinguishing observation is
+    // the RETURNED TOKEN's text: each body produces a FRESH token whose
+    // canonical source is its own head's pattern, so a first-handler-always
+    // dispatch would return the [0-9]+ token for BOTH scrutinees and fail
+    // the identity assertion below.
     const r1 = evalOne(
         h,
-        'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:Token. m, match("[0-9]*[02468]") → \\m:Token. m }',
+        'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match("[0-9]+"), match("[0-9]*[02468]") → match("[0-9]*[02468]") }',
     )
     const r2 = evalOne(
         h,
-        'fold [NatPat] match("[0-9]*[02468]") { match("[0-9]+") → \\m:Token. m, match("[0-9]*[02468]") → \\m:Token. m }',
+        'fold [NatPat] match("[0-9]*[02468]") { match("[0-9]+") → match("[0-9]+"), match("[0-9]*[02468]") → match("[0-9]*[02468]") }',
     )
-    assert(r1 !== undefined && !(r1 instanceof EvalErrorValue))
-    assert(r2 !== undefined && !(r2 instanceof EvalErrorValue))
+    assert(r1 instanceof TokenVal)
+    assert(r2 instanceof TokenVal)
+    // The returned token NAMES THE FIRED ARM: the [0-9]+ scrutinee routes to
+    // the [0-9]+ body, the [0-9]*[02468] scrutinee to its own.
+    assertEquals((r1 as TokenVal).text, "[0-9]+")
+    assertEquals((r2 as TokenVal).text, "[0-9]*[02468]")
 })
 
 Deno.test("E-FoldMatch: canonical spellings dispatch equally", () => {
