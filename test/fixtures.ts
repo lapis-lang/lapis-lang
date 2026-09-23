@@ -357,3 +357,24 @@ export function createPatternType(
         patternSources.map((source) => parsePattern(source)),
     )
 }
+
+// ── Mixed-carrier factory ────────────────────────────────────────────────────
+
+/**
+ * Constructs a MIXED data carrier — a `DataType` declaring both named
+ * variants and pattern members from pattern SOURCE strings (parsed through
+ * `parsePattern`, the same shape the declaration machinery produces). The
+ * mixed form is the Stage-1 additive carrier: the same `DataType` builder
+ * carries both member kinds, so a mixed type is reachable from the variant
+ * dispatches AND the token/pattern dispatches.
+ */
+export function createMixedType(
+    name: string,
+    variants: readonly Variant[],
+    patternSources: readonly string[],
+): DataType {
+    return DataType.define(name)
+        .addVariant(...variants)
+        .addPattern(...patternSources.map((source) => parsePattern(source)))
+        .build()
+}

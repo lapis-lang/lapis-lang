@@ -108,6 +108,7 @@ import {
     DataType,
     FamilyType,
     Field,
+    isPatternCarrierType,
     PatternDataType,
     type RequiredCases,
     Type,
@@ -1587,13 +1588,13 @@ class CostEngine extends AbstractLC<CostShape> {
      * step, no recursion): the token scrutinee dispatches to ONE handler,
      * whose body runs once. The cost is the scrutinee's cost plus that
      * handler's cost; there is no invocation count, no `#foldRec` variable,
-     * no recurrence — a `PatternDataType` has no fields, so nothing
+     * no recurrence — a pattern arm binds no fields, so nothing
      * substitutes. The records ride along from the scrutinee AND the fired
      * handler (the same record-carrying discipline the variant fold
      * applies); the token edge records the dispatch.
      */
     protected override patternFold(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         scrutinee: CostSummary,
         handlers: { patternSource: string; body: CostSummary }[],
         _resultType: Type,
@@ -2629,8 +2630,8 @@ export class CostPass extends SemanticPass<CostPassShape> {
 
     /**
      * patternFoldProd: the pattern-matched fold's assembly from the tree's
-     * records: the carrier (the typeProd descendant's value — a
-     * PatternDataType), the scrutinee (the first expr child), the handler
+     * records: the carrier (the typeProd descendant's value — a pattern
+     * carrier), the scrutinee (the first expr child), the handler
      * records (patternSource/bodySpan). The fired handler's body re-reads
      * from its span through the shared engine under the AMBIENT environment
      * extended with the token denotation (`match` bound — the engine's own
@@ -2655,7 +2656,10 @@ export class CostPass extends SemanticPass<CostPassShape> {
                 ? undefined
                 : this.registry.lookup(carrierName)
             const scrutineeSummary = scrutinee === undefined ? emptySummary() : scrutinee(env)
-            if (!(patternType instanceof PatternDataType)) {
+            // The assembly accepts a pattern carrier only (the shared guard —
+            // the ONE member-shape definition); anything else falls through
+            // to the child flow.
+            if (!isPatternCarrierType(patternType)) {
                 return childFlow === undefined ? scrutineeSummary : childFlow(env)
             }
             const records = collectDescendants(node, "spanPatternFoldHandler")

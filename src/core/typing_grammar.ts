@@ -37,7 +37,6 @@
  */
 
 import {
-    assert,
     char,
     empty,
     ensures,
@@ -57,6 +56,7 @@ import {
     DataType,
     FamilyType,
     FunType,
+    isPatternCarrierType,
     Nothing,
     NothingType,
     PatternDataType,
@@ -587,7 +587,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * the abstract-action contract.
      */
     protected patternFold(
-        _dataType: PatternDataType,
+        _dataType: PatternDataType | DataType,
         _scrutinee: Type,
         _handlers: { patternSource: string; body: Type }[],
         _resultType: Type,
@@ -634,11 +634,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            // Premise: the annotation must be a PatternDataType. A wrong-kind
-            // annotation rejects the branch (`empty<Type>()`) like any other
-            // failed premise — an `assert` here would throw out of the parse
-            // instead of rejecting it.
-            if (!(ty instanceof PatternDataType)) {
+            // Premise: the annotation must be a pattern carrier — a
+            // PatternDataType, or a DataType whose declaration (through its
+            // parent chain — comb inheritance) carries pattern members (the
+            // mixed carrier). A wrong-kind annotation rejects the branch
+            // (`empty<Type>()`) like any other failed premise — an `assert`
+            // here would throw out of the parse instead of rejecting it. The
+            // shared guard is the ONE member-shape definition.
+            if (!isPatternCarrierType(ty)) {
                 return empty<Type>()
             }
             const patternType = ty
@@ -674,7 +677,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // match("pᵢ") → tᵢ, ...  — pattern-fold handlers (span-captured)
     @rule
     protected spanPatternFoldHandlers(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: TypeCheckCtx,
     ): Parser<SpanPatternFoldHandler[]> {
         return sepBy(
@@ -694,7 +697,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     // override's spanFoldHandler applies).
     @rule
     protected spanPatternFoldHandler(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: TypeCheckCtx,
     ): Parser<SpanPatternFoldHandler> {
         return seq(
@@ -746,7 +749,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     @ensures(
         (
             _self: LCTypeCheck,
-            _args: [PatternDataType, Type, SpanPatternFoldHandler[]],
+            _args: [PatternDataType | DataType, Type, SpanPatternFoldHandler[]],
             _old,
             result: Type | undefined,
         ) => result === undefined || isWellFormedType(result),
@@ -758,7 +761,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         },
     )
     private typePatternFold(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         scrutineeType: Type,
         spanHandlers: SpanPatternFoldHandler[],
     ): Type | undefined {
@@ -769,8 +772,13 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Keyed on CANONICAL source (patternToString), the same normalization
         // the registry's reverse index and the handler gate apply: a raw
         // spelling key would make exhaustiveness depend on which spelling was
-        // registered.
-        const declared = dataType.patterns.map((p) => patternToString(p))
+        // registered. The declared set reads the PARENT CHAIN where the
+        // carrier is a DataType (allPatterns — comb inheritance, the same
+        // member set the registry indexes: a comb child whose parent declared
+        // a pattern owes it a handler too); a PatternDataType has no parent
+        // chain, so its own slot is the whole language.
+        const declared = (dataType instanceof DataType ? dataType.allPatterns() : dataType.patterns)
+            .map((p) => patternToString(p))
         const handlerSources = new Set(spanHandlers.map((h) => h.patternSource))
         for (const source of declared) {
             if (!handlerSources.has(source)) return undefined
@@ -1593,10 +1601,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      */
     protected matchedToken(dataTypeName: string, _text: string): Type {
         const resolved = this.registry.lookup(dataTypeName)
-        assert(
-            resolved instanceof PatternDataType,
-            `matchedToken premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the token gate (patternTokenProd) must be consulted before this action`,
-        )
+        // The dual-accept premise: a registered PatternDataType, or a data
+        // type whose declaration (through its parent chain — comb
+        // inheritance) carries pattern members. A violation is a caller bug —
+        // the token gate (patternTokenProd) must be consulted before this
+        // action. The shared type guard both throws AND narrows: the return
+        // needs no cast, so a future change to `lookup`'s union surfaces as a
+        // compile error here, not as a silent widening.
+        if (!isPatternCarrierType(resolved)) {
+            throw new Error(
+                `matchedToken premise violated: "${dataTypeName}" does not resolve to a registered pattern carrier — the token gate (patternTokenProd) must be consulted before this action`,
+            )
+        }
         return resolved
     }
 
@@ -1627,10 +1643,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         _rawSource: string,
     ): Type {
         const resolved = this.registry.lookup(dataTypeName)
-        assert(
-            resolved instanceof PatternDataType,
-            `matchedPattern premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the pattern gate (patternMatchProd) must be consulted before this action`,
-        )
+        // The dual-accept premise (the pattern gate's walk already proved the
+        // pattern is DECLARED on the carrier): a registered PatternDataType,
+        // or a data type whose declaration (through its parent chain) carries
+        // pattern members. A violation is a caller bug — the pattern gate
+        // (patternMatchProd) must be consulted before this action. The shared
+        // type guard both throws AND narrows — no cast (the same
+        // compile-error-not-silent-widening discipline matchedToken applies).
+        if (!isPatternCarrierType(resolved)) {
+            throw new Error(
+                `matchedPattern premise violated: "${dataTypeName}" does not resolve to a registered pattern carrier — the pattern gate (patternMatchProd) must be consulted before this action`,
+            )
+        }
         return resolved
     }
 

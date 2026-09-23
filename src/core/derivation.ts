@@ -413,7 +413,7 @@ class DerivationReader extends AbstractLC<ReaderShape> {
      * is future work for the derivation engine, not this rule.
      */
     protected override patternFold(
-        _dataType: PatternDataType,
+        _dataType: PatternDataType | DataType,
         _scrutinee: Term,
         _handlers: { patternSource: string; body: Term }[],
         _resultType: Type,

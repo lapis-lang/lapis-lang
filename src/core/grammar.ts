@@ -79,6 +79,7 @@ import {
     DataType,
     Field,
     FunType,
+    isPatternCarrierType,
     Nothing,
     PatternDataType,
     Token,
@@ -184,7 +185,25 @@ export class TypeRegistry {
     private readonly types = new Map<string, DataType | CodataType | PatternDataType>()
     private readonly variantIndex = new Map<string, DataType>()
     private readonly observerIndex = new Map<string, CodataType>()
-    private readonly patternIndex = new Map<string, PatternDataType>()
+    private readonly patternIndex = new Map<string, DataType | PatternDataType>()
+
+    /**
+     * The registered type's DECLARED patterns as CANONICAL sources — the
+     * indexing vocabulary, defined in exactly one place. A `DataType` walks
+     * `allPatterns()` (the parent chain — comb inheritance: a comb child
+     * whose PARENT declared the pattern is equally a declaring carrier,
+     * mirroring the variant walk's `allVariants()`); a `PatternDataType` has
+     * no parent chain, so its own slot is the whole language. Rendering
+     * through `patternToString` (the round-trip normalization) is part of
+     * this contract: every index key is canonical, so the reverse lookup and
+     * the term gates agree on the identity without per-site normalization.
+     */
+    private canonicalPatternSourcesOf(
+        type: DataType | PatternDataType,
+    ): readonly string[] {
+        const declared = type instanceof DataType ? type.allPatterns() : type.patterns
+        return declared.map((p) => patternToString(p))
+    }
 
     /**
      * Register a type. A type whose NAME is already registered is rejected —
@@ -213,15 +232,18 @@ export class TypeRegistry {
             }
         }
         // Index patterns for reverse lookup: the pattern's canonical source
-        // (patternToString — the round-trip normalization) maps to its type.
-        // A source already indexed is LEFT at its first declaration — matching
-        // the lexer's declaration-order tie-break; a later type declaring the
-        // identical pattern is shadowed (two types declaring the same pattern
-        // is an ambiguity the surface declaration machinery must reject; at
-        // the core layer the first declaration wins, deterministically).
-        if (type instanceof PatternDataType) {
-            for (const pattern of type.patterns) {
-                const source = patternToString(pattern)
+        // (the shared `canonicalPatternSourcesOf` vocabulary) maps to its
+        // type. A source already indexed is LEFT at its first declaration —
+        // matching the lexer's declaration-order tie-break; a later type
+        // declaring the identical pattern is shadowed (two types declaring
+        // the same pattern is an ambiguity the surface declaration machinery
+        // must reject; at the core layer the first declaration wins,
+        // deterministically).
+        // A mixed carrier indexes BOTH its member kinds: the variant walk
+        // above AND the pattern walk here — a mixed `data Color { Red,
+        // Green, Blue, #[A-F0-9]{6} }` is reachable from both dispatches.
+        if (type instanceof DataType || type instanceof PatternDataType) {
+            for (const source of this.canonicalPatternSourcesOf(type)) {
                 if (!this.patternIndex.has(source)) {
                     this.patternIndex.set(source, type)
                 }
@@ -244,7 +266,7 @@ export class TypeRegistry {
     }
 
     /**
-     * Reverse lookup: find the PatternDataType that declares a pattern by its
+     * Reverse lookup: find the type that declares a pattern by its
      * canonical source. The key is `patternToString`'s rendering (the
      * round-trip normalization), so a caller's source string must be in the
      * same canonical form — the `match("…")` form's payload parses through
@@ -253,8 +275,10 @@ export class TypeRegistry {
      *
      * Returns the FIRST type that declared the pattern (registration order —
      * the lexer's declaration-order tie-break, `surface-syntax.md` §1.3).
+     * A `DataType` whose declaration carries pattern members resolves here
+     * too (Stage-1: the two carrier shapes coexist until absorption).
      */
-    lookupPatternSource(patternSource: string): PatternDataType | undefined {
+    lookupPatternSource(patternSource: string): DataType | PatternDataType | undefined {
         return this.patternIndex.get(patternSource)
     }
 }
@@ -337,7 +361,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
      * the body, exactly as `foldHandler` extends with field types.
      */
     protected abstract patternFold(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         scrutinee: S["expr"],
         handlers: { patternSource: string; body: S["expr"] }[],
         resultType: Type,
@@ -723,10 +747,14 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            // The annotation must be a PatternDataType — the wrong-kind branch
-            // rejects (the caller falls through to `foldProd`'s reading; a
-            // failed premise is `empty`, never a throw out of the parse).
-            if (!(ty instanceof PatternDataType)) {
+            // The annotation must be a pattern carrier — a PatternDataType
+            // or a DataType whose declaration (through its parent chain —
+            // comb inheritance) carries pattern members (the mixed carrier;
+            // its pattern arms are this branch's to parse). The wrong-kind
+            // branch rejects (the caller falls through to `foldProd`'s
+            // reading; a failed premise is `empty`, never a throw out of the
+            // parse). The shared guard is the ONE member-shape definition.
+            if (!isPatternCarrierType(ty)) {
                 return empty<S["expr"]>()
             }
             const patternType = ty
@@ -754,7 +782,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // Pattern-fold handlers: match("pᵢ") → tᵢ, ...
     @rule
     protected patternFoldHandlers(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: unknown,
     ): Parser<{ patternSource: string; body: S["expr"] }[]> {
         return sepBy(
@@ -784,7 +812,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // scope is shadowed for the body, the usual lexical rule.
     @rule
     protected patternFoldHandler(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: unknown,
     ): Parser<{ patternSource: string; body: S["expr"] }> {
         return seq(
@@ -1068,7 +1096,13 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
                 return empty<S["atom"]>()
             }
             const resolved = this.registry.lookup(name)
-            if (!(resolved instanceof PatternDataType)) {
+            // The dual-accept gate: a registered PatternDataType, or a data
+            // type whose declaration (through its parent chain — comb
+            // inheritance) carries pattern members (a mixed carrier's token
+            // atom reads as its token — the same reading PatternDataType's
+            // atoms took). A variant-only carrier is not a token type. The
+            // shared guard is the ONE member-shape definition.
+            if (!isPatternCarrierType(resolved)) {
                 return empty<S["atom"]>()
             }
             return epsilon(name).map(() => this.matchedToken(name, name))
@@ -1217,17 +1251,27 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
                 if (seen.has(ast.name)) return true
                 seen.add(ast.name)
                 const resolved = this.registry.lookup(ast.name)
-                if (!(resolved instanceof PatternDataType)) {
+                if (!isPatternCarrierType(resolved)) {
                     // An unresolvable reference: no registered type owns the
-                    // name — the language is unknowable (the constructor
+                    // name (or the named type declares no patterns — a
+                    // variant-only carrier's name is not a pattern language)
+                    // — the language is unknowable (the constructor
                     // would be accepted with a language the registry cannot
-                    // enumerate).
+                    // enumerate). The shared guard is the ONE member-shape
+                    // definition.
                     return false
                 }
                 // The reference's language is the target's: anchored iff the
                 // target's declared patterns all are (the transitive
-                // obligation — a chain ending in `.` is unanchored).
-                return resolved.patterns.every((p) => this.isResolvableAndAnchored(p, seen))
+                // obligation — a chain ending in `.` is unanchored). The walk
+                // reads the PARENT CHAIN where the target is a DataType
+                // (allPatterns — a comb child's inherited patterns anchor
+                // through it too); a PatternDataType has no parent chain, so
+                // its own slot is the whole language.
+                const declared = resolved instanceof DataType
+                    ? resolved.allPatterns()
+                    : resolved.patterns
+                return declared.every((p) => this.isResolvableAndAnchored(p, seen))
             }
         }
     }

@@ -57,7 +57,15 @@ import {
     type Span,
 } from "@lapis-lang/lang-forma"
 
-import { Any, CodataType, DataType, FamilyType, PatternDataType, type Type } from "./types.ts"
+import {
+    Any,
+    CodataType,
+    DataType,
+    FamilyType,
+    isPatternCarrierType,
+    PatternDataType,
+    type Type,
+} from "./types.ts"
 
 import { type OpSig } from "./ops.ts"
 
@@ -569,11 +577,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            // The annotation must be a PatternDataType. A wrong-kind annotation
-            // rejects the branch (`empty<Value>()`) like any other failed step
-            // — a throw here would surface as a crash instead of a clean parse
-            // rejection.
-            if (!(ty instanceof PatternDataType)) {
+            // The annotation must be a pattern carrier — a PatternDataType,
+            // or a DataType whose declaration (through its parent chain —
+            // comb inheritance) carries pattern members (the mixed carrier).
+            // A wrong-kind annotation rejects the branch (`empty<Value>()`)
+            // like any other failed step — a throw here would surface as a
+            // crash instead of a clean parse rejection. The shared guard is
+            // the ONE member-shape definition.
+            if (!isPatternCarrierType(ty)) {
                 return empty<Value>()
             }
             const patternType = ty
@@ -602,7 +613,7 @@ export class LCEval extends AbstractLC<EvalShape> {
     // match("pᵢ") → tᵢ, ...  — pattern-fold handlers (span-captured for _forward)
     @rule
     protected spanPatternFoldHandlers(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: unknown,
     ): Parser<SpanPatternFoldHandler[]> {
         return sepBy(
@@ -620,7 +631,7 @@ export class LCEval extends AbstractLC<EvalShape> {
     // evaluator's dispatch keys canonical form.
     @rule
     protected spanPatternFoldHandler(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         ctx: unknown,
     ): Parser<SpanPatternFoldHandler> {
         return seq(
@@ -670,7 +681,7 @@ export class LCEval extends AbstractLC<EvalShape> {
      * pinned T-Pattern behavior.
      */
     private evalPatternFold(
-        dataType: PatternDataType,
+        dataType: PatternDataType | DataType,
         scrutinee: Value,
         handlers: SpanPatternFoldHandler[],
         ambientEnv: ValueEnv,
