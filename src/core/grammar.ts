@@ -233,22 +233,58 @@ export class TypeRegistry {
         }
         // Index patterns for reverse lookup: the pattern's canonical source
         // (the shared `canonicalPatternSourcesOf` vocabulary) maps to its
-        // type. A source already indexed is LEFT at its first declaration —
-        // matching the lexer's declaration-order tie-break; a later type
-        // declaring the identical pattern is shadowed (two types declaring
-        // the same pattern is an ambiguity the surface declaration machinery
-        // must reject; at the core layer the first declaration wins,
-        // deterministically).
+        // type. Two claim disciplines meet here, and the INHERITANCE one
+        // wins: a subtype carrier RE-CLAIMS a pattern its lineage declares,
+        // replacing an ancestor's index entry — the index owner is the
+        // MOST-SPECIFIC registered carrier, so `match("…")` for an inherited
+        // pattern introduces a token of the most specific registered carrier
+        // (the comb subtyping direction makes that token valid everywhere
+        // the ancestor's would be: child <: parent). A NON-lineage collision
+        // (two unrelated types declaring the identical pattern) keeps the
+        // first-declaration tie-break — the ambiguity the surface
+        // declaration machinery must reject; at the core layer the first
+        // declaration wins, deterministically. The lineage test (is the
+        // previous owner an ancestor of the new registrant?) is what
+        // separates an inheritance re-claim from a genuine collision.
         // A mixed carrier indexes BOTH its member kinds: the variant walk
         // above AND the pattern walk here — a mixed `data Color { Red,
         // Green, Blue, #[A-F0-9]{6} }` is reachable from both dispatches.
         if (type instanceof DataType || type instanceof PatternDataType) {
             for (const source of this.canonicalPatternSourcesOf(type)) {
-                if (!this.patternIndex.has(source)) {
+                const existing = this.patternIndex.get(source)
+                if (existing === undefined) {
+                    this.patternIndex.set(source, type)
+                    continue
+                }
+                // Re-claim: the new registrant is a DESCENDANT of the
+                // indexed owner (the owner's lineage contains the pattern
+                // AND the new type's chain passes through it) — the most
+                // specific carrier takes ownership, so the introduction
+                // form's carrier name follows the term's expected carrier.
+                // Anything else (a sibling collision) leaves the first
+                // declaration standing.
+                if (
+                    type instanceof DataType && existing instanceof DataType &&
+                    this.isAncestorOf(existing, type)
+                ) {
                     this.patternIndex.set(source, type)
                 }
             }
         }
+    }
+
+    /**
+     * Whether `ancestor` is in `type`'s parent chain — the lineage test the
+     * pattern re-claim applies (a subtype's registration re-points inherited
+     * patterns to itself; a collision between unrelated carriers does not
+     * re-point). Chain identity is object identity (`parent` links are
+     * published instances).
+     */
+    private isAncestorOf(ancestor: DataType, type: DataType): boolean {
+        for (let p = type.parent; p !== null; p = p.parent) {
+            if (p === ancestor) return true
+        }
+        return false
     }
 
     lookup(name: string): DataType | CodataType | PatternDataType | undefined {
@@ -273,13 +309,41 @@ export class TypeRegistry {
      * `parsePattern` and compares canonically, so two spellings of one AST
      * (`[0123456789]` and `[0-9]`) agree.
      *
-     * Returns the FIRST type that declared the pattern (registration order —
+     * Returns the FIRST type that registered the pattern (registration order —
      * the lexer's declaration-order tie-break, `surface-syntax.md` §1.3).
      * A `DataType` whose declaration carries pattern members resolves here
      * too (Stage-1: the two carrier shapes coexist until absorption).
+     *
+     * The returned owner is the INDEX owner — the registration-order pick —
+     * NOT necessarily the carrier a term's fold names: a comb child whose
+     * PARENT declared the pattern inherits it (`allPatterns`), so
+     * pattern-carrier MEMBERSHIP on a specific carrier is answered by
+     * `declaresPattern` below. Consumers that ask "which type owns this
+     * pattern" (the introduction form's carrier name) read the index;
+     * consumers that ask "can THIS carrier handle this pattern" (the fold
+     * handler gates) read the lineage predicate — the two questions have
+     * different answers under comb inheritance, and conflating them is what
+     * breaks a child-carrier fold over an inherited pattern.
      */
     lookupPatternSource(patternSource: string): DataType | PatternDataType | undefined {
         return this.patternIndex.get(patternSource)
+    }
+
+    /**
+     * Whether the given carrier's lineage DECLARES the pattern — the
+     * membership test the fold-path gates read. A carrier handles an
+     * inherited pattern: its own slot, or any ancestor's (the same chain
+     * `allPatterns` walks, and the same rule the variant fold applies —
+     * `findVariant` searches the parent chain, so a comb child's fold
+     * handles an inherited variant; the pattern side must agree). The
+     * `PatternDataType` arm is exact: its own slot is its whole language.
+     * The canonical comparison mirrors the index's key normalization.
+     */
+    declaresPattern(type: DataType | PatternDataType, canonicalSource: string): boolean {
+        if (type instanceof PatternDataType) {
+            return type.patterns.some((p) => patternToString(p) === canonicalSource)
+        }
+        return type.findPattern(canonicalSource) !== undefined
     }
 }
 
@@ -827,7 +891,17 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.ws,
         ).bind(([, , , patternSource]) => {
             const resolved = this.patternTypeName(patternSource as string)
-            if (resolved === undefined || resolved.typeName !== dataType.name) {
+            // The handler-head premise: the pattern is declared on THIS fold's
+            // carrier — through the LINEAGE, not just the index owner. A comb
+            // child's fold handles a pattern its PARENT declared (the same
+            // rule `findVariant` gives the variant fold); a pattern owned by
+            // an unrelated registered type is unmatchable and rejects. Keying
+            // on the index owner's NAME alone would deny the child its own
+            // inherited members whenever the parent registered first.
+            if (
+                resolved === undefined ||
+                !this.registry.declaresPattern(dataType, resolved.source)
+            ) {
                 return empty<{ patternSource: string; body: S["expr"] }>()
             }
             // The body parses under `match : Token` — through the binding

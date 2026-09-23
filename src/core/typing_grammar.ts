@@ -712,7 +712,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             this.ws,
         ).bind(([, , , patternSource]) => {
             const resolved = this.patternTypeName(patternSource as string)
-            if (resolved === undefined || resolved.typeName !== dataType.name) {
+            // The handler-head premise reads the LINEAGE (the same rule the
+            // variant fold's `findVariant` applies): a comb child's fold
+            // handles a pattern its parent declared. Keying on the index
+            // owner's name alone would deny the child its inherited members.
+            if (
+                resolved === undefined ||
+                !this.registry.declaresPattern(dataType, resolved.source)
+            ) {
                 return empty<SpanPatternFoldHandler>()
             }
             // The body's context: `match : Token` (the fixed binding,

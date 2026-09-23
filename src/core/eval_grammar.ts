@@ -67,6 +67,8 @@ import {
     type Type,
 } from "./types.ts"
 
+import { patternToString } from "./pattern_lang.ts"
+
 import { type OpSig } from "./ops.ts"
 
 import { AbstractLC, type LCShape } from "./grammar.ts"
@@ -646,7 +648,14 @@ export class LCEval extends AbstractLC<EvalShape> {
             this.ws,
         ).bind(([, , , patternSource]) => {
             const resolved = this.patternTypeName(patternSource as string)
-            if (resolved === undefined || resolved.typeName !== dataType.name) {
+            // The handler-head premise reads the LINEAGE (the same rule the
+            // variant fold's `findVariant` applies): a comb child's fold
+            // handles a pattern its parent declared. Keying on the index
+            // owner's name alone would deny the child its inherited members.
+            if (
+                resolved === undefined ||
+                !this.registry.declaresPattern(dataType, resolved.source)
+            ) {
                 return empty<SpanPatternFoldHandler>()
             }
             return this.exprProd(ctx)
@@ -689,7 +698,22 @@ export class LCEval extends AbstractLC<EvalShape> {
         if (!(scrutinee instanceof TokenVal)) {
             return EVAL_ERROR("pattern fold scrutinee is not a TokenVal")
         }
-        if (scrutinee.dataTypeName !== dataType.name) {
+        // The carrier check reads the LINEAGE, not just the name: the token's
+        // `dataTypeName` is the introduction form's resolved OWNER (the index
+        // pick — a comb child's inherited pattern introduces a PARENT-named
+        // token), so a name-equality check alone would reject a legitimate
+        // `fold [Child] <inherited-token>` (the same asymmetry the handler
+        // gates widened to `declaresPattern` — the fold path's carrier
+        // membership is lineage-wide). The introduction gate already proved
+        // the pattern is declared on SOME registered carrier; this check
+        // proves the fold's carrier is that carrier OR ITS LINEAGE.
+        const tokenOwner = this.registry.lookup(scrutinee.dataTypeName)
+        const carrierHandles = tokenOwner !== undefined &&
+            (scrutinee.dataTypeName === dataType.name ||
+                (tokenOwner instanceof DataType &&
+                    dataType instanceof DataType &&
+                    tokenOwner.allPatterns().some((p) => patternToString(p) === scrutinee.text)))
+        if (!carrierHandles) {
             return EVAL_ERROR(
                 `token type ${scrutinee.dataTypeName} does not match fold carrier ${dataType.name}`,
             )

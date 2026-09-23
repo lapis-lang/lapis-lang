@@ -3014,10 +3014,13 @@ function foldSummaryFrom(
  * EVERY handler conservatively (the over-approximation discipline the
  * variant fold applies to non-uniform handlers — a false precise bound would
  * be worse than a sound over-charge). No `#foldRec`, no recurrence — a
- * `PatternDataType` has no fields, so nothing substitutes.
+ * pattern arm binds no fields, so nothing substitutes. The carrier is the
+ * pattern-carrier union (the same shape the engine's own patternFold action
+ * accepts): the composition reads only the NAME (dispatch keys, edge
+ * labels), so both shapes flow through one helper.
  */
 function patternFoldSummaryFrom(
-    dataType: PatternDataType,
+    dataType: PatternDataType | DataType,
     scrutinee: CostSummary,
     handlers: { patternSource: string; body: CostSummary }[],
 ): CostSummary {

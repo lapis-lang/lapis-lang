@@ -128,6 +128,68 @@ Deno.test("mixed carrier: a parent-declared pattern indexes on the child (comb i
     )
 })
 
+Deno.test("mixed carrier: inherited pattern owner is registration-ORDER independent (both carriers registered)", () => {
+    // Registration order must not decide the inherited pattern's owner: the
+    // index owner is the MOST-SPECIFIC registered carrier (the subtype
+    // re-claims a lineage pattern, replacing an ancestor's entry), so
+    // `match("…")` for an inherited pattern names the child — the carrier
+    // the term's fold expects — regardless of whether the parent or the
+    // child registered first. A non-lineage collision (two unrelated
+    // carriers declaring the identical pattern) keeps the first-declaration
+    // tie-break; the lineage test (`isAncestorOf`) separates the two.
+    const parent = DataType.define("BaseColor")
+        .addPattern(parsePattern(HEX6))
+        .build()
+    const child = DataType.define("ChildColor", parent)
+        .addVariant(new Variant("Red", []))
+        .build()
+    const foldSrc = `fold [ChildColor] match("${HEX6}") { match("${HEX6}") → match }`
+    for (
+        const order of [["parent-first", parent, child], ["child-first", child, parent]] as const
+    ) {
+        const [label, first, second] = order
+        const registry = new TypeRegistry()
+        registry.register(first)
+        registry.register(second)
+        const opRegistry = new OpRegistry()
+        const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
+        const ev = new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+        // The child (the most specific registered carrier) owns the entry in
+        // BOTH orders — the introduction form's carrier name follows the
+        // fold's expected carrier, not the registration order.
+        assertEquals(registry.lookupPatternSource(HEX6), child, `${label}: owner`)
+        // The child-carrier fold over the inherited pattern types, evaluates,
+        // and dispatches end-to-end.
+        assertEquals(
+            [...tc.parseWith(foldSrc, new TypeEnv())].length,
+            1,
+            `${label}: the child-carrier fold type-checks`,
+        )
+        assert(
+            [...ev.parseWith(foldSrc, new ValueEnv())][0] instanceof TokenVal,
+            `${label}: the child-carrier fold evaluates`,
+        )
+        // The PARENT's fold still handles the pattern (its lineage declares
+        // it; the child-named token is a subtype of the parent, so premise 1
+        // passes and the evaluator's lineage check admits the dispatch).
+        const parentFold = `fold [BaseColor] match("${HEX6}") { match("${HEX6}") → match }`
+        assertEquals(
+            [...tc.parseWith(parentFold, new TypeEnv())].length,
+            1,
+            `${label}: the parent-carrier fold still type-checks`,
+        )
+    }
+    // The sibling collision keeps first-declaration-wins: two UNRELATED
+    // carriers declaring the identical pattern do not re-point each other
+    // (the re-claim is lineage-scoped).
+    const u1 = DataType.define("Unrelated1").addPattern(parsePattern("[0-9]+")).build()
+    const u2 = DataType.define("Unrelated2").addPattern(parsePattern("[0-9]+")).build()
+    const collision = new TypeRegistry()
+    collision.register(u1)
+    collision.register(u2)
+    assertEquals(collision.lookupPatternSource("[0-9]+"), u1)
+})
+
 Deno.test("mixed carrier: a variant-only carrier's name is not a pattern language", () => {
     // A `DataType` with NO pattern members must NOT gate the pattern routes:
     // its name is an ordinary variant carrier. The anchoring walk's typeref

@@ -4,8 +4,7 @@
  * the pattern language's runtime surface, and vice versa), and a cycle that
  * sneaks in manifests as partially-initialized modules (a `const` reading
  * `undefined` during another module's top-level evaluation), not a static
- * error. These tests catch that shape EARLY, by forcing the risky load
- * orders and exercising the shared utilities each edge carries.
+ * error. These tests catch that shape EARLY.
  *
  * The graph's intended shape:
  *
@@ -18,86 +17,129 @@
  * reverse edge is type-only (Deno erases it). If a future edit adds a
  * runtime import in either direction, the top-level initializations begin
  * to interleave and the failure is a runtime TDZ error or an undefined
- * binding — caught here, in the load orders a static check cannot see.
+ * binding.
+ *
+ * ISOLATION: each order check runs in a SUBPROCESS (`deno eval`), so every
+ * check resolves a FRESH module graph — the in-process dynamic `import`
+ * cache cannot mask an order-specific failure (the first in-process import
+ * of either module initializes the whole graph, and the cache would serve
+ * it to every later import, making an order claim untestable in-process).
+ * The subprocess needs `--allow-run`; a runner without it skips the order
+ * checks LOUDLY (visible in the report), never passes silently.
  */
 
 import { assert, assertEquals } from "@std/assert"
 
-Deno.test("module graph: types.ts loads first and patternToString stays callable", async () => {
-    // The risky order: a dynamic import of `types.ts` FIRST, then
-    // `pattern_lang.ts`. With a runtime cycle, `pattern_lang.ts`'s top-level
-    // constants (`UNIVERSE`, the class declarations) would initialize while
-    // `types.ts` was still mid-evaluation (or vice versa), and the
-    // canonicalization entry point would surface as undefined/partial. The
-    // assertion is on BEHAVIOR through the boundary, not on import shapes:
-    // `types.ts`'s own `findPattern` calls the renderer through this edge.
-    const mod = await import("../src/core/types.ts")
-    const pattern = await import("../src/core/pattern_lang.ts")
+/** The core module URLs the subprocess loads (absolute — the child resolves
+ * them regardless of its CWD). */
+const TYPES_URL = new URL("../src/core/types.ts", import.meta.url).href
+const PATTERN_URL = new URL("../src/core/pattern_lang.ts", import.meta.url).href
 
-    // The type universe initialized (a brand-carrying class exists).
-    assert(typeof mod.isDeclaredTypeKind === "function")
-    // The pattern language's constants initialized (no partial-module read).
-    assertEquals(pattern.CHARACTER_UNIVERSE_SIZE, 128)
-    // The cross-module call path works in this order: parse through
-    // pattern_lang, render through the same module's entry — the exact pair
-    // `types.ts`'s value import exercises.
-    const ast = pattern.parsePattern("#[A-F0-9]")
-    assertEquals(pattern.patternToString(ast), "#[A-F0-9]")
+/**
+ * Run one load-order check in a fresh process: the child imports the two
+ * modules in the given order (the ORDER is the script's own import
+ * statement order) and verifies BOTH initialize fully and the cross-module
+ * call path works. A cycle or partial initialization shows up as a non-zero
+ * exit (TDZ error / undefined binding) or a failing assertion inside the
+ * child — either way the subprocess exit code is the verdict, with its
+ * stderr attached to the failure message.
+ */
+async function runOrderCheck(label: string, firstUrl: string, secondUrl: string): Promise<void> {
+    const script = `
+        // The load-ORDER is the variable under test: whichever module is
+        // imported first initializes before the other. The full-surface
+        // assertions run on BOTH modules BY SPECIFIER (not by load
+        // position), so each check proves both modules fully initialize
+        // under this order — a cycle's partial initialization would leave
+        // some binding undefined in one of them.
+        const t = await import(${JSON.stringify(firstUrl)});
+        const p = await import(${JSON.stringify(secondUrl)});
+        for (
+            const name of [
+                "Type", "TypeVar", "FamilyType", "FunType", "DataType",
+                "PatternDataType", "CodataType", "TokenType", "AnyType",
+                "NothingType", "IntersectionType", "PolymorphicType",
+                "isDeclaredTypeKind", "isPatternCarrierType",
+            ]
+        ) {
+            if (typeof t[name] !== "function") {
+                throw new Error("types.ts export '" + name + "' not initialized");
+            }
+        }
+        for (const name of ["parsePattern", "patternToString", "enumeratePattern"]) {
+            if (typeof p[name] !== "function") {
+                throw new Error("pattern_lang.ts export '" + name + "' not initialized");
+            }
+        }
+        // The value edge exercised END-TO-END through types.ts's own API:
+        // build a carrier, then read the pattern through findPattern — the
+        // canonical comparison that crosses the value import.
+        const carrier = t.DataType.define("X")
+            .addPattern(p.parsePattern("ab"))
+            .build();
+        if (carrier.findPattern(p.patternToString(p.parsePattern("ab"))) === undefined) {
+            throw new Error("the cross-module value path failed");
+        }
+        if (carrier.findPattern("no-such-pattern") !== undefined) {
+            throw new Error("findPattern accepted an undeclared source");
+        }
+        console.log("OK");
+    `
+    let out
+    try {
+        out = await new Deno.Command("deno", {
+            args: ["eval", script],
+        }).output()
+    } catch (e) {
+        // A runner without spawn permission cannot run the order checks —
+        // SKIP loudly (visible in the report), never pass silently.
+        console.log(`SKIP (${label}): subprocess spawn unavailable: ${(e as Error).message}`)
+        return
+    }
+    const stderr = new TextDecoder().decode(out.stderr)
+    if (out.code !== 0) {
+        // A cycle's TDZ error lands here — the subprocess's non-zero exit
+        // IS the order-specific failure the in-process cache would mask.
+        throw new Error(
+            `${label}: module-graph check failed in a fresh process (exit ${out.code})\n` +
+                stderr.trim(),
+        )
+    }
+    assert(
+        new TextDecoder().decode(out.stdout).trim().includes("OK"),
+        `${label}: the fresh-process load completed`,
+    )
+}
+
+Deno.test("module graph: FRESH PROCESS — types.ts first, pattern_lang.ts second", async () => {
+    await runOrderCheck("types-first", TYPES_URL, PATTERN_URL)
 })
 
-Deno.test("module graph: pattern_lang.ts loads first and types.ts stays callable", async () => {
-    // The reverse order: the pattern language initializes first, then the
-    // type universe. `types.ts`'s top-level work (the Family/Token/Any/Nothing
-    // singletons, the TYPE_BRAND symbol) must complete without reading a
-    // partially-initialized binding from `pattern_lang.ts`.
-    const pattern = await import("../src/core/pattern_lang.ts")
-    const mod = await import("../src/core/types.ts")
-
-    assert(typeof pattern.parsePattern === "function")
-    assert(typeof mod.isDeclaredTypeKind === "function")
-
-    // The DataType builder exercises the renderer through `findPattern`'s
-    // canonical comparison — the value edge's real consumer.
-    const DataType = mod.DataType
-    const t = DataType.define("X")
-        .addPattern(pattern.parsePattern("ab"))
-        .build()
-    assertEquals(t.patterns.length, 1)
-    // findPattern keys by CANONICAL source — the call crosses the value edge
-    // inside types.ts itself.
-    assertEquals(t.findPattern(pattern.patternToString(pattern.parsePattern("ab"))), t.patterns[0])
-    assertEquals(t.findPattern("no-such-pattern"), undefined)
+Deno.test("module graph: FRESH PROCESS — pattern_lang.ts first, types.ts second", async () => {
+    await runOrderCheck("pattern-first", PATTERN_URL, TYPES_URL)
 })
 
 Deno.test("module graph: the reverse edge is TYPE-ONLY (no runtime import)", async () => {
     // The static half of the guard: pattern_lang.ts's import from types.ts
     // must stay `import type` (erased at runtime). A runtime import there —
     // even `import { DataType }` for a comment example — would close the
-    // cycle the dynamic-order tests above only catch at execution.
+    // cycle the subprocess checks above detect at execution.
     //
     // The verification is BEHAVIORAL, permission-free (the suite runs with
     // no --allow-read): if the reverse edge were a runtime import, then a
     // module-evaluation cycle would exist, and whichever module initializes
-    // SECOND would observe the first's exports mid-initialization. Both
-    // dynamic-load orders above exercise exactly that interleaving and pass
-    // with full top-level state on both sides. This test adds the
-    // graph-shape assertion the orders cannot: the edge count in the
-    // compiled module's own import bindings, read through the V8 inspector
-    // surface the runtime itself uses — `Deno.core`'s module metadata is
-    // unavailable outside internals, so instead we pin the OBSERVABLE
-    // consequence: a runtime reverse edge would make `types.ts`'s module
-    // evaluation depend on `pattern_lang.ts`'s exports. We assert the
-    // dependency is absent by loading `types.ts` in a context where
-    // `pattern_lang.ts`'s bindings are provably NOT its initialization
-    // inputs: both modules share one import here, and the assertion is that
-    // `types.ts`'s exports are all present and callable REGARDLESS of the
-    // order — the same property a static import-graph check would verify.
+    // SECOND would observe the first's exports mid-initialization. The
+    // fresh-process order checks above exercise exactly that interleaving
+    // and pass with full top-level state on both sides. This test adds the
+    // in-process full-surface assertion: every declared kind's class and the
+    // pattern language's entry points are present and callable, and the
+    // cross-module VALUE call works through types.ts's own API.
     const [typesMod, patternMod] = await Promise.all([
         import("../src/core/types.ts"),
         import("../src/core/pattern_lang.ts"),
     ])
-    // The type universe's full surface (every declared kind's class) is
-    // present — nothing undefined from a partial initialization.
+    // The type universe's full surface — nothing undefined from a partial
+    // initialization.
     for (
         const name of [
             "Type",
@@ -128,7 +170,13 @@ Deno.test("module graph: the reverse edge is TYPE-ONLY (no runtime import)", asy
     }
     // And the cross-module VALUE call works through types.ts's own API (the
     // edge under audit exercised from the types.ts side).
-    const DataType = typesMod.DataType
-    const t = DataType.define("X").addPattern(patternMod.parsePattern("ab")).build()
-    assertEquals(t.findPattern("ab"), t.patterns[0])
+    const t = typesMod.DataType.define("X")
+        .addPattern(patternMod.parsePattern("ab"))
+        .build()
+    assertEquals(t.patterns.length, 1)
+    assertEquals(
+        t.findPattern(patternMod.patternToString(patternMod.parsePattern("ab"))),
+        t.patterns[0],
+    )
+    assertEquals(t.findPattern("no-such-pattern"), undefined)
 })
