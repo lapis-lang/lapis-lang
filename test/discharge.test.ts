@@ -2020,7 +2020,7 @@ Deno.test("machineFinite: a typeref naming a variant-only carrier rejects (no si
     // space. The lookup declines it, so the enumeration surfaces the
     // loud "does not resolve to a registered pattern type" error instead.
     const h = patternHarness()
-    const varOnly = h.bool
+    // `Bool` is already registered by the harness as a variant-only carrier.
     const refPat = createPatternType("RefPat", ["<Bool>"])
     h.registry.register(refPat)
     h.opRegistry.declare(

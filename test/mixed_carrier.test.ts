@@ -22,7 +22,7 @@ import {
     VariantVal,
 } from "../src/index.ts"
 
-import { DataType, FunType, TokenType, TypeEnv, Variant } from "../src/core/types.ts"
+import { DataType, FunType, TypeEnv, Variant } from "../src/core/types.ts"
 
 import { parsePattern } from "../src/core/pattern_lang.ts"
 
