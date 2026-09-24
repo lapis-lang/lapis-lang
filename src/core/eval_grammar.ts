@@ -11,8 +11,11 @@
  *
  *   E-App:       (λx:σ. t) v → [x ↦ v] t
  *   E-Let:       let x:σ = v in u → [x ↦ v] u
- *   E-Fold:      fold [T] (Cₖ(vⱼ)) {Cᵢ(xⱼ) → tᵢ} → [xⱼ ↦ vⱼ'] tₖ
- *   E-FoldMatch: fold [T] (match(pₖ)) {match("pᵢ") → tᵢ} → [match ↦ tok] tₖ
+ *   E-Fold:      fold [T] v {Cᵢ(xⱼ) → tᵢ, match("pₖ") → uₖ} →
+ *                a VariantVal scrutinee fires its variant arm: [xⱼ ↦ vⱼ'] tₖ
+ *                a TokenVal scrutinee fires the pattern arm: [match ↦ tok] uₖ
+ *                (one rule, TWO arm kinds — the value-kind disjointness makes
+ *                the per-arm readings independent within one handler list)
  *   E-Obs:       (unfold [T] s {oⱼ → gⱼ}).oₖ → gₖ(s)
  *   E-Cofold:    cofold [T] (unfold [T] s {oⱼ → gⱼ}) {oⱼ(xⱼ) → t} → [xⱼ ↦ gⱼ(s)] t
  *   E-TApp:      (Λα <: σ. t) [τ] → [α ↦ τ] t  (type erasure)
@@ -57,15 +60,7 @@ import {
     type Span,
 } from "@lapis-lang/lang-forma"
 
-import {
-    Any,
-    CodataType,
-    DataType,
-    FamilyType,
-    isPatternCarrierType,
-    PatternDataType,
-    type Type,
-} from "./types.ts"
+import { Any, CodataType, DataType, FamilyType, type Type } from "./types.ts"
 
 import { patternToString } from "./pattern_lang.ts"
 
@@ -111,22 +106,17 @@ const EVAL_ERROR = (msg: string) => new EvalErrorValue(msg)
 
 // ── Span-carrying handler/generator info ──────────────────────────────────────
 
-/** A fold handler with span-captured body (for deferred evaluation). */
-interface SpanHandler {
-    variantName: string
-    bindings: string[]
-    bodySpan: Span
-}
-
 /**
- * A pattern-fold handler with span-captured body (for deferred evaluation).
- * The key is the pattern's CANONICAL source — the evaluator's dispatch and
- * the checker's exhaustiveness both key canonical form.
+ * A fold handler arm — ONE discriminated record for both member kinds (the
+ * merged fold form): a VARIANT arm carries the constructor name and its
+ * field bindings; a PATTERN arm carries the pattern's CANONICAL source (the
+ * evaluator's dispatch keys canonical form). Each arm's body span is
+ * captured for deferred `_forward` evaluation; exactly one payload is
+ * present — the `kind` tag is the record's discriminant.
  */
-interface SpanPatternFoldHandler {
-    patternSource: string
-    bodySpan: Span
-}
+type SpanHandler =
+    | { kind: "variant"; variantName: string; bindings: string[]; bodySpan: Span }
+    | { kind: "pattern"; patternSource: string; bodySpan: Span }
 
 /** An unfold generator with span-captured body (for deferred evaluation). */
 interface SpanGenerator {
@@ -456,40 +446,81 @@ export class LCEval extends AbstractLC<EvalShape> {
         dataType: DataType,
         ctx: unknown,
     ): Parser<SpanHandler> {
-        return seq(
-            this.variantName,
-            this.ws,
-            char("("),
-            this.ws,
-            sepBy(this.ident, this.ws1),
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([vName, , , , bindings]) => {
-            const variant = dataType.findVariant(vName)
-            if (!variant) {
-                return empty<SpanHandler>()
-            }
-            const bindingList = (bindings as string[] | undefined) ?? []
-            let extendedCtx = ctx
-            for (let i = 0; i < bindingList.length; i++) {
-                const field = variant.fields[i]
-                if (field) {
-                    extendedCtx = this.extendCtx(extendedCtx, bindingList[i]!, field.type)
+        // ONE alternation over both member kinds (the merged fold form): the
+        // variant head captures the constructor's bindings; the pattern head
+        // captures the body under `match : Token` (the extended context —
+        // this override threads ctx, so the binding rides in the parsed
+        // spans). The two heads are lexically disjoint, the `or` unambiguous.
+        return or(
+            seq(
+                this.variantName,
+                this.ws,
+                char("("),
+                this.ws,
+                sepBy(this.ident, this.ws1),
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([vName, , , , bindings]): Parser<SpanHandler> => {
+                const variant = dataType.findVariant(vName)
+                if (!variant) {
+                    return empty<SpanHandler>()
                 }
-            }
-            return this.exprProd(extendedCtx)
-                .map((_body, span) => ({
-                    variantName: vName,
-                    bindings: bindingList,
-                    bodySpan: {
-                        start: span.start + this._inputOffset,
-                        end: span.end + this._inputOffset,
-                    } as Span,
-                }))
-        })
+                const bindingList = (bindings as string[] | undefined) ?? []
+                let extendedCtx = ctx
+                for (let i = 0; i < bindingList.length; i++) {
+                    const field = variant.fields[i]
+                    if (field) {
+                        extendedCtx = this.extendCtx(extendedCtx, bindingList[i]!, field.type)
+                    }
+                }
+                return this.exprProd(extendedCtx)
+                    .map((_body, span) => ({
+                        kind: "variant" as const,
+                        variantName: vName,
+                        bindings: bindingList,
+                        bodySpan: {
+                            start: span.start + this._inputOffset,
+                            end: span.end + this._inputOffset,
+                        } as Span,
+                    }))
+            }),
+            seq(
+                this.kw("match"),
+                char("("), // tight paren — the pattern form's discipline
+                this.ws,
+                this.patternString,
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([, , , patternSource]): Parser<SpanHandler> => {
+                const resolved = this.patternTypeName(patternSource as string)
+                // The handler-head premise reads the LINEAGE (the same rule
+                // the variant fold's `findVariant` applies): a comb child's
+                // fold handles a pattern its parent declared. Keying on the
+                // index owner's name alone would deny the child its
+                // inherited members.
+                if (
+                    resolved === undefined ||
+                    !this.registry.declaresPattern(dataType, resolved.source)
+                ) {
+                    return empty<SpanHandler>()
+                }
+                return this.exprProd(ctx)
+                    .map((_body, span) => ({
+                        kind: "pattern" as const,
+                        patternSource: resolved.source,
+                        bodySpan: {
+                            start: span.start + this._inputOffset,
+                            end: span.end + this._inputOffset,
+                        } as Span,
+                    }))
+            }),
+        )
     }
 
     /** Evaluate a fold: find matching handler, bind fields, _forward body. */
@@ -499,11 +530,32 @@ export class LCEval extends AbstractLC<EvalShape> {
         handlers: SpanHandler[],
         ambientEnv: ValueEnv,
     ): Value {
-        if (!(scrutinee instanceof VariantVal)) {
-            return EVAL_ERROR("fold scrutinee is not a VariantVal")
+        // The kind dispatch — the merged fold's one step decides by the
+        // scrutinee's VALUE shape: a VariantVal takes the variant arm
+        // (recursive-field walk); a TokenVal takes the pattern arm (single
+        // step, `match` binds RAW). The two routes never mix within one
+        // step; the diagnostics name both shapes so a broken scrutinee is
+        // reported honestly.
+        if (scrutinee instanceof VariantVal) {
+            return this.evalFoldVariantArm(dataType, scrutinee, handlers, ambientEnv)
         }
-        const handler = handlers.find((h) => h.variantName === scrutinee.variantName)
-        if (!handler) {
+        if (scrutinee instanceof TokenVal) {
+            return this.evalFoldPatternArm(dataType, scrutinee, handlers, ambientEnv)
+        }
+        return EVAL_ERROR("fold scrutinee is neither a VariantVal nor a TokenVal of the carrier")
+    }
+
+    /** E-Fold's variant arm: the recursive-field walk (the existing route). */
+    private evalFoldVariantArm(
+        dataType: DataType,
+        scrutinee: VariantVal,
+        handlers: SpanHandler[],
+        ambientEnv: ValueEnv,
+    ): Value {
+        const handler = handlers.find((h) =>
+            h.kind === "variant" && h.variantName === scrutinee.variantName
+        )
+        if (!handler || handler.kind !== "variant") {
             return EVAL_ERROR(`no handler for variant: ${scrutinee.variantName}`)
         }
 
@@ -555,175 +607,42 @@ export class LCEval extends AbstractLC<EvalShape> {
         }
     }
 
-    // ── E-FoldMatch: pattern-matched fold (single step, no recursion) ────────
-
     /**
-     * Override `patternFoldProd` to capture handler body spans. The scrutinee
-     * is a token (already a value); the matching handler's body is re-evaluated
-     * via `_forward` under the fold's ambient scope extended with
-     * `match ↦ tok` — the fixed binding E-FoldMatch substitutes (lc.md §3.1).
-     * There is NO recursive-field walk: a `PatternDataType` has no fields, so
-     * the fold is a single-step extraction (E-FoldMatch's `[match ↦ tok]` —
-     * the token binds RAW, never re-folded).
+     * E-Fold's pattern arm (the merged fold's token route): dispatch the
+     * token scrutinee to its handler, bind `match`, and replay the body span.
+     * The carrier check reads the LINEAGE, not just the name: the token's
+     * `dataTypeName` is the introduction form's resolved OWNER (the index
+     * pick — a comb child's inherited pattern introduces a PARENT-named
+     * token), so a name-equality check alone would reject a legitimate
+     * `fold [Child] <inherited-token>` (the same asymmetry the handler gates
+     * widened to `declaresPattern` — the fold path's carrier membership is
+     * lineage-wide).
      */
-    // fold [T] e { match("pᵢ") → tᵢ }  — E-FoldMatch (span-captured + _forward)
-    @rule({ rule: "E-FoldMatch", production: "patternFoldProd" })
-    protected override patternFoldProd(ctx: unknown): Parser<Value> {
-        return seq(
-            this.kw("fold"),
-            this.ws1,
-            char("["),
-            this.ws,
-            this.typeProd(this.typeVarCtx(ctx)),
-            this.ws,
-            char("]"),
-            this.ws,
-        ).bind(([, , , , ty]) => {
-            // The annotation must be a pattern carrier — a PatternDataType,
-            // or a DataType whose declaration (through its parent chain —
-            // comb inheritance) carries pattern members (the mixed carrier).
-            // A wrong-kind annotation rejects the branch (`empty<Value>()`)
-            // like any other failed step — a throw here would surface as a
-            // crash instead of a clean parse rejection. The shared guard is
-            // the ONE member-shape definition.
-            if (!isPatternCarrierType(ty)) {
-                return empty<Value>()
-            }
-            const patternType = ty
-            return this.exprProd(ctx)
-                .bind((scrutinee) =>
-                    seq(this.ws, char("{"), this.ws)
-                        .bind(() =>
-                            this.spanPatternFoldHandlers(patternType, ctx)
-                                .bind((handlers) =>
-                                    seq(this.ws, char("}"))
-                                        .map(() =>
-                                            this.evalPatternFold(
-                                                patternType,
-                                                scrutinee,
-                                                handlers,
-                                                ctx as ValueEnv,
-                                            )
-                                        )
-                                )
-                        )
-                )
-        })
-    }
-
-    /** Parse pattern-fold handlers, capturing body spans instead of evaluating. */
-    // match("pᵢ") → tᵢ, ...  — pattern-fold handlers (span-captured for _forward)
-    @rule
-    protected spanPatternFoldHandlers(
-        dataType: PatternDataType | DataType,
-        ctx: unknown,
-    ): Parser<SpanPatternFoldHandler[]> {
-        return sepBy(
-            this.spanPatternFoldHandler(dataType, ctx),
-            seq(this.ws, char(","), this.ws),
-        )
-    }
-
-    // match("pᵢ") → tᵢ  — single pattern-fold handler (span-captured)
-    //
-    // The head gate re-runs the introduction form's walk (`patternTypeName`)
-    // PLUS the carrier-name premise — the same re-check discipline the fold
-    // override's spanFoldHandler applies (the override does not inherit the
-    // base's bind chain). The handler carries the CANONICAL source — the
-    // evaluator's dispatch keys canonical form.
-    @rule
-    protected spanPatternFoldHandler(
-        dataType: PatternDataType | DataType,
-        ctx: unknown,
-    ): Parser<SpanPatternFoldHandler> {
-        return seq(
-            this.kw("match"),
-            char("("), // tight paren — the pattern form's discipline
-            this.ws,
-            this.patternString,
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([, , , patternSource]) => {
-            const resolved = this.patternTypeName(patternSource as string)
-            // The handler-head premise reads the LINEAGE (the same rule the
-            // variant fold's `findVariant` applies): a comb child's fold
-            // handles a pattern its parent declared. Keying on the index
-            // owner's name alone would deny the child its inherited members.
-            if (
-                resolved === undefined ||
-                !this.registry.declaresPattern(dataType, resolved.source)
-            ) {
-                return empty<SpanPatternFoldHandler>()
-            }
-            return this.exprProd(ctx)
-                .map((_body, span) => ({
-                    patternSource: resolved.source,
-                    bodySpan: {
-                        start: span.start + this._inputOffset,
-                        end: span.end + this._inputOffset,
-                    } as Span,
-                }))
-        })
-    }
-
-    /**
-     * Evaluate a pattern-matched fold: dispatch the token scrutinee to its
-     * handler, bind `match`, and replay the body span.
-     *
-     * Dispatch keys the CANONICAL pattern source — the token's text IS the
-     * canonical source on the `match("p")` route (the gate canonicalizes),
-     * so a plain text comparison against the handler's canonical source is
-     * exact on that route. The bare-atom route's token carries the TYPE NAME
-     * as its text (`patternTokenProd`), not a pattern — a bare-atom scrutinee
-     * therefore matches only when the carrier genuinely declares a pattern
-     * whose canonical source equals the type name (a pathological
-     * coincidence); otherwise the dispatch is a miss, reported as the same
-     * "no handler" failure shape E-Fold uses. This asymmetry is deliberate:
-     * the fold keys DECLARED PATTERNS — the bare atom remains the type's
-     * VALUE, but its text names the type, not a constructor, so there is no
-     * handler it can reach unless the type declares one shaped like its name.
-     * "Fixing" it (making the bare atom's text a pattern source) would change
-     * `TokenVal.equals` and the cost algebra's variable naming, breaking the
-     * pinned T-Pattern behavior.
-     */
-    private evalPatternFold(
-        dataType: PatternDataType | DataType,
-        scrutinee: Value,
-        handlers: SpanPatternFoldHandler[],
+    private evalFoldPatternArm(
+        dataType: DataType,
+        scrutinee: TokenVal,
+        handlers: SpanHandler[],
         ambientEnv: ValueEnv,
     ): Value {
-        if (!(scrutinee instanceof TokenVal)) {
-            return EVAL_ERROR("pattern fold scrutinee is not a TokenVal")
-        }
-        // The carrier check reads the LINEAGE, not just the name: the token's
-        // `dataTypeName` is the introduction form's resolved OWNER (the index
-        // pick — a comb child's inherited pattern introduces a PARENT-named
-        // token), so a name-equality check alone would reject a legitimate
-        // `fold [Child] <inherited-token>` (the same asymmetry the handler
-        // gates widened to `declaresPattern` — the fold path's carrier
-        // membership is lineage-wide). The introduction gate already proved
-        // the pattern is declared on SOME registered carrier; this check
-        // proves the fold's carrier is that carrier OR ITS LINEAGE.
         const tokenOwner = this.registry.lookup(scrutinee.dataTypeName)
         const carrierHandles = tokenOwner !== undefined &&
             (scrutinee.dataTypeName === dataType.name ||
                 (tokenOwner instanceof DataType &&
-                    dataType instanceof DataType &&
                     tokenOwner.allPatterns().some((p) => patternToString(p) === scrutinee.text)))
         if (!carrierHandles) {
             return EVAL_ERROR(
                 `token type ${scrutinee.dataTypeName} does not match fold carrier ${dataType.name}`,
             )
         }
-        const handler = handlers.find((h) => h.patternSource === scrutinee.text)
-        if (!handler) {
+        const handler = handlers.find((h) =>
+            h.kind === "pattern" && h.patternSource === scrutinee.text
+        )
+        if (!handler || handler.kind !== "pattern") {
             return EVAL_ERROR(`no handler for pattern: ${scrutinee.text}`)
         }
 
-        // E-FoldMatch: [match ↦ tok] tₖ — the token value itself binds to
+        // E-Fold's pattern arm: [match ↦ tok] tₖ — the token value itself
+        // binds to
         // `match` (it is already a value; a single-step extraction), and the
         // body replays in the fold's ambient scope extended with it — the
         // handler's free variables resolve lexically.
@@ -1306,7 +1225,12 @@ export class LCEval extends AbstractLC<EvalShape> {
             _handlers: unknown[],
             _resultType: Type,
         ) => scrutinee instanceof VariantVal,
-        { rule: "E-Fold", role: "premise", formula: "scrutinee : Cₖ(vⱼ)", type: "τ" },
+        {
+            rule: "E-Fold",
+            role: "premise",
+            formula: "scrutinee : Cₖ(vⱼ) (variant arm) ∨ scrutinee : TokenVal (pattern arm)",
+            type: "τ",
+        },
     )
     @ensures(
         () => true,
@@ -1315,7 +1239,10 @@ export class LCEval extends AbstractLC<EvalShape> {
     protected fold(
         _dataType: DataType,
         _scrutinee: Value,
-        _handlers: { variantName: string; bindings: string[]; body: Value }[],
+        _handlers: (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: Value }
+            | { kind: "pattern"; patternSource: string; body: Value }
+        )[],
         _resultType: Type,
     ): Value {
         throw new Error("LCEval.fold: unreachable — foldProd is overridden")
@@ -1422,42 +1349,6 @@ export class LCEval extends AbstractLC<EvalShape> {
     }
 
     /**
-     * E-FoldMatch: fold [T] (match(pₖ)) {match("pᵢ") → tᵢ} → [match ↦ tok] tₖ.
-     * Premise: the scrutinee is a TokenVal of the fold's carrier (the dispatch
-     * gate). Step-rule — the fold transitions by re-evaluating the matching
-     * handler body under `match ↦ tok`. The `production` key links this rule
-     * to the `patternFoldProd` production (which is overridden above with
-     * `@rule({ rule: "E-FoldMatch", production: "patternFoldProd" })`).
-     */
-    @requires(
-        (
-            _self: LCEval,
-            _dataType: PatternDataType,
-            scrutinee: Value,
-            _handlers: unknown[],
-            _resultType: Type,
-        ) => scrutinee instanceof TokenVal,
-        {
-            rule: "E-FoldMatch",
-            role: "premise",
-            formula: "scrutinee : match(pₖ)",
-            type: "τ",
-        },
-    )
-    @ensures(
-        () => true,
-        { rule: "E-FoldMatch", role: "conclusion", formula: "result : w", type: "τ" },
-    )
-    protected patternFold(
-        _dataType: PatternDataType,
-        _scrutinee: Value,
-        _handlers: { patternSource: string; body: Value }[],
-        _resultType: Type,
-    ): Value {
-        throw new Error("LCEval.patternFold: unreachable — patternFoldProd is overridden")
-    }
-
-    /**
      * E-Op: op(v₁, ..., vₙ) → def(op) v₁ ... vₙ. Premise: the operation is
      * declared in Ω and the arguments are values. Step-rule — the application
      * transitions by applying the definition. The `production` key links this
@@ -1478,7 +1369,7 @@ export class LCEval extends AbstractLC<EvalShape> {
     }
 
     /**
-     * E-Token: `Ident` resolving to a registered `PatternDataType` evaluates
+     * E-Token: `Ident` resolving to a registered `DataType` evaluates
      * to the matched token — the raw text as a `TokenVal`. The token is an
      * axiom of the operational semantics (lc.md §2.3): no subterm evaluation,
      * the value IS the matched text.
@@ -1511,9 +1402,9 @@ export class LCEval extends AbstractLC<EvalShape> {
      * E-TAbs/E-TApp use for their non-overridden productions.
      *
      * The action is only reached on the verified path — the base production
-     * commits its conclusion via `epsilon` after the gate, the established
-     * production-path shape (#56) — so this contract encodes both the
-     * conclusion the rule model reads and the production linkage.
+     * commits its conclusion via `epsilon` after the gate — so this contract
+     * encodes both the conclusion the rule model reads and the production
+     * linkage.
      */
     @ensures(
         (_self: LCEval, _args: [string, string, string], _old, result: Value) =>

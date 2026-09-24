@@ -21,13 +21,14 @@ import {
     isDeclaredTypeKind,
     Nothing,
     NothingType,
-    PatternDataType,
     PolymorphicType,
     TokenType,
     type Type,
     TypeVar,
     TypeVarEnv,
 } from "./types.ts"
+
+import { patternToString } from "./pattern_lang.ts"
 
 /**
  * The Type-universe membership test: is this value actually a declared
@@ -68,7 +69,6 @@ export function isTypeValue(t: unknown): t is Type {
             typeVar: () => true,
             family: () => true,
             data: () => true,
-            patternData: () => true,
             codata: () => true,
             token: () => true,
             any: () => true,
@@ -167,7 +167,7 @@ export function isSubtype(
     }
 
     // Pattern-matched data types: only reflexive (same name)
-    if (sub instanceof PatternDataType && super_ instanceof PatternDataType) {
+    if (sub instanceof DataType && super_ instanceof DataType) {
         return sub.equals(super_)
     }
 
@@ -232,6 +232,17 @@ function isDataTypeSubtype(
                 return false
             }
         }
+    }
+
+    // S-Data-Width (pattern members): every pattern member the SUPER's
+    // lineage declares must be declared in the SUB's lineage by canonical
+    // source — a pattern member's width contribution is its declared
+    // CONSTRUCTOR identity (a pattern the sub's lineage lacks is an
+    // inhabitant the sub cannot produce). Depth does not apply: patterns
+    // bind no fields.
+    for (const superPattern of super_.allPatterns()) {
+        const source = patternToString(superPattern)
+        if (sub.findPattern(source) === undefined) return false
     }
 
     return true

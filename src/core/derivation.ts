@@ -84,16 +84,7 @@ import { type CheckedOpSig, OpRegistry } from "./ops.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
-import {
-    CodataType,
-    DataType,
-    FamilyType,
-    Nothing,
-    PatternDataType,
-    type Type,
-    TypeEnv,
-    Variant,
-} from "./types.ts"
+import { CodataType, DataType, FamilyType, Nothing, type Type, TypeEnv, Variant } from "./types.ts"
 
 // ── The symbolic term AST ─────────────────────────────────────────────────────
 
@@ -389,39 +380,35 @@ class DerivationReader extends AbstractLC<ReaderShape> {
     protected override fold(
         dataType: DataType,
         scrutinee: Term,
-        handlers: { variantName: string; bindings: string[]; body: Term }[],
+        handlers: (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: Term }
+            | { kind: "pattern"; patternSource: string; body: Term }
+        )[],
         _resultType: Type,
     ): Term {
         return {
             k: "fold",
             carrier: dataType.name,
             scrutinee,
-            handlers: handlers.map((h) => ({
-                variantName: h.variantName,
-                bindings: h.bindings,
-                body: h.body,
-            })),
+            handlers: handlers.flatMap((h) => {
+                // The derivation fragment is a fold-skeleton language over
+                // VARIANT arms: a pattern arm in the handler list throws the
+                // same loud diagnostic the merged fold action gives a pattern
+                // arm (the fragment's move set is variant-carrier folds only —
+                // extending the skeleton is future work, not this rule).
+                if (h.kind === "pattern") {
+                    throw new DefinitionShapeError(
+                        "",
+                        'pattern-matched fold (`fold [T] e { match("…") → t }` — a pattern-type elimination)',
+                    )
+                }
+                return [{
+                    variantName: h.variantName,
+                    bindings: h.bindings,
+                    body: h.body,
+                }]
+            }),
         }
-    }
-
-    /**
-     * Pattern-matched fold — the derivation fragment is a fold-skeleton
-     * language over VARIANT carriers; a pattern-matched carrier has no variant
-     * cases to skeletonize (the same rejection the token forms take — the
-     * fragment's move set is variant-carrier folds only). The diagnostic
-     * quotes the construct's shape; extending the skeleton to pattern carriers
-     * is future work for the derivation engine, not this rule.
-     */
-    protected override patternFold(
-        _dataType: PatternDataType | DataType,
-        _scrutinee: Term,
-        _handlers: { patternSource: string; body: Term }[],
-        _resultType: Type,
-    ): Term {
-        throw new DefinitionShapeError(
-            "",
-            'pattern-matched fold (`fold [T] e { match("…") → t }` — a pattern-type elimination)',
-        )
     }
 
     protected override unfold(
@@ -508,13 +495,18 @@ class DerivationReader extends AbstractLC<ReaderShape> {
     }
 
     exposedPatternFold(
-        dataType: PatternDataType,
+        dataType: DataType,
         handlers: { patternSource: string }[],
     ): Term {
-        return this.patternFold(
+        // The diagnostic rides the MERGED fold action's pattern arm: a
+        // pattern arm in the handler list throws the DefinitionShapeError
+        // the action carries (readRejectedConstruct's
+        // seam keeps its diagnostic through the one action).
+        return this.fold(
             dataType,
             { k: "var", name: "tok" },
             handlers.map((h) => ({
+                kind: "pattern" as const,
                 patternSource: h.patternSource,
                 body: { k: "var", name: "tok" } as Term,
             })),
@@ -545,11 +537,12 @@ export function readRejectedConstruct(
             reader.exposedMatchedToken(args[0]!, args[1] ?? "")
             break
         case "patternFold":
-            // args[0]: the carrier's name (looked up in a fresh empty registry —
-            // the diagnostic never reads it, the parameter only shapes the
-            // signature the diagnostic rides).
+            // args[0]: the carrier's name (the diagnostic never reads it, the
+            // parameter only shapes the signature the diagnostic rides) —
+            // built through the public builder (the constructor is
+            // module-private).
             reader.exposedPatternFold(
-                new PatternDataType(args[0]!, []),
+                DataType.define(args[0]!).build(),
                 [{ patternSource: args[1] ?? "" }],
             )
             break
@@ -847,7 +840,7 @@ function schemaMotives(
                 { direction: "right", left: fApp(v("a"), argument!), right: argument! },
             ]
         case "distributive":
-            // Deferred (the plan's D9): the two-op schema routes residual —
+            // Deferred: the two-op schema routes residual —
             // the gate refuses relational kinds, so this arm is unreachable
             // through `deriveLaw`; kept for exhaustiveness.
             return []
@@ -894,7 +887,7 @@ export interface DerivationInstance {
 }
 
 /**
- * The derivation certificate (the plan's D8): the visible provenance of a
+ * The derivation certificate: the visible provenance of a
  * `derivable`-discharged law — which cases closed how, and which axioms the
  * proof consumed (each `primitive`/`discharged` — the trust chain).
  */
@@ -909,7 +902,7 @@ export interface DerivationCertificate {
     }[]
     /**
      * The belt-and-braces screen's checked-instance count (the concrete
-     * redundancy D7 mandates; `undefined` when the screen declined).
+     * redundancy the schema mandates; `undefined` when the screen declined).
      */
     readonly screened?: number
 }
@@ -1596,7 +1589,7 @@ function rewriteWhole(
  * Prove one schema instance's obligation for ONE variant case, or report
  * the failed move.
  *
- * The fixed-priority move sequence (the plan's D4), no backtracking:
+ * The fixed-priority move sequence, no backtracking:
  *
  * 1. **Reflexivity** — syntactic term equality.
  * 2. **Normalize** — the computation fixpoint (E-Fold + E-Op) on both
@@ -1795,7 +1788,7 @@ function bindAxis(motiveSide: Term, axisVar: string | undefined, pattern: Term):
 // ── The gate and the entry ────────────────────────────────────────────────────
 
 /**
- * The cheap syntactic gate (the plan's D6): whether the claim's target
+ * The cheap syntactic gate: whether the claim's target
  * operation's definition is in the fragment's admitted shape — a lambda
  * chain over the declared parameters whose body is a fold over one of the
  * parameters, one handler per axis variant, over a μ-type carrier. No `E`
@@ -1813,7 +1806,7 @@ export function derivableFragment(
     registry: TypeRegistry,
     omega: OpRegistry,
 ): boolean {
-    // Intrinsic kinds only (the plan's D9); `distributive` routes residual.
+    // Intrinsic kinds only; `distributive` routes residual.
     if (RELATIONAL_KINDS.includes(law.kind)) return false
     // Pattern carriers have no variant cases to skeletonize.
     if (op.paramTypes.some((t) => !(t instanceof DataType))) return false
@@ -1827,7 +1820,8 @@ export function derivableFragment(
 }
 
 /**
- * Attempt the derivation of one law claim (the plan's D6 dispatch): build
+ * Attempt the derivation of one law claim (the dispatch over the bounded move
+ * sequence): build
  * the skeleton (the motive = the claim's schema; the cases = the axis
  * carrier's variants), discharge every instance's every case with the
  * bounded move sequence, and return either the certificate or the
@@ -1853,7 +1847,7 @@ export function deriveLaw(
     laws: LawRegistry,
     budget: number = MAX_STEPS_PER_CASE,
 ): DerivationResult {
-    // Relational kinds are deferred (the plan's D9): route residual.
+    // Relational kinds are deferred: route residual.
     if (RELATIONAL_KINDS.includes(law.kind)) {
         return notDerivableAll(
             "distributive is outside the first cut's fragment (routes residual)",
@@ -1863,7 +1857,8 @@ export function deriveLaw(
     const shape = readDefShape(op, registry, omega)
     const handlerBodies = shape.handlers.map((h) => h.body)
 
-    // The axiom base: the called ops' primitive/discharged laws (D5).
+    // The axiom base: the called ops' primitive/discharged laws (the schema's
+    // trust chain).
     const referenced = new Set<string>()
     for (const body of handlerBodies) freeOps(body, referenced)
     const axioms: AxiomSource[] = []

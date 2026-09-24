@@ -252,12 +252,12 @@ export class VariantVal extends Value {
 
 /**
  * `match("p")` — a matched token: the sole inhabitant of a pattern-matched
- * data type (`PatternDataType`). The raw matched text IS the value — there is
+ * data type (`DataType`). The raw matched text IS the value — there is
  * no structure beneath it (lc.md §2.1: the token is introduced by the lexer,
  * an axiom of the operational semantics, with no evaluation rule producing
  * it). In this grammar-based evaluator the "lexer" is the term grammar
  * itself, with two introduction routes: a bare atom whose name resolves to a
- * registered `PatternDataType` (`patternTokenProd` — text = the name) and the
+ * registered `DataType` (`patternTokenProd` — text = the name) and the
  * explicit `match("p")` form (E-Pattern — text = the pattern source). Both
  * yield the same value shape; the text convention differs by route. The
  * route also decides the value's LC source form (`renderSource`): the bare

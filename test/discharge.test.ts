@@ -27,6 +27,7 @@ import {
     makeEvalTerm,
     OpRegistry,
     OpSig,
+    PatternParseError,
     screeningRegime,
     screenLaw,
     TokenVal,
@@ -40,7 +41,7 @@ import { DataType, Family, Field, FunType, TypeEnv, Variant } from "../src/core/
 
 import { coefficients } from "../src/core/type_algebra.ts"
 
-import { createBoolType, createNatType, createPatternType } from "./fixtures.ts"
+import { createBoolType, createMixedType, createNatType, createPatternType } from "./fixtures.ts"
 
 import { assert, assertEquals, assertThrows } from "@std/assert"
 
@@ -945,11 +946,17 @@ Deno.test("token: the evaluator's nameBound gate routes ρ bindings to the varia
     assertEquals((tokenValues[0] as TokenVal).dataTypeName, "NatPat")
 })
 
-Deno.test("discharge: a pattern type with NO patterns has no vocabulary — the screen declines", () => {
-    // The empty-pattern early return in `patternSamples`: a pattern type
-    // with no declared patterns has zero inhabitants, so the screen has no
-    // sample vocabulary and declines — the declaration is rejected rather
-    // than installed `asserted` with zero coverage.
+Deno.test("discharge: a carrier with NO members discharges vacuously — 0 instances is honest", () => {
+    // A bare carrier (no variants, no patterns) has zero inhabitants: the
+    // FINITE regime establishes the claim over ∅ — every inhabitant was
+    // checked, the count records the vacuous shape. The absorption sweep
+    // changed this test's outcome from a declining screen to an honest
+    // vacuous discharge: post-absorption a "pattern type with no patterns"
+    // IS a bare DataType, the member-shape gates route it to the variant
+    // walk (empty), and the finite regime's proof over ∅ is the same honest
+    // shape the Empty-variant test pins. (The screen-decline shape still
+    // exists — a pattern-bearing carrier whose certification declines —
+    // pinned by the over-ceiling and dead-evaluator tests.)
     const h = boolHarness()
     const hollow = createPatternType("HollowPat", [])
     h.registry.register(hollow)
@@ -957,19 +964,17 @@ Deno.test("discharge: a pattern type with NO patterns has no vocabulary — the 
         new OpSig("hollowTok", [hollow, hollow], hollow, "\\x:HollowPat. \\y:HollowPat. x"),
         { checkDefinition: () => undefined },
     )
-    assertThrows(
-        () =>
-            declareCheckedLaw(
-                { kind: "associative", target: "hollowTok" },
-                h.opRegistry,
-                h.laws,
-                evalOfHarness(h.registry, h.opRegistry),
-                checkerFor(h.registry, h.opRegistry),
-            ),
-        LawDeclarationError,
-        "certification declined",
+    const { law, instances, regime } = declareCheckedLaw(
+        { kind: "associative", target: "hollowTok" },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
     )
-    assertEquals(h.laws.lookup("hollowTok").length, 0)
+    assertEquals(regime, "finite", "a memberless carrier is finite (0 inhabitants)")
+    assertEquals(instances, 0, "the sweep over ∅ is complete and vacuous")
+    assertEquals(law.provenance, "discharged")
+    assert(h.laws.has("hollowTok", "associative"))
 })
 
 Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is a variable, not a token", () => {
@@ -1035,7 +1040,7 @@ Deno.test("token: the gate's core guarantee — a Γ/ρ-bound PascalCase name is
 
 Deno.test("discharge: a data type with a pattern-typed field is sampled — Empty | With(Pat) screens both variants", () => {
     // Pattern support is not only for TOP-LEVEL parameters: a `DataType`
-    // variant with a `PatternDataType` field gets its field sampled through
+    // variant with a `DataType` field gets its field sampled through
     // the language-equation enumeration (the size-≤ k token
     // classes), so the `With(Pat)` variant's inhabitants are constructed
     // and the screen reaches its field-carrying arm. With tokens sized by
@@ -1161,7 +1166,7 @@ Deno.test("certified screen: a Nat op's coverage states the certified prefix —
     // The certificate: the residual screen's sweep space for Nat is the
     // COMPLETE size-≤ 3 class set (Zero, Succ(Zero), Succ(Succ(Zero))) —
     // counted independently by the type equation's coefficients, and the
-    // enumerated count asserts equal. Provenance is UNCHANGED (D7): still
+    // enumerated count asserts equal. Provenance is UNCHANGED: still
     // `asserted` — certification upgrades the evidence claim, not authority.
     const h = boolHarness()
     const nat = createNatType()
@@ -1251,6 +1256,35 @@ Deno.test("certified screen: a pattern carrier certifies its language-equation p
     assertEquals(coefficients(natPat, 2), [0, 10, 100])
     const eval_ = evalOfHarness(h.registry, h.opRegistry)
     assertEquals(inhabitantsUpToSize(natPat, 2, eval_).length, 110)
+})
+
+Deno.test("certified screen: a MIXED carrier's prefix composes both member kinds (the certificate agrees)", () => {
+    // The mixed composition the certified screen requires: a carrier with
+    // BOTH member kinds (variants `Zero`/`Succ` AND the token language
+    // `[0-9]+`) — its size-≤ 2 space is the union of the variant walk's
+    // values (Zero, Succ(Zero)) and the token walk's tokens (the 110
+    // digit strings), 112 inhabitants, and the coefficients count the
+    // SAME union (the fixpoint plus the token counts, kind-disjoint). The
+    // certificate's theorem — one count, two derivations — must hold for
+    // the mixed carrier exactly as it does for each kind alone: omitting
+    // either kind would make the certified sweep under-cover the space
+    // the equation counts (the mismatch the certificate rejects).
+    const h = boolHarness()
+    const mixed = createMixedType(
+        "Mixed",
+        [
+            new Variant("Zero", []),
+            new Variant("Succ", [new Field("pred", Family)]),
+        ],
+        ["[0-9]+"],
+    )
+    h.registry.register(mixed)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(coefficients(mixed, 2), [0, 11, 101])
+    const space = inhabitantsUpToSize(mixed, 2, eval_)
+    assertEquals(space.length, 112)
+    const kinds = new Set(space.map((v) => v instanceof TokenVal ? "token" : "variant"))
+    assertEquals(kinds, new Set(["variant", "token"]), "both member kinds swept")
 })
 
 Deno.test("enumerator contract: a pattern type at k = 0 yields NO samples (c₀ = 0)", () => {
@@ -1351,8 +1385,41 @@ Deno.test("enumerator contract: a mutually recursive A↔B pair enumerates both 
     assertEquals(inhabitantsUpToSize(a, 4, eval_).length, 2)
 })
 
+Deno.test("enumerator contract: a MIXED FIELD carrier's space composes both kinds (the certificate agrees)", () => {
+    // The field-level composition: `Outer = Mk(m: MX)` where
+    // `MX = Zero() | "ab"` is a MIXED carrier (a variant AND a token
+    // pattern). Outer's field space must union BOTH kinds of MX — the
+    // variant walk's Zero plus the token "ab" — so Mk(Zero()) is size 2
+    // and Mk(MX("ab")) is size 3; the coefficients read the same union
+    // (the field arm's kind-disjoint sum). Omitting the field's token
+    // members would shrink the enumeration AND the equation differently —
+    // the certificate's mismatch check exists exactly for such holes.
+    const h = boolHarness()
+    const mixed = createMixedType("MX", [new Variant("Zero", [])], ["ab"])
+    const outer = DataType.define("Outer")
+        .addVariant(new Variant("Mk", [new Field("m", mixed)]))
+        .build()
+    h.registry.register(mixed)
+    h.registry.register(outer)
+    const eval_ = evalOfHarness(h.registry, h.opRegistry)
+    assertEquals(coefficients(outer, 3), [0, 0, 1, 1])
+    const space = inhabitantsUpToSize(outer, 3, eval_)
+    assertEquals(space.length, 2)
+    // Both member kinds rode the field's space: one Mk over the VARIANT
+    // member (Mk(Zero())), one over the TOKEN member (Mk(MX("ab")) — the
+    // token rides INSIDE the Mk variant, as a field value).
+    const fieldKinds = new Set(
+        space.flatMap((v) =>
+            v instanceof VariantVal
+                ? [...v.fields.values()].map((f) => f instanceof TokenVal ? "token" : "variant")
+                : []
+        ),
+    )
+    assertEquals(fieldKinds, new Set(["variant", "token"]), "both field kinds swept")
+})
+
 Deno.test("certified screen: a wide-flat record certifies its raised min class (7-Bool record, 128) via the RESIDUAL path", () => {
-    // The floor raise (D3): a 7-Bool record's smallest nonempty class is
+    // The floor raise: a 7-Bool record's smallest nonempty class is
     // size 8 (128 inhabitants) — beyond MAX_SCREEN_SIZE, but within the
     // prefix budget, so the position certifies exactly that class instead
     // of declining. ROUTING MATTERS: a unary involutory sweep over the
@@ -1513,7 +1580,7 @@ Deno.test("certified screen: a pattern type with NO patterns still declines (no 
 })
 
 Deno.test("certified screen: exhaustion counts and provenance are UNCHANGED (the finite regime untouched)", () => {
-    // D7: certification upgrades the residual's evidence claim only — the
+    // Certification upgrades the residual's evidence claim only — the
     // finite regime's exhaustion (full sweep → discharged) is untouched, and
     // its exact instance counts hold (8 = 2³ for associative over Bool).
     const h = boolHarness()
@@ -1671,6 +1738,48 @@ Deno.test("machineFinite: the same law UNSCOPED stays residual — asserted, not
         checkerFor(h.registry, h.opRegistry),
     )
     assertEquals(regime, "residual", "an unscoped pattern carrier routes residual")
+    assertEquals(law.provenance, "asserted")
+})
+
+Deno.test("machineFinite: a MIXED carrier routes residual even when scoped (the sub-space sweep cannot reach the variant members)", () => {
+    // The routing refinement: `patternSpaceOf` enumerates a carrier's
+    // token language only — a carrier with BOTH member kinds has variant
+    // members outside the sub-space machinery's reach (and their space
+    // may be unbounded), so a scoped law over a mixed carrier cannot
+    // discharge over the predicate's full domain. The certified screen
+    // (which composes both kinds — see the mixed certification test)
+    // applies instead: the claim installs `asserted` with the certified
+    // prefix's evidence, never a scoped `discharged`.
+    const h = patternHarness()
+    const mixed = createMixedType(
+        "MixedTok",
+        [new Variant("Zero", [])],
+        ["[0-9]+"],
+    )
+    h.registry.register(mixed)
+    h.opRegistry.declare(
+        new OpSig("mixId", [mixed], mixed, "\\x:MixedTok. x"),
+        { checkDefinition: () => undefined },
+    )
+    const { regime, law } = declareCheckedLaw(
+        {
+            kind: "involutory",
+            target: "mixId",
+            subSpace: [{
+                position: 0,
+                where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+            }],
+        },
+        h.opRegistry,
+        h.laws,
+        evalOfHarness(h.registry, h.opRegistry),
+        checkerFor(h.registry, h.opRegistry),
+    )
+    assertEquals(
+        regime,
+        "residual",
+        "a scoped mixed carrier routes residual (both kinds certify there)",
+    )
     assertEquals(law.provenance, "asserted")
 })
 
@@ -1900,5 +2009,41 @@ Deno.test("machineFinite: an EMPTY filtered sub-space rejects (no vacuous discha
             ),
         LawDeclarationError,
         "admits NO string",
+    )
+})
+
+Deno.test("machineFinite: a typeref naming a variant-only carrier rejects (no silent empty language)", () => {
+    // The sub-space enumeration's type-reference lookup must resolve only
+    // PATTERN carriers: `<Bool>` names a registered variant-only carrier
+    // (no pattern members) — counting it as a pattern type would read an
+    // EMPTY language (all-zero counts) and silently shrink the certified
+    // space. The lookup declines it, so the enumeration surfaces the
+    // loud "does not resolve to a registered pattern type" error instead.
+    const h = patternHarness()
+    const varOnly = h.bool
+    const refPat = createPatternType("RefPat", ["<Bool>"])
+    h.registry.register(refPat)
+    h.opRegistry.declare(
+        new OpSig("tokId", [refPat], refPat, "\\x:RefPat. x"),
+        { checkDefinition: () => undefined },
+    )
+    assertThrows(
+        () =>
+            declareCheckedLaw(
+                {
+                    kind: "involutory",
+                    target: "tokId",
+                    subSpace: [{
+                        position: 0,
+                        where: "fold [Bool] True() { True() -> True(), False() -> False() }",
+                    }],
+                },
+                h.opRegistry,
+                h.laws,
+                evalOfHarness(h.registry, h.opRegistry),
+                checkerFor(h.registry, h.opRegistry),
+            ),
+        PatternParseError,
+        "does not resolve to a registered pattern type",
     )
 })

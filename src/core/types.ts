@@ -655,74 +655,20 @@ function resolveObserverFields(
     return observers.map((observer) => observer.resolveBuild(group) ?? observer)
 }
 
-// ── Pattern-matched data type (μ with patterns) ───────────────────────────────
-
 /**
- * `μ α. Σᵢ pᵢ` — a pattern-matched data type.
+ * The PATTERN-CARRIER type guard: a `DataType` whose declaration (through
+ * its parent chain — comb inheritance) carries pattern members. A carrier
+ * with pattern members is the ONE pattern-carrying shape — a carrier whose
+ * members are pattern constructors is a `DataType` with a patterns slot, the
+ * same class the variant dispatches read, so both member kinds flow through
+ * one type.
  *
- * Each `pᵢ` is a parsed pattern (a restricted regular expression — see
- * `pattern_lang.ts`) specifying an infinite set of constructors. There are
- * no fields (no Family); the sole inhabitant of a matched constructor is the
- * `Token` — the raw matched text. The AST is stored (not the source string):
- * the language-equation reading (`pattern_lang.ts` — concatenation multiplies,
- * alternation sums, Kleene star inverts (1−P)) reads the structure, and
- * rendering back to source is the AST's `toString`.
- *
- * The declared patterns are IMMUTABLE: the constructor copies the argument
- * into a frozen array, so a registered type's declarations cannot be
- * mutated after the fact — the registry's reverse index (the pattern source
- * → type map, built once at registration) would otherwise drift from the
- * type's own declaration (a post-registration `patterns.push` or splice
- * would leave removed patterns constructible and added patterns rejected).
- * A revised declaration set constructs a fresh `PatternDataType` (and a
- * fresh registry — registration is final).
- */
-export class PatternDataType extends Type {
-    readonly patterns: readonly PatternAST[]
-    constructor(
-        readonly name: string,
-        patterns: readonly PatternAST[],
-    ) {
-        super()
-        this.patterns = Object.freeze([...patterns])
-    }
-
-    equals(other: Type): boolean {
-        return other instanceof PatternDataType && this.name === other.name
-    }
-
-    toString(): string {
-        return this.name
-    }
-
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.patternData(this)
-    }
-
-    /** An atom: the base `map` default applies (no traversable sub-types). */
-    override map(cases: TypeCases<Type>): Type {
-        return cases.patternData?.(this) ?? this
-    }
-}
-
-/**
- * The PATTERN-CARRIER type guard: a registered type whose members are
- * pattern constructors — a `PatternDataType`, or a `DataType` whose
- * declaration (through its parent chain — comb inheritance) carries pattern
- * members. This is the ONE definition of the member-shape predicate the
- * gates, the premise asserts, and the type-guard consumers read, so the
- * dual-accept rule cannot drift between a boolean check here and a narrowing
- * check there.
- *
- * As a type predicate it narrows `Type` to the union — the checker's
- * `matchedToken`/`matchedPattern` premise asserts and every grammar gate
+ * As a type predicate it narrows `Type` to `DataType` — the checker's
+ * `matchedToken`/`matchedPattern` premise checks and every grammar gate
  * consult the same shape test the action's return type trusts.
  */
-export function isPatternCarrierType(
-    t: Type | undefined,
-): t is PatternDataType | DataType {
-    return t instanceof PatternDataType ||
-        (t instanceof DataType && t.hasPatterns)
+export function isPatternCarrierType(t: Type | undefined): t is DataType {
+    return t instanceof DataType && t.hasPatterns
 }
 
 // ── Codata type (ν) ───────────────────────────────────────────────────────────
@@ -1147,7 +1093,6 @@ export interface TypeCases<T> {
     family?: (t: FamilyType) => T | undefined
     fun?: (t: FunType, param: T, result: T) => T | undefined
     data?: (t: DataType) => T | undefined
-    patternData?: (t: PatternDataType) => T | undefined
     codata?: (t: CodataType) => T | undefined
     token?: (t: TokenType) => T | undefined
     any?: (t: AnyType) => T | undefined

@@ -6,8 +6,7 @@
  * typed-rejection boundary's caller-naming discipline.
  *
  * See _docs/theory/type-algebra.md §1 (the judgment-class consolidation),
- * §4.3 (the boundary), and the D1–D8 decisions of the plan these
- * behaviors implement.
+ * §4.3 (the boundary), and the design decisions these behaviors implement.
  */
 
 import { assert, assertEquals, assertThrows } from "@std/assert"
@@ -49,7 +48,7 @@ function nat(): DataType {
         .build()
 }
 
-// ── Identity-keyed memos (D2 — the same-instance cache) ──────────────────────
+// ── Identity-keyed memos (the same-instance cache) ──────────────────────────
 
 Deno.test("memo identity: a repeat call on the same instance reads the memo (same spec objects)", () => {
     const t = nat()
@@ -84,7 +83,7 @@ Deno.test("memo identity: two distinct DataType instances with the same name get
 Deno.test("memo identity: a fresh TypeAlgebra instance has its own empty memo", () => {
     // Instances carry their caches; the module default instance's state does
     // not leak into (or from) a fresh one — a consumer isolating its memos
-    // constructs its own algebra (D5's fresh-instance story).
+    // constructs its own algebra (the fresh-instance story).
     const fresh = new TypeAlgebra()
     const t = nat()
     const freshSpecs = fresh.derivative(t)
@@ -136,7 +135,7 @@ Deno.test("inhabitants: same-name carriers do not share verdicts (identity keyin
     assertEquals(finiteInhabitants(inner), 2)
 })
 
-// ── ContextSpec.derivative(): the chain rule as data (D3) ────────────────────
+// ── ContextSpec.derivative(): the chain rule as data ────────────────────────
 
 Deno.test("context edge: a data-hole spec carries the hole's own derivative", () => {
     // Wrapped(inner: Nat): the spec's holeType is Nat, so the edge is
@@ -212,7 +211,7 @@ Deno.test("context edge: the edge is computed at most once per spec (lazily memo
     assert(spec.derivative() === spec.derivative())
 })
 
-// ── The typed-rejection boundary (D6 — the caller-naming discipline) ─────────
+// ── The typed-rejection boundary (the caller-naming discipline) ───────────────
 
 Deno.test("boundary: derivative and coefficients both name themselves in the intersection rejection", () => {
     // The message interpolates `type.name` — an IntersectionType carries no
@@ -269,7 +268,7 @@ Deno.test("boundary: the free-function delegates route through the same boundary
     assertThrows(() => coefficients(intersection, 2), TypeError, "coefficients(")
 })
 
-// ── Value-side virtuals (D7 — the method contract) ──────────────────────────
+// ── Value-side virtuals (the method contract) ─────────────────────────────────
 
 Deno.test("value virtuals: Value.equals (VariantVal) — constructor, carrier name, fields", () => {
     const t = bool()

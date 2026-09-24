@@ -99,16 +99,8 @@
  *   deeper inside the traversal.
  */
 
-import {
-    CodataType,
-    DataType,
-    Field,
-    IntersectionType,
-    PatternDataType,
-    type Type,
-    Variant,
-} from "./types.ts"
-import { setRegistryHook, typeUnionCountsWith } from "./pattern_lang.ts"
+import { CodataType, DataType, Field, IntersectionType, type Type, Variant } from "./types.ts"
+import { satAddSeq, setRegistryHook, typeUnionCountsWith } from "./pattern_lang.ts"
 
 // ── The lookup hook (instance state; the module global is the facade) ────────
 
@@ -127,7 +119,7 @@ import { setRegistryHook, typeUnionCountsWith } from "./pattern_lang.ts"
  * hook only matters for type REFERENCES inside patterns (`<T>`); a pattern
  * language without references works without any hook.
  */
-export type PatternLookup = (name: string) => PatternDataType | undefined
+export type PatternLookup = (name: string) => DataType | undefined
 
 const rejectingLookup: PatternLookup = () => {
     throw new TypeError(
@@ -344,7 +336,15 @@ export class TypeAlgebra {
                             this,
                         ),
                     data: (fieldCarrier): ContextSpec | undefined =>
-                        new ContextSpec(
+                        // A pattern-BEARING field carrier contributes no
+                        // context: its values are tokens (atomic — nothing
+                        // to punch), the same no-structure rule the token
+                        // field applies. A pattern FIELD still joins the
+                        // recursive field's surroundings (Leibniz: every
+                        // non-hole field, in field order). Stage 5's
+                        // member-shape derivative decides whether a pattern
+                        // carrier's token values gain structure.
+                        fieldCarrier.patterns.length > 0 ? undefined : new ContextSpec(
                             variant.name,
                             field.name,
                             fieldCarrier,
@@ -355,7 +355,6 @@ export class TypeAlgebra {
                     intersection: () => undefined,
                     polymorphic: () => undefined,
                     typeVar: () => undefined,
-                    patternData: () => undefined,
                     codata: () => undefined,
                     token: () => undefined,
                     any: () => undefined,
@@ -487,12 +486,26 @@ export class TypeAlgebra {
                     {
                         family: () => UNBOUNDED,
                         any: () => UNBOUNDED,
-                        data: (t) => t,
+                        data: (t) =>
+                            // A pattern-BEARING field carrier: its token
+                            // language's finiteness decides. A FINITE
+                            // pattern language (bounded lengths, no star
+                            // over an open class — `ab`, `[ab]{2,3}`) keeps
+                            // the carrier finitely inhabitable: the count
+                            // threads through the union's total (the
+                            // per-length counts, saturated at the ceiling).
+                            // An UNBOUNDED language (`[0-9]+`, `.`) routes
+                            // unbounded — the generating function is
+                            // rational, never polynomial. The test is the
+                            // union's truncated count: a saturated (ceiling
+                            // +1) or budget-declined reading routes
+                            // unbounded; a bounded total is the finite
+                            // member count the product multiplies.
+                            t.patterns.length > 0 ? this.patternLanguageCount(t) : t,
                         fun: () => undefined,
                         intersection: () => undefined,
                         polymorphic: () => undefined,
                         typeVar: () => undefined,
-                        patternData: () => undefined,
                         codata: () => undefined,
                         token: () => undefined,
                         nothing: () => undefined,
@@ -527,14 +540,59 @@ export class TypeAlgebra {
         // unbounded `undefined`; the saturated ceiling + 1. The memo stores
         // `null` for the undefined verdict (WeakMap values cannot be
         // `undefined` without losing the "absent" distinction).
-        const verdict = state === "unbounded"
-            ? undefined
-            : state === "saturated"
-            ? MAX_FINITE_INHABITANTS + 1
-            : total
+        // The MIXED composition (the counting side): the carrier's OWN
+        // pattern members contribute their token-language count to the sum
+        // (kind-disjoint universes — VariantVal sizes and token text
+        // lengths add without double-counting). A finite token language
+        // keeps the carrier finite (its count joins the variant sum); an
+        // unbounded one poisons the verdict (the rational GF).
+        let verdict: number | undefined
+        if (state === "unbounded") {
+            verdict = undefined
+        } else if (state === "saturated") {
+            verdict = MAX_FINITE_INHABITANTS + 1
+        } else {
+            verdict = total
+        }
+        if (verdict !== undefined && type.patterns.length > 0) {
+            const tokenCount = this.patternLanguageCount(type)
+            if (tokenCount === undefined) return undefined
+            verdict = Math.min(verdict + tokenCount, MAX_FINITE_INHABITANTS + 1)
+        }
         this.inhabitantsMemo.set(type, verdict ?? null as unknown as number)
         return verdict
     }
+
+    /**
+     * The token-language count of a pattern-bearing carrier — the
+     * finiteness test's reading. `typeUnionCounts`' truncated profile sums
+     * to the language's total size; a SATURATED profile (the ceiling + 1)
+     * or one that would exceed the exhaustion ceiling routes unbounded (the
+     * rational GF), while a bounded total IS the finite member count.
+     * Memoized through the same inhabitants memo (identity-keyed — the
+     * carrier is frozen, so the verdict is stable).
+     */
+    private patternLanguageCount(type: DataType): number | undefined {
+        const cached = this.inhabitantsMemo.get(type)
+        if (this.inhabitantsMemo.has(type)) return cached === null ? undefined : cached
+        if (this.patternCountMemo.has(type)) return this.patternCountMemo.get(type)
+        // A budget DECLINE is the unbounded reading (the language's set is
+        // too large to materialize — the rational GF): undefined, not a
+        // throw — the counting classifier's contract is verdict-or-undefined,
+        // and the decline is the honest "no finite verdict" shape.
+        let verdict: number | undefined
+        try {
+            const profile = typeUnionCountsWith(type, MAX_FINITE_INHABITANTS, this.lookup)
+            const total = profile.reduce((sum, c) => sum + c, 0)
+            verdict = total >= MAX_COEFFICIENT ? undefined : total
+        } catch {
+            verdict = undefined
+        }
+        this.patternCountMemo.set(type, verdict)
+        return verdict
+    }
+
+    private patternCountMemo = new WeakMap<DataType, number | undefined>()
 
     // ── The typed-rejection boundary ─────────────────────────────────────────
 
@@ -551,7 +609,7 @@ export class TypeAlgebra {
      * here).
      */
     private requireSemiringCarrier(
-        type: DataType | PatternDataType | CodataType,
+        type: DataType | CodataType,
         caller: string,
     ): asserts type is DataType {
         if (type instanceof IntersectionType) {
@@ -624,20 +682,20 @@ export class TypeAlgebra {
      * (a ν-type's generating function is not a counting object).
      */
     coefficients(
-        type: DataType | PatternDataType | CodataType,
+        type: DataType | CodataType,
         k: number,
     ): Coefficients {
         if (k < 0) {
             throw new RangeError(`coefficients(${type.name}): the degree k must be ≥ 0`)
         }
-        if (type instanceof PatternDataType) {
-            // The language-equation reading: a pattern type's language
-            // is the UNION of its variants' languages — variants may overlap
-            // (`a` and `a?` both hold "a"), so the counts read off the merged
-            // STRING SET (the same dedup the certified enumerator runs), not
-            // the per-variant sum. Cycles through type references reject
-            // loudly inside the environment (an ill-founded equation has no
-            // reading).
+        if (type instanceof DataType && type.patterns.length > 0 && type.variants.length === 0) {
+            // The language-equation reading: a PATTERNS-ONLY carrier's
+            // language is the UNION of the declared patterns — variants may
+            // overlap (`a` and `a?` both hold "a"), so the counts read off
+            // the merged STRING SET (the same dedup the certified enumerator
+            // runs), not the per-variant sum. Cycles through type references
+            // reject loudly inside the environment (an ill-founded equation
+            // has no reading).
             return typeUnionCountsWith(type, k, this.lookup)
         }
         this.requireSemiringCarrier(type, "coefficients")
@@ -657,7 +715,6 @@ export class TypeAlgebra {
                                 collect(inner)
                                 return undefined
                             },
-                            patternData: () => undefined,
                             codata: () => undefined,
                             fun: () => undefined,
                             intersection: () => undefined,
@@ -687,7 +744,18 @@ export class TypeAlgebra {
             return memoed.coeffs.slice(0, k + 1)
         }
         const state = new GFState(system, this.lookup)
-        const coeffs = state.getFor(type, k)
+        let coeffs = state.getFor(type, k)
+        // The MIXED composition: a carrier with BOTH member kinds reads
+        // the per-length SUM of (the variant-system fixpoint) plus (the
+        // token-language counts). Soundness: variant inhabitants are
+        // `VariantVal`s (size = constructor-node count), pattern inhabitants
+        // are tokens (size = text length) — KIND-DISJOINT universes, so the
+        // sequences add without double-counting. The token side reads the
+        // union with the same saturation arithmetic the union arm applies.
+        if (type.patterns.length > 0) {
+            const tokenCounts = typeUnionCountsWith(type, k, this.lookup)
+            coeffs = coeffs.map((c, i) => Math.min(c + (tokenCounts[i] ?? 0), MAX_COEFFICIENT))
+        }
         this.coefficientsMemo.set(type, { degree: k, coeffs })
         return coeffs
     }
@@ -819,8 +887,33 @@ function fieldGF(
     // screen's `construct` and `screenableDomain` apply).
     return field.type.dispatch<Coefficients>({
         family: () => current.currentFor(carrier, k),
-        data: (t) => current.currentFor(t, k),
-        patternData: (t) => typeUnionCountsWith(t, k, current.lookup),
+        data: (t) =>
+            // A pattern-BEARING data field reads the language-equation
+            // counting: its members are pattern constructors, so its
+            // per-length classes are the UNION's token counts (tokens
+            // sized by TEXT LENGTH — matching the enumeration's per-length
+            // classes exactly). The variant-system path below (collect +
+            // fixpoint) only sees carriers WITH variants; a patterns-only
+            // field carrier's GF is its token language, never a zero
+            // polynomial — routing it through the system would report zero
+            // inhabitants for a With(p) variant (the enumeration hole the
+            // certificate's mismatch check rejects).
+            //
+            // The MIXED composition: a field carrier with BOTH member
+            // kinds sums (its variant-system approximation, read through
+            // the fixpoint memo) plus (its token-language counts) — the
+            // same kind-disjoint sum the top-level coefficients arm runs.
+            // Omitting either kind would under-count the field's space and
+            // the enumeration's class filter would then mismatch the
+            // certificate.
+            t.patterns.length > 0 && t.variants.length === 0
+                ? typeUnionCountsWith(t, k, current.lookup)
+                : t.patterns.length > 0
+                ? satAddSeq(
+                    current.currentFor(t, k),
+                    [...typeUnionCountsWith(t, k, current.lookup)],
+                )
+                : current.currentFor(t, k),
         fun: () => zeroUpTo(k),
         intersection: () => zeroUpTo(k),
         polymorphic: () => zeroUpTo(k),
@@ -849,7 +942,7 @@ class GFState {
     constructor(
         private readonly system: Set<DataType>,
         /** The algebra instance's pattern-type lookup (the per-instance seam). */
-        readonly lookup: (name: string) => PatternDataType | undefined,
+        readonly lookup: (name: string) => DataType | undefined,
     ) {}
 
     /** A system member's CURRENT approximation (never triggers a solve). */
@@ -949,7 +1042,7 @@ export function derivative(type: DataType): ContextSpec[] {
  * (a ν-type's generating function is not a counting object).
  */
 export function coefficients(
-    type: DataType | PatternDataType | CodataType,
+    type: DataType | CodataType,
     k: number,
 ): Coefficients {
     return typeAlgebra.coefficients(type, k)

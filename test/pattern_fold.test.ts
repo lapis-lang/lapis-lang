@@ -2,13 +2,13 @@
  * Pattern-matched fold tests — the elimination form over pattern-matched data
  * types (T-FoldMatch / E-FoldMatch, lc.md §5.2b + §3.1).
  *
- * `fold [T] e { match("pᵢ") → tᵢ }` eliminates a `PatternDataType` token: the
+ * `fold [T] e { match("pᵢ") → tᵢ }` eliminates a `DataType` token: the
  * handler head re-spells the constructor (`match("p")` — the same gate the
  * introduction form runs), the body references the fixed `match : Token`
  * binding, and evaluation dispatches the token to its handler by CANONICAL
  * pattern source. These tests pin the premises (carrier kind, scrutinee
  * subtype, exhaustiveness over canonical sources, handler-head carrier
- * membership), the one-pass join typing (no fixpoint — a PatternDataType has
+ * membership), the one-pass join typing (no fixpoint — a DataType has
  * no fields), the Nothing-propagation arm, the token dispatch (including the
  * bare-atom route's documented miss), the span replay of nested folds, and
  * the branch-ordering contract between the two fold forms.
@@ -209,8 +209,8 @@ Deno.test("T-FoldMatch: wrong-kind annotation rejects (branch-reject, not a cras
     // The annotation resolves to a TypeVar (unregistered name) — neither the
     // pattern branch's gate nor the variant branch's accepts it: the branch
     // is a clean empty forest, never a throw out of the parse (the ordering
-    // pin). A registered-codata carrier takes the same path (patternFoldProd
-    // and foldProd both reject it); the TypeVar route is what this harness
+    // pin). A registered-codata carrier takes the same path (the fold's
+    // annotation premise rejects it); the TypeVar route is what this harness
     // can spell without a codata fixture.
     assertEquals(
         typeOfOne(
@@ -361,7 +361,7 @@ Deno.test("E-FoldMatch: canonical spellings dispatch equally", () => {
     assert(!(result instanceof EvalErrorValue))
 })
 
-Deno.test("E-FoldMatch: a non-token scrutinee errors (not a crash)", () => {
+Deno.test("E-Fold: a non-token scrutinee errors on the pattern arm (not a crash)", () => {
     const h = patternHarness()
     const result = evalOne(
         h,
@@ -369,7 +369,12 @@ Deno.test("E-FoldMatch: a non-token scrutinee errors (not a crash)", () => {
     )
     assert(result instanceof EvalErrorValue)
     const err = result as EvalErrorValue
-    assert(err.message.startsWith("pattern fold scrutinee is not a TokenVal"))
+    // The merged fold's diagnostic names BOTH arm shapes (a scrutinee that
+    // is neither a variant value nor a carrier token takes no arm).
+    assert(
+        err.message.startsWith("fold scrutinee is neither a VariantVal nor a TokenVal"),
+        `the merged diagnostic: ${err.message}`,
+    )
 })
 
 Deno.test("E-FoldMatch: a token of a different type rejects the handler head", () => {

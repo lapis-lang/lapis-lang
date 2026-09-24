@@ -164,7 +164,7 @@ Deno.test("TypeRegistry: registration is final — a duplicate type name is reje
 
 Deno.test("TypeRegistry: a duplicate across kinds is also rejected (same name, any kind)", () => {
     // The finality holds across kinds: a DataType, a CodataType, and a
-    // PatternDataType share the one name-keyed map.
+    // DataType share the one name-keyed map.
     const registry = new TypeRegistry()
     const nat = createPatternType("NatPat", ["[0-9]+"])
     registry.register(nat)
@@ -175,7 +175,7 @@ Deno.test("TypeRegistry: a duplicate across kinds is also rejected (same name, a
         () => registry.register(nat),
         TypeRegistryError,
     )
-    // A distinct PatternDataType with the same name — rejected too.
+    // A distinct DataType with the same name — rejected too.
     assertThrows(
         () => registry.register(createPatternType("NatPat", ["[a-z]+"])),
         TypeRegistryError,
@@ -281,7 +281,7 @@ Deno.test("TypeRegistry: the declared patterns are frozen (no post-registration 
     // declaration array would let a post-registration `patterns.push` /
     // splice drift the index from the type's own declaration (removed
     // patterns staying constructible, added patterns being rejected).
-    // `PatternDataType` freezes the array — a mutation attempt either throws
+    // `DataType` freezes the array — a mutation attempt either throws
     // (strict mode) or silently no-ops, and the index stays consistent with
     // the type's declarations either way.
     const registry = new TypeRegistry()
@@ -529,7 +529,7 @@ Deno.test("T-Pattern: an op definition using match(...) declares and evaluates",
     assertEquals(sig.name, "usesMatch")
     // A definition that USES the pattern form: a curried function whose body
     // is the match construction (the definition must type as
-    // `paramTypes → resultType` — Ω well-formedness, #49). The op
+    // `paramTypes → resultType` — Ω well-formedness). The op
     // evaluates through the definition window to the token.
     const constSig = h.opRegistry.declare(
         new OpSig("mkToken", [natPat], natPat, '\\x:NatPat. match("[0-9]+")'),

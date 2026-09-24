@@ -2,7 +2,7 @@
  * LC Cost Algebra — static cost/depth analysis over LC terms.
  *
  * See _docs/theory/semantics.md §5.5 (The Cost Algebra) and
- * _docs/issue52-plan.md (the implementation plan this module follows).
+ * _docs/design-decisions.md (the decisions this module follows).
  *
  * Totality guarantees that programs terminate; it does not guarantee that they
  * terminate _feasibly_. The cage makes cost analysis unusually tractable — a
@@ -108,8 +108,6 @@ import {
     DataType,
     FamilyType,
     Field,
-    isPatternCarrierType,
-    PatternDataType,
     type RequiredCases,
     Type,
     type TypeCases,
@@ -591,8 +589,8 @@ export interface CostEdge {
 
 /**
  * A flag: the diagnostic (never an error) on value-size feedback without a
- * static bound — the busy-beaver candidate. The payload is the issue's
- * acceptance item: the feedback edge, the missing bound, and the suggested
+ * static bound — the busy-beaver candidate. The payload is the acceptance
+ * item's data: the feedback edge, the missing bound, and the suggested
  * runtime profile.
  */
 export interface CostFlag {
@@ -883,7 +881,6 @@ function typeKind(type: Type | undefined): "data" | "function" | "unknown" {
             typeVar: () => "unknown",
             family: () => "unknown",
             data: () => "data",
-            patternData: () => "data",
             codata: () => "data",
             token: () => "unknown",
             any: () => "unknown",
@@ -909,7 +906,7 @@ function denotationFor(name: string, type: Type | undefined): Denotation {
     }
 }
 
-// ── The fold recurrence (the plan's D4) ───────────────────────────────────────
+// ── The fold recurrence ───────────────────────────────────────────────────────
 
 /**
  * The result-size recurrence's outcome: the closed bound, when the recurrence
@@ -1147,7 +1144,7 @@ function summaryPlus(a: CostSummary, b: CostSummary): CostSummary {
  * opacity rule): Ω's declared signatures, the registry's variant fields,
  * lambda annotations in the source, and the fold's own handler structure. It
  * does NOT consume the type checker's per-node types (the analysis is
- * independent of `LCTypeCheck` — see the plan's D7).
+ * independent of `LCTypeCheck` — that independence is by design).
  *
  * **Closure body costs.** A lambda's summary is O(1) to *produce*, and it
  * carries the body's cost as the **deferred per-application cost** (`bodyCost`)
@@ -1394,7 +1391,10 @@ class CostEngine extends AbstractLC<CostShape> {
     protected override fold(
         dataType: DataType,
         scrutinee: CostSummary,
-        handlers: { variantName: string; bindings: string[]; body: CostSummary }[],
+        handlers: (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: CostSummary }
+            | { kind: "pattern"; patternSource: string; body: CostSummary }
+        )[],
         _resultType: Type,
     ): CostSummary {
         void _resultType
@@ -1402,143 +1402,44 @@ class CostEngine extends AbstractLC<CostShape> {
         // handler-internal application of the recursion binding (the
         // Ackermann shape) records its flag edge inside the body — dropping
         // it would launder a flagged feedback into a certified report.
-        const edges: CostEdge[] = [...scrutinee.edges]
-        const unresolved: UnresolvedCost[] = [...scrutinee.unresolved]
-        const latencies: LatencyReport[] = [...scrutinee.latencies]
-        for (const handler of handlers) {
-            edges.push(...handler.body.edges)
-            unresolved.push(...handler.body.unresolved)
-            latencies.push(...handler.body.latencies)
-        }
-
-        // The scrutinee's size drives the invocation count — a size-sensitive
-        // position: record the edge (scrutinee → this fold).
-        edges.push({
-            producer: scrutinee.provenance,
-            consumer: { kind: "fold", name: dataType.name },
-            position: "fold scrutinee",
-            consumerSite: `fold [${dataType.name}]`,
-            bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
-            isFlagged: scrutinee.resultSize.isOpaque,
-        })
-
-        // The recursion variable: the fold's result at a subtree. The `#`
-        // prefix makes it untypable — a user binder named `foldRec` cannot
-        // collide with the fold's own symbolic quantity under `substitute`.
-        const RECURSION = "#foldRec"
-
-        // Per-handler summaries with the bindings substituted.
-        const perHandler = handlers.map((handler) => {
-            const variant = dataType.findVariant(handler.variantName)
-            let bodyCost = handler.body.cost
-            let bodySize = handler.body.resultSize
-            let bodyDepth = handler.body.depth
-            if (variant !== undefined) {
-                variant.fields.forEach((field: Field, i: number) => {
-                    const binding = handler.bindings[i]
-                    if (binding === undefined) return
-                    if (field.type instanceof FamilyType) {
-                        // The recursion result at the subtree.
-                        const recResult = SizeExpr.variable(RECURSION)
-                        bodyCost = bodyCost.substitute(binding, recResult)
-                        bodySize = bodySize.substitute(binding, recResult)
-                        bodyDepth = bodyDepth.substitute(binding, recResult)
-                    }
-                    // Non-recursive bindings keep their raw field sizes (the
-                    // size variables the production bound them to).
-                })
-            }
-            return {
-                variantName: handler.variantName,
-                cost: bodyCost,
-                size: bodySize,
-                depth: bodyDepth,
-            }
-        })
-
-        // The per-node work: the pairing is invocations × (Σ handler costs)
-        // — a safe OVER-APPROXIMATION of the exact Σ_nodes decomposition
-        // (per node, only the matching handler's body runs; summing all
-        // handlers charges every handler at every node, so non-uniform
-        // handlers over-approximate by the handler-count factor). The sum
-        // (not the max) is what the arithmetic supports: SizeExpr has no max
-        // operator, and the sum stays sound for uniform handlers — where it
-        // IS the max — while the recurrence solver consumes it directly.
-        let perNodeWork = SizeExpr.ZERO
-        let perNodeDepth = DepthExpr.ZERO
-        let foldRecurrence: string | undefined
-        for (const h of perHandler) {
-            perNodeWork = perNodeWork.plus(h.cost)
-            perNodeDepth = perNodeDepth.max(h.depth)
-        }
-
-        // The result-size recurrence: chain carriers (exactly one recursive
-        // variant with exactly one recursive field) close via the solver;
-        // everything else reports the conservative symbolic form.
-        const allVariants = dataType.allVariants()
-        const recursiveVariants = allVariants.filter((v) =>
-            v.fields.some((f) => f.type instanceof FamilyType)
+        // The one composition: the handler list dispatches BY ARM KIND —
+        // a carrier whose scrutinee and arms are all variant-shaped runs
+        // the recursion-substitution composition; a carrier with pattern
+        // arms runs the single-step token-charge composition. A MIXED
+        // handler list (both kinds on one carrier) composes both: the
+        // variant arms charge per node over the variant scrutinee, the
+        // pattern arms charge the token dispatch (the value-kind
+        // disjointness — a VariantVal scrutinee never fires a pattern arm
+        // and vice versa — makes the per-arm reading exact per arm).
+        const variantArms = handlers.filter(
+            (
+                h,
+            ): h is {
+                kind: "variant"
+                variantName: string
+                bindings: string[]
+                body: CostSummary
+            } => h.kind === "variant",
         )
-        let resultSize: SizeExpr
-        const isChain = recursiveVariants.length === 1 &&
-            recursiveVariants[0]!.fields.filter((f) => f.type instanceof FamilyType).length === 1
-        if (isChain) {
-            const recVariant = recursiveVariants[0]!
-            const baseVariants = allVariants.filter(
-                (v) => !v.fields.some((f) => f.type instanceof FamilyType),
-            )
-            const baseSize = baseVariants.reduce<SizeExpr>(
-                (sum, v) => {
-                    const h = perHandler.find((ph) => ph.variantName === v.name)
-                    return sum.plus(h ? h.size : SizeExpr.ZERO)
-                },
-                SizeExpr.ZERO,
-            )
-            const stepHandler = perHandler.find((ph) => ph.variantName === recVariant.name)
-            const stepSize = stepHandler ? stepHandler.size : SizeExpr.ZERO
-            // The recurrence's input is the scrutinee's FULL size expression
-            // — the invocation count is the input's node count, whatever
-            // variables name it (e.g. `|p0|` under an op definition's
-            // environment, `|m| + |n|` for a sum-scrutinee, the literal's own
-            // node count for a constructor literal). An opaque scrutinee
-            // names itself honestly (`scrutinee` — the conservative fallback
-            // the cost path below shares).
-            const inputSize = scrutinee.resultSize.isOpaque
-                ? SizeExpr.variable("#scrutinee")
-                : scrutinee.resultSize
-            const solved = solveChainRecurrence(baseSize, stepSize, RECURSION, inputSize)
-            resultSize = solved.closed ?? SizeExpr.opaque("super-affine structural growth")
-            foldRecurrence = solved.recurrence
-        } else {
-            resultSize = SizeExpr.variable(RECURSION)
+        const patternArms = handlers.filter(
+            (h): h is { kind: "pattern"; patternSource: string; body: CostSummary } =>
+                h.kind === "pattern",
+        )
+        if (variantArms.length === 0) {
+            // Patterns-only arms: the single-step token charge (the same
+            // composition a dedicated pattern-fold action would give).
+            return patternFoldSummaryFrom(dataType, scrutinee, patternArms)
         }
-
-        // The cost: scrutinee evaluation + Σ over nodes of per-node work.
-        // The invocation count is the scrutinee's node count — exact for a
-        // literal scrutinee (its own size), else the scrutinee's OWN size
-        // variable (e.g. |p0| under an op definition's parameter denotation —
-        // the recurrence's input, named by the denotation the environment
-        // bound; an unbound scrutinee falls back to its rendered form).
-        const isLiteral = scrutinee.provenance.kind === "constructor"
-        const invocations = isLiteral
-            ? scrutinee.resultSize
-            : scrutinee.resultSize.isOpaque
-            ? SizeExpr.variable("#scrutinee")
-            : scrutinee.resultSize
-        const foldCost = invocations.times(perNodeWork)
-        const foldDepth = scrutinee.depth.plus(invocations).max(perNodeDepth.plus(invocations))
-
-        return {
-            cost: scrutinee.cost.plus(foldCost),
-            depth: foldDepth,
-            resultSize,
-            recurrence: foldRecurrence,
-            provenance: { kind: "fold", name: dataType.name },
-            resultKind: resultSize.isOpaque ? "unknown" : "data",
-            edges,
-            unresolved,
-            latencies,
-        }
+        return foldSummaryFrom(
+            dataType,
+            scrutinee,
+            variantArms.map((h) => ({
+                variantName: h.variantName,
+                bindings: h.bindings,
+                body: h.body,
+            })),
+            patternArms,
+        )
     }
 
     /**
@@ -1577,98 +1478,6 @@ class CostEngine extends AbstractLC<CostShape> {
             resultSize: SizeExpr.constant(1),
             provenance: { kind: "unfold", name: codataType.name },
             resultKind: "data",
-            edges,
-            unresolved,
-            latencies,
-        }
-    }
-
-    /**
-     * fold [T] e { match("pᵢ") → tᵢ } — the pattern-matched fold (single
-     * step, no recursion): the token scrutinee dispatches to ONE handler,
-     * whose body runs once. The cost is the scrutinee's cost plus that
-     * handler's cost; there is no invocation count, no `#foldRec` variable,
-     * no recurrence — a pattern arm binds no fields, so nothing
-     * substitutes. The records ride along from the scrutinee AND the fired
-     * handler (the same record-carrying discipline the variant fold
-     * applies); the token edge records the dispatch.
-     */
-    protected override patternFold(
-        dataType: PatternDataType | DataType,
-        scrutinee: CostSummary,
-        handlers: { patternSource: string; body: CostSummary }[],
-        _resultType: Type,
-    ): CostSummary {
-        void _resultType
-        // The FIRED handler: dispatch by the scrutinee's token identity. A
-        // match-route token names its pattern in its size variable
-        // (`token(T:<p>)` — matchedPattern's naming), so the handler whose
-        // canonical source sanitizes to the same component is the one the
-        // fold fires. A token whose size is NOT a single such variable (the
-        // bare-atom route's `token(T)`, an opaque or multi-monomial
-        // scrutinee) carries no dispatch identity — the conservative charge
-        // (EVERY handler's records and cost) stands, the same over-approximation
-        // discipline the variant fold applies to non-uniform handlers: a
-        // false precise bound would be worse than a sound over-charge.
-        const scrutineeVar = renderTokenVariable(scrutinee.resultSize)
-        const fired = scrutineeVar === undefined
-            ? undefined
-            : handlers.find((h) =>
-                `token(${dataType.name}:${sanitizeNameComponent(h.patternSource)})` ===
-                    scrutineeVar
-            )
-        const charged = fired !== undefined ? [fired] : handlers
-
-        // The charged handlers' records ride along with the scrutinee's (the
-        // handler bodies were analyzed under the production's environment; a
-        // handler-internal application of an opaque value records its flag
-        // edge inside the body — dropping it would launder a flagged feedback
-        // into a certified report).
-        const edges: CostEdge[] = [...scrutinee.edges]
-        const unresolved: UnresolvedCost[] = [...scrutinee.unresolved]
-        const latencies: LatencyReport[] = [...scrutinee.latencies]
-        let perNodeWork = SizeExpr.ZERO
-        let perNodeDepth = DepthExpr.ZERO
-        for (const h of charged) {
-            edges.push(...h.body.edges)
-            unresolved.push(...h.body.unresolved)
-            latencies.push(...h.body.latencies)
-            perNodeWork = perNodeWork.plus(h.body.cost)
-            perNodeDepth = perNodeDepth.max(h.body.depth)
-        }
-
-        // The dispatch edge: the token → this fold.
-        edges.push({
-            producer: scrutinee.provenance,
-            consumer: { kind: "foldMatch", name: dataType.name },
-            position: "pattern fold scrutinee",
-            consumerSite: `fold [${dataType.name}]`,
-            bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
-            isFlagged: scrutinee.resultSize.isOpaque,
-        })
-
-        // The result: EXACT only when the dispatch is exact (a single fired
-        // handler — the body's own result). A conservative charge (multiple
-        // handlers) means the fired arm is unknowable statically: the result
-        // could be ANY charged body's — larger, or function-typed — so the
-        // size is opaque and the kind unknown (a charged[0]-precise bound
-        // would underbound the result and miss the opacity/feedback behavior
-        // a later handler carries).
-        const result = charged.length === 1
-            ? { size: charged[0]!.body.resultSize, kind: charged[0]!.body.resultKind }
-            : {
-                size: SizeExpr.opaque(
-                    `the dispatch identity is not discoverable — the result is one of ${charged.length} handler bodies`,
-                ),
-                kind: "unknown" as const,
-            }
-
-        return {
-            cost: scrutinee.cost.plus(perNodeWork),
-            depth: scrutinee.depth.max(perNodeDepth),
-            resultSize: result.size,
-            provenance: { kind: "foldMatch", name: dataType.name },
-            resultKind: result.kind,
             edges,
             unresolved,
             latencies,
@@ -1964,7 +1773,7 @@ function applySummary(fn: CostSummary, arg: CostSummary, consumer: Provenance): 
     }
 }
 
-// ── Op summaries (the plan's D6: memoized, stratified, identity-bearing) ──────
+// ── Op summaries (memoized, stratified, identity-bearing) ────────────────────
 
 /**
  * An operation's cost summary: the definition's summary with the parameters'
@@ -2273,7 +2082,7 @@ export function analyzeTerm(
     return reportOf(summary, source, undefined)
 }
 
-// ── CostPass: the DerivationTree-consuming vehicle (the plan's D2) ────────────
+// ── CostPass: the DerivationTree-consuming vehicle ───────────────────────────
 
 /**
  * The deferred-summary shape the pass's per-production methods return: a
@@ -2293,7 +2102,7 @@ interface CostPassShape {
 
 /**
  * `CostPass extends SemanticPass` — the `DerivationTree`-consuming entry the
- * issue mandates. The pass consumes the type checker's derivation trees
+ * design mandates. The pass consumes the type checker's derivation trees
  * (`LCTypeCheck.parseToTree`) and composes the memoized op summaries at the
  * tree's `opProd` nodes (never re-reading a definition — the
  * identity-survival payoff: the tree names the op, the summary comes from Ω
@@ -2615,83 +2424,6 @@ export class CostPass extends SemanticPass<CostPassShape> {
     }
 
     /**
-     * spanPatternFoldHandler: the checker's pattern-fold handler record
-     * (canonical pattern source, body span) — the same identity-summary
-     * discipline spanFoldHandler applies; the pattern fold's assembly
-     * consumes the values.
-     */
-    protected spanPatternFoldHandler(
-        node: DerivationNode,
-        _children: readonly DeferredSummary[],
-    ): DeferredSummary {
-        void node
-        return passthroughSummary
-    }
-
-    /**
-     * patternFoldProd: the pattern-matched fold's assembly from the tree's
-     * records: the carrier (the typeProd descendant's value — a pattern
-     * carrier), the scrutinee (the first expr child), the handler
-     * records (patternSource/bodySpan). The fired handler's body re-reads
-     * from its span through the shared engine under the AMBIENT environment
-     * extended with the token denotation (`match` bound — the engine's own
-     * token sizing applies). There is no handler-environment walk (no
-     * fields to bind) and no recursion substitution. When the tree did not
-     * keep the records (a fragmented forest), the node's own source span
-     * re-reads through the engine — the fallback that keeps the report the
-     * algebra's (the same discipline foldProd applies).
-     */
-    protected patternFoldProd(
-        node: DerivationNode,
-        children: readonly DeferredSummary[],
-    ): DeferredSummary {
-        const carrierNode = collectDescendants(node, "typeProd")[0]
-        const carrier = carrierNode?.value
-        const scrutineeNode = firstExprChild(node)
-        const scrutinee = scrutineeNode === undefined ? undefined : this.defer(scrutineeNode)
-        const childFlow = children.length === 1 ? children[0]! : undefined
-        return (env) => {
-            const carrierName = carrier instanceof Type ? dataTypeNameOfType(carrier) : undefined
-            const patternType = carrierName === undefined
-                ? undefined
-                : this.registry.lookup(carrierName)
-            const scrutineeSummary = scrutinee === undefined ? emptySummary() : scrutinee(env)
-            // The assembly accepts a pattern carrier only (the shared guard —
-            // the ONE member-shape definition); anything else falls through
-            // to the child flow.
-            if (!isPatternCarrierType(patternType)) {
-                return childFlow === undefined ? scrutineeSummary : childFlow(env)
-            }
-            const records = collectDescendants(node, "spanPatternFoldHandler")
-                .map((h) => h.value as SpanPatternFoldRecord | undefined)
-                .filter((r): r is SpanPatternFoldRecord => r !== undefined)
-            if (records.length === 0) {
-                // No records on this tree: re-read the fold's span through
-                // the engine (the honest structure source).
-                const slice = this.nodeSourceSlice(node)
-                return slice === undefined
-                    ? scrutineeSummary
-                    : this.engine.analyze(slice, env) ?? scrutineeSummary
-            }
-            // The assembly feeds patternFoldSummaryFrom, which mirrors the
-            // engine's own dispatch (a `token(T:<p>)`-shaped scrutinee fires
-            // exactly its handler; any other shape charges every handler
-            // conservatively). Each body re-reads under the ambient
-            // environment extended with the token denotation — the binding's
-            // size variable is the engine's per-pattern token variable, so
-            // the body's arithmetic and a direct token analysis agree.
-            const handlers = records.map((r) => ({
-                patternSource: r.patternSource,
-                body: this.engine.analyze(
-                    this.engineSource().slice(r.bodySpan.start, r.bodySpan.end),
-                    env.extend("match", tokenDenotation(patternType.name, r.patternSource)),
-                ) ?? emptySummary(),
-            }))
-            return patternFoldSummaryFrom(patternType, scrutineeSummary, handlers)
-        }
-    }
-
-    /**
      * foldProd: the fold's assembly from the tree's records: the carrier
      * (the typeProd descendant's value), the scrutinee (the first expr
      * child), the handler records (variantName/bindings/bodySpan). Bodies
@@ -2827,12 +2559,6 @@ interface SpanFoldRecord {
     readonly bodySpan: { start: number; end: number }
 }
 
-/** The checker's `spanPatternFoldHandler` record shape. */
-interface SpanPatternFoldRecord {
-    readonly patternSource: string
-    readonly bodySpan: { start: number; end: number }
-}
-
 /** The pass's identity summary (no work, no records). */
 function passthroughSummary(_env: CostEnv): CostSummary {
     return emptySummary()
@@ -2903,10 +2629,23 @@ function foldSummaryFrom(
     dataType: DataType,
     scrutinee: CostSummary,
     handlers: { variantName: string; bindings: string[]; body: CostSummary }[],
+    patternArms: { kind: "pattern"; patternSource: string; body: CostSummary }[] = [],
 ): CostSummary {
     const edges: CostEdge[] = [...scrutinee.edges]
     const unresolved: UnresolvedCost[] = [...scrutinee.unresolved]
     const latencies: LatencyReport[] = [...scrutinee.latencies]
+    // The pattern arms ride along FIRST (their records join the variant
+    // arms' — the same record-carrying discipline): a mixed fold charges
+    // both routes, the token dispatch's records are part of the
+    // certificate.
+    const patternCharge = patternArms.length > 0
+        ? patternFoldSummaryFrom(dataType, scrutinee, patternArms)
+        : undefined
+    if (patternCharge !== undefined) {
+        edges.push(...patternCharge.edges)
+        unresolved.push(...patternCharge.unresolved)
+        latencies.push(...patternCharge.latencies)
+    }
     for (const handler of handlers) {
         edges.push(...handler.body.edges)
         unresolved.push(...handler.body.unresolved)
@@ -2950,6 +2689,21 @@ function foldSummaryFrom(
     for (const h of perHandler) {
         perNodeWork = perNodeWork.plus(h.cost)
         perNodeDepth = perNodeDepth.max(h.depth)
+    }
+    // The pattern arms' single-step charge joins the per-node work: a mixed
+    // fold's nodes pay the variant dispatch OR the token dispatch (never
+    // both — the value-kind disjointness), so SUMMING both charges is the
+    // same over-approximation the non-uniform variant fold already applies.
+    // The arms' per-node work is computed directly from the charged arms
+    // (patternFoldSummaryFrom's composition is scrutinee.cost + Σ arms; the
+    // scrutinee's own cost is already in the outer sum).
+    if (patternCharge !== undefined) {
+        let patternWork = SizeExpr.ZERO
+        for (const arm of patternArms) {
+            patternWork = patternWork.plus(arm.body.cost)
+        }
+        perNodeWork = perNodeWork.plus(patternWork)
+        perNodeDepth = perNodeDepth.max(patternCharge.depth)
     }
     const allVariants = dataType.allVariants()
     const recursiveVariants = allVariants.filter((v) =>
@@ -3015,12 +2769,12 @@ function foldSummaryFrom(
  * variant fold applies to non-uniform handlers — a false precise bound would
  * be worse than a sound over-charge). No `#foldRec`, no recurrence — a
  * pattern arm binds no fields, so nothing substitutes. The carrier is the
- * pattern-carrier union (the same shape the engine's own patternFold action
+ * pattern-carrier union (the same shape the engine's fold's pattern arm
  * accepts): the composition reads only the NAME (dispatch keys, edge
  * labels), so both shapes flow through one helper.
  */
 function patternFoldSummaryFrom(
-    dataType: PatternDataType | DataType,
+    dataType: DataType,
     scrutinee: CostSummary,
     handlers: { patternSource: string; body: CostSummary }[],
 ): CostSummary {
@@ -3052,7 +2806,7 @@ function patternFoldSummaryFrom(
         bound: scrutinee.resultSize.isOpaque ? undefined : scrutinee.resultSize,
         isFlagged: scrutinee.resultSize.isOpaque,
     })
-    // The result mirrors the engine's patternFold: EXACT (the fired body's
+    // The result mirrors the engine's fold's pattern arm: EXACT (the fired body's
     // own result) only when the dispatch is exact; a conservative charge's
     // result is opaque/unknown (any charged body could produce it).
     const result = charged.length === 1
@@ -3128,9 +2882,9 @@ function leafText(node: DerivationNode | undefined): string | undefined {
 
 /** The carrier's name from a type value (`undefined` for the rest). */
 function dataTypeNameOfType(type: Type): string | undefined {
-    // PatternDataType is NOT a DataType (a disjoint Type subclass — a pattern
+    // DataType is NOT a DataType (a disjoint Type subclass — a pattern
     // type has no variants), so the pattern-fold carrier's name must be read
     // here too; missing it would send the CostPass's pattern-fold assembly to
     // the fallback on every real tree.
-    return type instanceof DataType || type instanceof PatternDataType ? type.name : undefined
+    return type instanceof DataType ? type.name : undefined
 }

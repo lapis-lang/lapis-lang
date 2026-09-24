@@ -2,7 +2,7 @@
  * Mixed-carrier tests — a `DataType` declaring BOTH named variants and
  * pattern members (the Stage-1 additive form). The member gates widened
  * additively: a mixed carrier's pattern member's bare atom reads as its
- * token (the same reading `PatternDataType`'s atoms took), its `match("…")`
+ * token (the same reading `DataType`'s atoms took), its `match("…")`
  * form introduces through the pattern route, and `fold [T] …` over it routes
  * to the pattern fold (the pattern branch is ordered first). The variant
  * routes keep working on the same carrier — both member kinds are reachable
@@ -91,7 +91,7 @@ function evalOne(
 Deno.test("mixed carrier: the registry indexes a DataType's patterns (reverse lookup)", () => {
     const h = mixedHarness()
     // The declared pattern resolves through the reverse index to the
-    // mixed carrier — the same index `PatternDataType` registration filled.
+    // mixed carrier — the same index `DataType` registration filled.
     assertEquals(h.registry.lookupPatternSource(HEX6), h.color)
 })
 
@@ -143,7 +143,12 @@ Deno.test("mixed carrier: inherited pattern owner is registration-ORDER independ
     const child = DataType.define("ChildColor", parent)
         .addVariant(new Variant("Red", []))
         .build()
-    const foldSrc = `fold [ChildColor] match("${HEX6}") { match("${HEX6}") → match }`
+    // ChildColor is MIXED (the Red variant + the inherited pattern), so the
+    // Progress premise requires the Red() arm alongside the pattern arm —
+    // the token scrutinee fires the pattern arm end-to-end. The arm bodies
+    // both type Color (a pattern arm's body binds `match : Token`; a variant
+    // arm's does not, so it names the variants) — one common σ.
+    const foldSrc = `fold [ChildColor] match("${HEX6}") { Red() → Red(), match("${HEX6}") → Red() }`
     for (
         const order of [["parent-first", parent, child], ["child-first", child, parent]] as const
     ) {
@@ -166,8 +171,8 @@ Deno.test("mixed carrier: inherited pattern owner is registration-ORDER independ
             `${label}: the child-carrier fold type-checks`,
         )
         assert(
-            [...ev.parseWith(foldSrc, new ValueEnv())][0] instanceof TokenVal,
-            `${label}: the child-carrier fold evaluates`,
+            [...ev.parseWith(foldSrc, new ValueEnv())][0]?.renderDisplay() === "Red()",
+            `${label}: the child-carrier fold evaluates (the pattern arm fired)`,
         )
         // The PARENT's fold still handles the pattern (its lineage declares
         // it; the child-named token is a subtype of the parent, so premise 1
@@ -210,7 +215,7 @@ Deno.test("mixed carrier: a variant-only carrier's name is not a pattern languag
 Deno.test("mixed carrier: the bare carrier name introduces a token (T-Token over a DataType)", () => {
     const h = mixedHarness()
     // The bare atom's shape: the CARRIER name (the same reading a
-    // PatternDataType's bare atom took — the token's text is the name). The
+    // DataType's bare atom took — the token's text is the name). The
     // variant names (`Red`, `Green`, `Hex`) are constructor calls, not
     // tokens.
     const t = typeOfOne(h, "Color")
@@ -269,22 +274,29 @@ Deno.test("mixed carrier: an undeclared pattern rejects the match route", () => 
 
 Deno.test("mixed carrier: fold over the pattern arm routes to the pattern fold", () => {
     const h = mixedHarness()
-    // The annotation carries patterns — the ordered-first pattern branch owns
-    // the source; the single handler returns its token, so σ = Token.
+    // The mixed carrier's fold: complete variant arms (the Progress premise —
+    // the scrutinee's type admits variant values) PLUS the pattern arm. All
+    // arm bodies type Color (the pattern arm's body returns a variant, not
+    // the token — one common σ across the arm groups), so σ = Color.
     const t = typeOfOne(
         h,
-        `fold [Color] match("${HEX6}") { match("${HEX6}") → match }`,
+        `fold [Color] match("${HEX6}") { Red() → Red(), Green() → Green(), Hex() → Hex(), match("${HEX6}") → Red() }`,
     )
-    assert(t instanceof TokenType, "the fold's result is the handler body's type")
+    assertEquals(t, h.color, "the fold's result is the joined arm type")
 })
 
-Deno.test("mixed carrier: fold dispatches the token to its handler", () => {
+Deno.test("mixed carrier: fold dispatches a token scrutinee to its pattern arm", () => {
     const h = mixedHarness()
     const v = evalOne(
         h,
-        `fold [Color] match("${HEX6}") { match("${HEX6}") → match }`,
+        `fold [Color] match("${HEX6}") { Red() → Green(), Green() → Red(), Hex() → Red(), match("${HEX6}") → Red() }`,
     )
-    assert(v instanceof TokenVal, "the fired body returned the bound token")
+    assert(v !== undefined)
+    assertEquals(
+        v!.renderDisplay(),
+        "Red()",
+        "the token scrutinee fired the pattern arm (its body returned Red())",
+    )
 })
 
 Deno.test("mixed carrier: exhaustiveness covers the pattern members", () => {
@@ -293,17 +305,19 @@ Deno.test("mixed carrier: exhaustiveness covers the pattern members", () => {
     assertEquals(
         typeOfOne(
             h,
-            `fold [Color] match("${HEX6}") { match("${HEX6}") → match }`,
+            `fold [Color] match("${HEX6}") { Red() → Red(), Green() → Red(), Hex() → Red(), match("${HEX6}") → Red() }`,
         ),
         undefined,
         "the second declared pattern has no handler",
     )
-    // Both handlers: the fold accepts and types as the common σ.
+    // Both handlers (plus the complete variant arms the Progress premise
+    // requires on a mixed carrier), all bodies typing Color — the fold
+    // accepts and types as the joined σ.
     const t = typeOfOne(
         h,
-        `fold [Color] match("${HEX6}") { match("${HEX6}") → match, match("${HEX2}") → match }`,
+        `fold [Color] match("${HEX6}") { Red() → Red(), Green() → Green(), Hex() → Hex(), match("${HEX6}") → Red(), match("${HEX2}") → Red() }`,
     )
-    assert(t instanceof TokenType, "complete handlers type the fold")
+    assertEquals(t, h.color, "complete handlers type the fold")
 })
 
 // ── Variant routes keep working on the same carrier ─────────────────────────
@@ -318,19 +332,15 @@ Deno.test("mixed carrier: variant fold still parses (the same carrier, variant r
 
 Deno.test("mixed carrier: a variant scrutinee takes no pattern handler", () => {
     const h = mixedHarness()
-    // A variant scrutinee is NOT a token: the pattern fold declines it (the
-    // two routes never mix within one step) — the evaluator reports the
-    // failure as an `EvalErrorValue` sentinel, never a crash and never a
-    // successful handler dispatch.
-    //
-    // PINNED STAGE-1 BOUNDARY: the checker cannot per-arm-enforce the token
-    // shape — premise 1 (`isSubtype(scrutineeType, T)`) passes because
-    // `Red() : Color` on a mixed carrier, and only the evaluator's dispatch
-    // catches the shape mismatch. On a pure PatternDataType the tension cannot
-    // arise (no variants exist), so this is a surface the mixed form opens;
-    // the merged fold's per-arm premises close it. Until then, this sentinel
-    // (not a parse rejection) IS the pinned contract — do not mistake it for
-    // a final typing rule.
+    // A variant scrutinee is NOT a token: the pattern arm cannot fire on it
+    // — the evaluator reports the failure as an `EvalErrorValue` sentinel,
+    // never a crash and never a successful handler dispatch. (The checker
+    // accepts the fold — its premises are the per-arm sets, and both hold:
+    // the variant arm set covers every variant, the pattern arm set covers
+    // every declared pattern — because the value-kind disjointness makes
+    // either scrutinee shape fire only its own arms; the evaluator's
+    // dispatch is where the mismatch surfaces for a term that would fire a
+    // pattern arm on a variant value.)
     const folded = evalOne(
         h,
         `fold [Color] Red() { match("${HEX6}") → match }`,
@@ -339,6 +349,62 @@ Deno.test("mixed carrier: a variant scrutinee takes no pattern handler", () => {
         folded instanceof EvalErrorValue,
         "a variant scrutinee takes no pattern handler (the error sentinel)",
     )
+})
+
+// ── The ONE mixed-handler fold form: variant heads AND the pattern head in ONE handler list ──
+
+Deno.test("mixed carrier: ONE fold lists variant heads AND the pattern head (the checker types it)", () => {
+    const h = mixedHarness()
+    // The single mixed-handler fold form: variant arms covering every
+    // variant AND the match head covering the declared pattern, in ONE
+    // handler list. The checker's merged fold parses the alternation per
+    // handler and its premises hold per arm set: the result is the joined
+    // arm type (the pattern arm's σ-constant body joins the variant
+    // fixpoint's σ — all Color here).
+    const t = typeOfOne(
+        h,
+        `fold [Color] Red() { Red() → Red(), Green() → Green(), Hex() → Hex(), match("${HEX6}") → Red() }`,
+    )
+    assert(t !== undefined, "the mixed handler list parses and types")
+    assertEquals(t, h.color, "the joined arm type is the carrier")
+})
+
+Deno.test("mixed carrier: ONE mixed-handler fold evaluates by the scrutinee's value shape", () => {
+    const h = mixedHarness()
+    // The evaluator's kind dispatch: a VariantVal scrutinee fires the
+    // variant arm (Green()); a TokenVal scrutinee fires the pattern arm —
+    // both routes live in ONE handler list, never mixing within a step.
+    const variantRoute = evalOne(
+        h,
+        `fold [Color] Red() { Red() → Green(), Green() → Red(), Hex() → Red(), match("${HEX6}") → Red() }`,
+    )
+    assert(variantRoute !== undefined)
+    assertEquals(
+        variantRoute!.renderDisplay(),
+        "Green()",
+        "the variant scrutinee took the variant arm",
+    )
+    const tokenRoute = evalOne(
+        h,
+        `fold [Color] match("${HEX6}") { Red() → Green(), Green() → Red(), Hex() → Red(), match("${HEX6}") → Green() }`,
+    )
+    assert(tokenRoute !== undefined)
+    assertEquals(
+        tokenRoute!.renderDisplay(),
+        "Green()",
+        "the token scrutinee took the pattern arm",
+    )
+})
+
+Deno.test("mixed carrier: a mixed handler list missing a variant arm rejects (exhaustiveness stays per arm set)", () => {
+    const h = mixedHarness()
+    // The variant arm set is all-or-nothing even when the pattern arm is
+    // present: Red + Green covered but Hex missing rejects the fold.
+    const t = typeOfOne(
+        h,
+        `fold [Color] Red() { Red() → Red(), Green() → Green(), match("${HEX6}") → Red() }`,
+    )
+    assertEquals(t, undefined, "the Hex variant has no handler")
 })
 
 // ── Cross-carrier isolation ─────────────────────────────────────────────────

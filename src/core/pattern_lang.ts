@@ -52,7 +52,7 @@
  * the space it claims).
  */
 
-import { type PatternDataType } from "./types.ts"
+import { type PatternTypeShape } from "./pattern_shape.ts"
 
 // ── The character universe ───────────────────────────────────────────────────
 
@@ -130,6 +130,17 @@ export type PatternAST =
     | { readonly kind: "plus"; readonly inner: PatternAST }
     /** `p?` — zero or one. */
     | { readonly kind: "opt"; readonly inner: PatternAST }
+    /**
+     * `p{n}`, `p{n,}`, `p{n,m}` — counted repetition (the residual shapes
+     * beyond the sugar: {0,}→star, {1,}→plus, {0,1}→opt, {1}→inner all
+     * desugar at parse, so `repeat` carries only min ≥ 2 or a bounded max).
+     */
+    | {
+        readonly kind: "repeat"
+        readonly inner: PatternAST
+        readonly min: number
+        readonly max: number | undefined
+    }
     /** `<TypeName>` — the pattern of another registered data type. */
     | { readonly kind: "typeref"; readonly name: string }
 
@@ -161,6 +172,12 @@ export function patternToString(ast: PatternAST): string {
             return `${patternToString(ast.inner)}+`
         case "opt":
             return `${patternToString(ast.inner)}?`
+        case "repeat":
+            return ast.max === undefined
+                ? `${patternToString(ast.inner)}{${ast.min},}`
+                : ast.max === ast.min
+                ? `${patternToString(ast.inner)}{${ast.min}}`
+                : `${patternToString(ast.inner)}{${ast.min},${ast.max}}`
         case "typeref":
             return `<${ast.name}>`
     }
@@ -229,12 +246,37 @@ export class PatternParseError extends Error {
     }
 }
 
+/**
+ * The practical limit on a user-defined pattern's SOURCE LENGTH — the parse
+ * edge rejects anything longer, loudly. The bound is a hygiene cap, not a
+ * semantic one: patterns beyond it are unmaintainable to spell correctly
+ * (escape accounting, canonical-source identity, the reviewer's read) and
+ * every consumer below the parse (the set-closure counting, the
+ * enumeration, the certificate's canonical keys) scales with the SOURCE
+ * length's potential expansion, not the pattern's match reach. 80
+ * characters is generous headroom for real lexical rules (`Nat`'s
+ * `[0-9]+`, `Int`'s two-pattern form, `Complex`'s signed pair, the
+ * motivating `#[A-F0-9]{6}`) while keeping the certificate's canonical
+ * keys bounded; a genuinely lexical shape that needs more belongs in a
+ * second declared variant (alternation-by-variant is the fragment's own
+ * decomposition tool).
+ */
+export const MAX_PATTERN_SOURCE_LENGTH = 80
+
 /** The pattern AST of one source pattern — the parse is total or throws. */
 export function parsePattern(source: string): PatternAST {
     if (source.length === 0) {
         throw new PatternParseError(
             source,
             "an empty pattern matches nothing — a variant must consume at least one character",
+        )
+    }
+    if (source.length > MAX_PATTERN_SOURCE_LENGTH) {
+        throw new PatternParseError(
+            source,
+            `the pattern source is ${source.length} characters — past the ` +
+                `${MAX_PATTERN_SOURCE_LENGTH}-character practical limit ` +
+                "(a lexical rule that needs more belongs in a second declared variant)",
         )
     }
     const parser = new PatternParser(source)
@@ -294,6 +336,79 @@ class PatternParser {
             } else if (ch === "?") {
                 this.pos++
                 atom = { kind: "opt", inner: atom }
+            } else if (ch === "{") {
+                // The counted-repetition postfix `{n}`, `{n,}`, `{n,m}` —
+                // the sugar DESUGARS AT PARSE ({0,}→star, {1,}→plus,
+                // {0,1}→opt, {1}→the inner itself), so the residual shapes
+                // (`{n}` and `{n,}` for n ≥ 2, `{n,m}` beyond the sugar)
+                // become `repeat` nodes — one new AST kind, every downstream
+                // consumer (counts, enumeration, rendering, anchoring)
+                // handles exactly one case.
+                this.pos++
+                // The postfix is STRICT — no whitespace inside the braces
+                // (`{2}`, `{2,}`, `{2,3}`): whitespace is a literal
+                // matchable character in this fragment (a pattern may
+                // consume it as content), so a space inside the braces
+                // would be ambiguous with the payload's own characters —
+                // the strict form keeps the postfix's grammar
+                // unambiguous. `a{2 }` rejects (the regex declines, the
+                // brace-postfix error names the spellings; a literal `{`
+                // spells as `\{`).
+                const digits = /^(\d+)(,(\d+)?)?/.exec(
+                    this.source.slice(this.pos),
+                )
+                if (!digits) {
+                    throw new PatternParseError(
+                        this.source,
+                        `a brace postfix needs \`{n}\`, \`{n,}\`, or \`{n,m}\` (a literal \'{\' spells as \\{)`,
+                    )
+                }
+                const min = parseInt(digits[1]!, 10)
+                const hasComma = digits[2] !== undefined
+                const maxText = digits[3]
+                if (maxText === undefined && hasComma) {
+                    // `{n,}` — unbounded above.
+                    const consumed = digits[0]!.length
+                    this.pos += consumed
+                    if (this.source[this.pos] !== "}") {
+                        throw new PatternParseError(
+                            this.source,
+                            `an unterminated counted repetition — missing }`,
+                        )
+                    }
+                    this.pos++
+                    atom = min === 0
+                        ? { kind: "star", inner: atom }
+                        : min === 1
+                        ? { kind: "plus", inner: atom }
+                        : { kind: "repeat", inner: atom, min, max: undefined }
+                    continue
+                }
+                const max = maxText === undefined ? min : parseInt(maxText, 10)
+                const consumed = digits[0]!.length
+                this.pos += consumed
+                if (this.source[this.pos] !== "}") {
+                    throw new PatternParseError(
+                        this.source,
+                        `an unterminated counted repetition — missing }`,
+                    )
+                }
+                this.pos++
+                if (max !== undefined && max < min) {
+                    throw new PatternParseError(
+                        this.source,
+                        `a counted repetition {${min},${max}} is inverted (max < min)`,
+                    )
+                }
+                atom = min === 0 && max === 1
+                    ? { kind: "opt", inner: atom }
+                    : min === 0 && max === undefined
+                    ? { kind: "star", inner: atom }
+                    : min === 1 && max === undefined
+                    ? { kind: "plus", inner: atom }
+                    : min === 1 && max === 1
+                    ? atom
+                    : { kind: "repeat", inner: atom, min, max }
             } else {
                 break
             }
@@ -457,7 +572,7 @@ class PatternParser {
  */
 export interface PatternCountEnv {
     /** Look up a referenced type by name (returns undefined for unknown names). */
-    lookupPattern(name: string): PatternDataType | undefined
+    lookupPattern(name: string): PatternTypeShape | undefined
     /** The referenced type's coefficients — the recursion point (memoized by the caller). */
     coefficientsOf(name: string, k: number, stack: readonly string[]): readonly number[]
     /** The referenced type's full size-≤ k token set (the enumeration recursion point). */
@@ -612,6 +727,57 @@ export function patternCounts(
                 out.push(n === 0 ? Math.max(1, inner[0] ?? 0) : inner[n] ?? 0)
             }
             return out
+        }
+        case "repeat": {
+            // The SET-CLOSURE reading (§2.2 item 1): the language is the
+            // union of the inner's powers Pᵢ for i ∈ [min..max] — each power
+            // is the inner's enumerated string set concatenated i times, the
+            // union dedups overlapping powers, and the per-length profile
+            // reads off the merged set. The counts and the enumeration share
+            // this walk (the certificate's two derivations agree for {n,m}
+            // exactly as they do for star). Budget: a wide `{n,}` explodes
+            // the closure — MAX_STAR_COUNT_BUDGET declines loudly (the
+            // honest bound, the same discipline star/plus apply).
+            // The inner's ENUMERATED string set per length (the pieces the
+            // powers concatenate) — the same constructive dual star's arm
+            // reads. A past-budget inner declines the whole node.
+            const pieces = enumerateNode(ast.inner, k, env, MAX_STAR_COUNT_BUDGET, refChain)
+            if (pieces === undefined) {
+                throw new PatternParseError(
+                    patternToString(ast),
+                    `the counted repetition's inner enumeration exceeds the counting budget — the count declines loudly`,
+                )
+            }
+            // Iterate the powers: P⁰ = {ε}, Pᵢ = Pᵢ₋₁ · pieces. The union
+            // collects only i ∈ [min..max] (the bounded case; unbounded runs
+            // to the fixpoint — bounded by k, no string can exceed length k
+            // once no new string appears). min===0 joins P⁰ = {ε} (the
+            // zero-repetition member — `a{0,3}` holds ε exactly as `a?` does).
+            const out = new Set<string>()
+            if (ast.min === 0) out.add("")
+            let power = new Set<string>([""])
+            const upper = ast.max ?? k + 1
+            for (let i = 1; i <= Math.min(upper, k + 1); i++) {
+                const next = new Set<string>()
+                for (const left of power) {
+                    for (const piece of pieces) {
+                        const joined = left + piece
+                        if (joined.length <= k) next.add(joined)
+                        if (next.size > MAX_STAR_COUNT_BUDGET) {
+                            throw new PatternParseError(
+                                patternToString(ast),
+                                `the counted repetition's set closure exceeds the counting budget — the count declines loudly`,
+                            )
+                        }
+                    }
+                }
+                power = next
+                // Powers i ≥ min join the union.
+                if (i >= ast.min) {
+                    for (const s of power) out.add(s)
+                }
+            }
+            return countStringsPerLength(out, k)
         }
         case "typeref": {
             if (refChain.includes(ast.name)) {
@@ -860,6 +1026,32 @@ function enumerateNode(
             if (inner === undefined) return undefined
             return new Set(["", ...inner])
         }
+        case "repeat": {
+            // The same set-closure walk `patternCounts`' repeat arm runs —
+            // the counts and the enumeration share the walk, so the
+            // certificate's two derivations agree for {n,m} by construction.
+            const inner = enumerateNode(ast.inner, k, env, maxCount, refChain)
+            if (inner === undefined) return undefined
+            const out = new Set<string>()
+            if (ast.min === 0) out.add("")
+            let power = new Set<string>([""])
+            const upper = ast.max ?? k + 1
+            for (let i = 1; i <= Math.min(upper, k + 1); i++) {
+                const next = new Set<string>()
+                for (const left of power) {
+                    for (const piece of inner) {
+                        const joined = left + piece
+                        if (joined.length <= k) next.add(joined)
+                        if (next.size > maxCount) return undefined
+                    }
+                }
+                power = next
+                if (i >= ast.min) {
+                    for (const s of power) out.add(s)
+                }
+            }
+            return out
+        }
         case "typeref": {
             if (refChain.includes(ast.name)) {
                 throw new PatternParseError(
@@ -883,7 +1075,7 @@ function enumerateNode(
  * cycle rejection at the recursion point.
  */
 export function makePatternCountEnv(
-    lookupPattern: (name: string) => PatternDataType | undefined,
+    lookupPattern: (name: string) => PatternTypeShape | undefined,
 ): PatternCountEnv {
     const coeffMemo = new Map<string, readonly number[]>()
     return {
@@ -933,9 +1125,9 @@ export function makePatternCountEnv(
  * rejection.
  */
 function typeCoefficients(
-    type: PatternDataType,
+    type: PatternTypeShape,
     k: number,
-    lookupPattern: (name: string) => PatternDataType | undefined,
+    lookupPattern: (name: string) => PatternTypeShape | undefined,
     refChain: readonly string[],
     memo: Map<string, readonly number[]>,
 ): readonly number[] {
@@ -977,10 +1169,10 @@ function zeroSeq(k: number): number[] {
  * matched strings. Memoized per (type, k); the refChain carries the recursion.
  */
 function typeEnumeration(
-    type: PatternDataType,
+    type: PatternTypeShape,
     k: number,
     maxCount: number,
-    lookupPattern: (name: string) => PatternDataType | undefined,
+    lookupPattern: (name: string) => PatternTypeShape | undefined,
     refChain: readonly string[],
     enumMemo: Map<string, Set<string> | undefined>,
 ): Set<string> | undefined {
@@ -1014,8 +1206,8 @@ function typeEnumeration(
  * @throws PatternParseError on a counting-budget decline or an
  *         ill-founded type-reference cycle.
  */
-export function typeUnionCounts(type: PatternDataType, k: number): readonly number[] {
-    const lookup = (name: string): PatternDataType | undefined => {
+export function typeUnionCounts(type: PatternTypeShape, k: number): readonly number[] {
+    const lookup = (name: string): PatternTypeShape | undefined => {
         const resolved = patternLookupHook(name)
         return resolved
     }
@@ -1029,9 +1221,9 @@ export function typeUnionCounts(type: PatternDataType, k: number): readonly numb
  * instance's environment, not the process-global hook.
  */
 export function typeUnionCountsWith(
-    type: PatternDataType,
+    type: PatternTypeShape,
     k: number,
-    lookup: (name: string) => PatternDataType | undefined,
+    lookup: (name: string) => PatternTypeShape | undefined,
 ): readonly number[] {
     return typeCoefficients(type, k, lookup, [type.name], new Map())
 }
@@ -1045,11 +1237,11 @@ export function typeUnionCountsWith(
  * @throws PatternParseError on an ill-founded type-reference cycle.
  */
 export function typeUnionStrings(
-    type: PatternDataType,
+    type: PatternTypeShape,
     k: number,
     maxCount: number,
 ): Set<string> | undefined {
-    const lookup = (name: string): PatternDataType | undefined => patternLookupHook(name)
+    const lookup = (name: string): PatternTypeShape | undefined => patternLookupHook(name)
     return typeUnionStringsWith(type, k, maxCount, lookup)
 }
 
@@ -1058,16 +1250,16 @@ export function typeUnionStrings(
  * seam (the same contract as typeUnionCountsWith).
  */
 export function typeUnionStringsWith(
-    type: PatternDataType,
+    type: PatternTypeShape,
     k: number,
     maxCount: number,
-    lookup: (name: string) => PatternDataType | undefined,
+    lookup: (name: string) => PatternTypeShape | undefined,
 ): Set<string> | undefined {
     return typeEnumeration(type, k, maxCount, lookup, [type.name], new Map())
 }
 
 /** The installed registry hook (wired by `setPatternLookup` in type_algebra). */
-function patternLookupHook(name: string): PatternDataType | undefined {
+function patternLookupHook(name: string): PatternTypeShape | undefined {
     return registryHook(name)
 }
 
@@ -1078,7 +1270,7 @@ function patternLookupHook(name: string): PatternDataType | undefined {
  * setter is re-exported wiring, and the default THROWS (a type reference
  * with no installed registry is a typed rejection).
  */
-let registryHook: (name: string) => PatternDataType | undefined = () => {
+let registryHook: (name: string) => PatternTypeShape | undefined = () => {
     throw new TypeError(
         "a pattern language type reference <T> requires the registry hook — " +
             "install it via setPatternLookup (the law checker wires the type registry)",
@@ -1091,8 +1283,8 @@ let registryHook: (name: string) => PatternDataType | undefined = () => {
  * for restoration in tests.
  */
 export function setRegistryHook(
-    lookup: (name: string) => PatternDataType | undefined,
-): (name: string) => PatternDataType | undefined {
+    lookup: (name: string) => PatternTypeShape | undefined,
+): (name: string) => PatternTypeShape | undefined {
     const prior = registryHook
     registryHook = lookup
     return prior
@@ -1100,7 +1292,7 @@ export function setRegistryHook(
 
 /** The full environment over a lookup function (coefficients + enumeration). */
 function makeEnv(
-    lookupPattern: (name: string) => PatternDataType | undefined,
+    lookupPattern: (name: string) => PatternTypeShape | undefined,
     memo: Map<string, readonly number[]>,
 ): PatternCountEnv {
     return {

@@ -12,7 +12,7 @@
  *   grammar.ts → types.ts, pattern_lang.ts        (runtime, acyclic)
  *
  * `types.ts` imports `patternToString` as a VALUE from `pattern_lang.ts`,
- * while `pattern_lang.ts` imports the `PatternDataType` TYPE from
+ * while `pattern_lang.ts` imports the `DataType` TYPE from
  * `types.ts` — the pairing is cycle-free at runtime ONLY because the
  * reverse edge is type-only (Deno erases it). If a future edit adds a
  * runtime import in either direction, the top-level initializations begin
@@ -51,13 +51,21 @@ async function runOrderCheck(label: string, firstUrl: string, secondUrl: string)
         // assertions run on BOTH modules BY SPECIFIER (not by load
         // position), so each check proves both modules fully initialize
         // under this order — a cycle's partial initialization would leave
-        // some binding undefined in one of them.
-        const t = await import(${JSON.stringify(firstUrl)});
-        const p = await import(${JSON.stringify(secondUrl)});
+        // some binding undefined in one of them. The names bind by MODULE
+        // (types / pattern), never by load position — position-based
+        // naming would read the wrong module's exports on one of the two
+        // orders.
+        const [first, second] = await Promise.all([
+            import(${JSON.stringify(firstUrl)}),
+            import(${JSON.stringify(secondUrl)}),
+        ])
+        const firstIsTypes = ${JSON.stringify(firstUrl === TYPES_URL)}
+        const t = firstIsTypes ? first : second
+        const p = firstIsTypes ? second : first
         for (
             const name of [
                 "Type", "TypeVar", "FamilyType", "FunType", "DataType",
-                "PatternDataType", "CodataType", "TokenType", "AnyType",
+                "CodataType", "TokenType", "AnyType",
                 "NothingType", "IntersectionType", "PolymorphicType",
                 "isDeclaredTypeKind", "isPatternCarrierType",
             ]
@@ -147,7 +155,6 @@ Deno.test("module graph: the reverse edge is TYPE-ONLY (no runtime import)", asy
             "FamilyType",
             "FunType",
             "DataType",
-            "PatternDataType",
             "CodataType",
             "TokenType",
             "AnyType",

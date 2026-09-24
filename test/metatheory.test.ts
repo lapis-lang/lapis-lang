@@ -33,7 +33,6 @@ Deno.test("metatheory: LCEval produces evaluation rules from contract metadata",
         "E-App",
         "E-Cofold",
         "E-Fold",
-        "E-FoldMatch",
         "E-Lam",
         "E-Let",
         "E-Obs",
@@ -87,7 +86,6 @@ Deno.test("metatheory: rules are classified as value-rules or step-rules", () =>
         "E-App",
         "E-Cofold",
         "E-Fold",
-        "E-FoldMatch",
         "E-Let",
         "E-Obs",
         "E-Op",
@@ -133,7 +131,7 @@ Deno.test("metatheory: Preservation holds — step-rules preserve types (static)
     }
 })
 
-Deno.test("metatheory: Preservation — all 8 step-rules checked", () => {
+Deno.test("metatheory: Preservation — all 7 step-rules checked", () => {
     const rules = collectRules(LCEval)
     const staticRules = collectRules(LCTypeCheck)
     const result = checkPreservation(rules, staticRules)
@@ -143,7 +141,6 @@ Deno.test("metatheory: Preservation — all 8 step-rules checked", () => {
         "E-App",
         "E-Cofold",
         "E-Fold",
-        "E-FoldMatch",
         "E-Let",
         "E-Obs",
         "E-Op",
@@ -218,7 +215,6 @@ Deno.test("metatheory: LCTypeCheck rules are still collected correctly", () => {
         "T-App",
         "T-Cofold",
         "T-Fold",
-        "T-FoldMatch",
         "T-Let",
         "T-Obs",
         "T-Op",

@@ -45,10 +45,50 @@ The lexer is driven by `data` declarations: each pattern constructor is a lexica
 | One or more       | `+`                  | `[0-9]+`            | one or more of the preceding           |
 | Zero or more      | `*`                  | `[^"]*`             | zero or more of the preceding          |
 | Optional          | `?`                  | `-?`                | zero or one of the preceding           |
+| Counted — exact   | `{n}`                | `#[A-F0-9]{6}`      | exactly n of the preceding             |
+| Counted — min     | `{n,}`               | `x{2,}`             | n or more of the preceding             |
+| Counted — range   | `{n,m}`              | `#[0-9]{1,3}`       | between n and m of the preceding       |
 | Type reference    | `<TypeName>`         | `<Char>`, `<Nat>`   | match the pattern of another data type |
 | Escape            | `\`                  | `\+`, `\.`, `\<`    | literal special char                   |
 
-**Metacharacters** (must be escaped when meant literally): `+ * ? [ ] \ . < >`.
+**Metacharacters** (must be escaped when meant literally): `+ * ? [ ] \ . < > { }`.
+
+**Counted repetition semantics — the SET reading.** `p{n,m}`'s language is the union of the inner's
+powers Pⁱ for i ∈ [n..m]: each power is the inner's string set concatenated i times, the union
+DEDUPS overlapping powers (`a?{2,3}` holds each string once even though P² = P³ for a nullable inner
+— the per-variant sum would double-count), and the per-length profile reads off the merged set. The
+sugar desugars at parse: `{0,}` → `*`, `{1,}` → `+`, `{0,1}` → `?`, `{1}` → the inner itself; the
+residual shapes become one `repeat` node (min ≥ 2 or a bounded max). Exactness is by construction —
+the counts and the enumeration share one set-closure walk, so the certificate's two derivations
+agree for `{n,m}` exactly as they do for `*`. A closure past the counting budget declines loudly
+(the honest bound).
+
+**Practical limits — definition size AND match reach.** Two hygiene caps bound a user-defined
+pattern, both loud at their edges:
+
+1. **Definition size: 80 characters.** A pattern's SOURCE is capped at
+   `MAX_PATTERN_SOURCE_LENGTH =
+   80` characters (`pattern_lang.ts`); the parse edge rejects
+   anything longer, naming the limit. The bound is a hygiene cap, not a semantic one — it is
+   INCLUSIVE (a pattern of exactly 80 characters parses). A pattern beyond that length is
+   unmaintainable to spell correctly (escape accounting, canonical-source identity, review
+   legibility), and a lexical rule that genuinely needs more belongs in a second declared variant
+   (alternation-by-variant is the fragment's own decomposition tool). The counted postfix keeps real
+   lexical rules far under the cap: `#[A-F0-9]{6}` (11 characters) says what a 20+-character
+   hand-written expansion would say, and more legibly.
+
+2. **Match reach: 80 characters of consumed text.** An open-ended pattern (`[0-9]+`, `x{2,}`,
+   `.*`-shaped forms) does NOT license an unbounded match: a pattern may consume AT MOST
+   `MAX_PATTERN_SOURCE_LENGTH` characters from the input — the same 80-character bound. The
+   rationale is the token's downstream cost: the token's size is its text length (the counting
+   equations, the enumeration's per-length classes, the certificate's coefficients all scale with
+   it), so an unbounded reach would let a single 10 GB token into a source file — past every budget
+   the algebra declares. The counted postfix is the tool for large-but-bounded classes:
+   `#[A-F0-9]{6}` consumes exactly 6, `x{2,80}` consumes up to 80 — a pattern whose reach needs more
+   than 80 characters is declaring a token no source file should carry. (Enforcement edge: the LC
+   core's token routes carry the canonical pattern source as the text — a pinned, bounded value —
+   and the surface lexer that applies this cap at match time is the surface elaboration's scope; the
+   cap is stated here as language fiat so the lexer's contract is already fixed.)
 
 **Excluded:** alternation `|` (use multiple variants), groups `()`, anchors, backreferences. Flat
 patterns compile to a DFA; type references (`<TypeName>`) make the pattern language context-free
@@ -728,3 +768,10 @@ s pop             "=> [3, Push(value:2, rest:Empty)]"
    `Rect <real: Nat>\+<imag: Nat>j` for `Complex`, where `real` and `imag` are bound in fold
    handlers. Conceptually sound (pattern = parser, captures = semantic values) but syntax and
    handler-dispatch mechanics need validation against a real implementation. Deferred until Stage 1.
+
+   Resolution note (mixed carriers + merged fold): the merged fold's two handler schemas — a variant
+   arm binding its fields, a pattern arm binding `match : Token` — are the boundary a capture would
+   collapse (a capture arm binds named sub-matches INSTEAD of the whole token). Captures stay
+   deferred; the counted-repetition `{n,m}` semantics landed without them (the set reading, see
+   §1.3), and a capture design would need to coexist with the counted postfix — a capture's
+   `<name: T>` inside a counted range is undefined as of this change.
