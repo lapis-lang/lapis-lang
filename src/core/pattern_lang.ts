@@ -753,11 +753,26 @@ export function patternCounts(
             // to the fixpoint — bounded by k, no string can exceed length k
             // once no new string appears). min===0 joins P⁰ = {ε} (the
             // zero-repetition member — `a{0,3}` holds ε exactly as `a?` does).
+            //
+            // The NULLABLE-INNER case beyond the bound: a nullable inner
+            // (ε ∈ pieces) makes the higher powers PAD with ε pieces — every
+            // string ≤ k expressible with j non-ε pieces (j ≤ k) is in Pⁱ
+            // for every i ≥ j, so P^min ∩ (≤ k) = (∪_{j ≤ k+1} P^j) ∪ {ε}
+            // whenever min > k+1. The power loop capped at k+1 would never
+            // reach min and report zero counts (`a?{100}` matches "" and
+            // "a"); the stabilized union is the correct reading.
             const out = new Set<string>()
-            if (ast.min === 0) out.add("")
+            const nullableInner = pieces.has("")
+            if (
+                ast.min === 0 || (nullableInner && ast.min <= (ast.max ?? Number.MAX_SAFE_INTEGER))
+            ) {
+                out.add("")
+            }
             let power = new Set<string>([""])
+            const allPowers = new Set<string>([""])
             const upper = ast.max ?? k + 1
-            for (let i = 1; i <= Math.min(upper, k + 1); i++) {
+            const loopEnd = Math.min(upper, k + 1)
+            for (let i = 1; i <= loopEnd; i++) {
                 const next = new Set<string>()
                 for (const left of power) {
                     for (const piece of pieces) {
@@ -772,10 +787,19 @@ export function patternCounts(
                     }
                 }
                 power = next
+                for (const s of power) allPowers.add(s)
                 // Powers i ≥ min join the union.
                 if (i >= ast.min) {
                     for (const s of power) out.add(s)
                 }
+            }
+            if (ast.min > loopEnd && nullableInner) {
+                // The powers stabilize under ε-padding: P^min's strings ≤ k
+                // are exactly the stabilized union (the same set the loop
+                // built through k+1, which subsumes ∪_{j ≤ min} P^j for
+                // strings ≤ k) — plus ε (P^min ∋ ε since P⁰ = {ε} pads).
+                for (const s of allPowers) out.add(s)
+                out.add("")
             }
             return countStringsPerLength(out, k)
         }
@@ -1029,14 +1053,23 @@ function enumerateNode(
         case "repeat": {
             // The same set-closure walk `patternCounts`' repeat arm runs —
             // the counts and the enumeration share the walk, so the
-            // certificate's two derivations agree for {n,m} by construction.
+            // certificate's two derivations agree for {n,m} by construction
+            // — INCLUDING the nullable-inner stabilization beyond the k+1
+            // power bound (the same fix both arms apply).
             const inner = enumerateNode(ast.inner, k, env, maxCount, refChain)
             if (inner === undefined) return undefined
             const out = new Set<string>()
-            if (ast.min === 0) out.add("")
+            const nullableInner = inner.has("")
+            if (
+                ast.min === 0 || (nullableInner && ast.min <= (ast.max ?? Number.MAX_SAFE_INTEGER))
+            ) {
+                out.add("")
+            }
             let power = new Set<string>([""])
+            const allPowers = new Set<string>([""])
             const upper = ast.max ?? k + 1
-            for (let i = 1; i <= Math.min(upper, k + 1); i++) {
+            const loopEnd = Math.min(upper, k + 1)
+            for (let i = 1; i <= loopEnd; i++) {
                 const next = new Set<string>()
                 for (const left of power) {
                     for (const piece of inner) {
@@ -1046,9 +1079,16 @@ function enumerateNode(
                     }
                 }
                 power = next
+                for (const s of power) allPowers.add(s)
                 if (i >= ast.min) {
                     for (const s of power) out.add(s)
                 }
+            }
+            if (ast.min > loopEnd && nullableInner) {
+                // The nullable inner's powers stabilize (the ε-padding
+                // reading): the stabilized union plus ε is P^min ∩ (≤ k).
+                for (const s of allPowers) out.add(s)
+                out.add("")
             }
             return out
         }

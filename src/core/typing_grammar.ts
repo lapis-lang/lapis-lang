@@ -633,8 +633,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         //
         // Concretely: `fold [Color] Red() { match("…") → … }` on a MIXED
         // carrier is REJECTED here — `Red()` may be a variant value, and no
-        // variant arm can fire on it.
-        if (patternArms.length > 0 && dataType.variants.length > 0 && variantArms.length === 0) {
+        // variant arm can fire on it. The member set is LINEAGE-WIDE
+        // (allVariants — a comb child inherits its parent's variants; its
+        // local slot alone would wrongly call it patterns-only).
+        if (patternArms.length > 0 && allVariants.length > 0 && variantArms.length === 0) {
             return Any // a variant value cannot fire any arm
         }
         if (patternArms.length > 0) {
@@ -888,8 +890,9 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             // pattern arms fire ONLY on tokens, so when the carrier has
             // variants the variant arm set must be present to fire on a
             // variant value. A patterns-only carrier's every value is a
-            // token, so pattern arms alone suffice there.
-            if (dataType.variants.length > 0 && variantArms.length === 0) {
+            // token, so pattern arms alone suffice there. The member set is
+            // LINEAGE-WIDE (allVariants — an inherited variant is a member).
+            if (allVariants.length > 0 && variantArms.length === 0) {
                 return undefined
             }
             const declared = dataType.allPatterns().map((p) => patternToString(p))

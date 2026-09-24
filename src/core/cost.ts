@@ -2467,15 +2467,39 @@ export class CostPass extends SemanticPass<CostPassShape> {
                     ? scrutineeSummary
                     : this.engine.analyze(slice, env) ?? scrutineeSummary
             }
-            const handlers = records.map((r) => ({
-                variantName: r.variantName,
-                bindings: r.bindings,
-                body: this.engine.analyze(
-                    this.engineSource().slice(r.bodySpan.start, r.bodySpan.end),
-                    this.handlerEnv(dataType, r, env),
-                ) ?? emptySummary(),
-            }))
-            return foldSummaryFrom(dataType, scrutineeSummary, handlers)
+            // The records are the checker's DISCRIMINATED handler shape —
+            // dispatch by kind: variant arms re-read their bodies under the
+            // field-binding environments; pattern arms re-read under the
+            // ambient environment extended with the token denotation (the
+            // `match` binding — the engine's per-pattern token sizing).
+            // The two lists feed foldSummaryFrom's own arm dispatch (a
+            // mixed handler list composes both routes; a pattern-arm-only
+            // list charges the single-step token composition).
+            const variantHandlers = records
+                .filter((r): r is Extract<SpanFoldRecord, { kind: "variant" }> =>
+                    r.kind === "variant"
+                )
+                .map((r) => ({
+                    variantName: r.variantName,
+                    bindings: r.bindings,
+                    body: this.engine.analyze(
+                        this.engineSource().slice(r.bodySpan.start, r.bodySpan.end),
+                        this.handlerEnv(dataType, r, env),
+                    ) ?? emptySummary(),
+                }))
+            const patternArms = records
+                .filter((r): r is Extract<SpanFoldRecord, { kind: "pattern" }> =>
+                    r.kind === "pattern"
+                )
+                .map((r) => ({
+                    kind: "pattern" as const,
+                    patternSource: r.patternSource,
+                    body: this.engine.analyze(
+                        this.engineSource().slice(r.bodySpan.start, r.bodySpan.end),
+                        env.extend("match", tokenDenotation(dataType.name, r.patternSource)),
+                    ) ?? emptySummary(),
+                }))
+            return foldSummaryFrom(dataType, scrutineeSummary, variantHandlers, patternArms)
         }
     }
 
@@ -2531,13 +2555,17 @@ export class CostPass extends SemanticPass<CostPassShape> {
     }
 
     /**
-     * The handler environment for one handler record: non-recursive fields
-     * bound to their declared types' denotations (the raw field sizes),
-     * Family fields bound to the fold-recursion denotation (the μ-bound's
-     * named producer end). The same rule the engine's
+     * The handler environment for one VARIANT handler record: non-recursive
+     * fields bound to their declared types' denotations (the raw field
+     * sizes), Family fields bound to the fold-recursion denotation (the
+     * μ-bound's named producer end). The same rule the engine's
      * `foldFieldType` + `extendCtx` pair applies.
      */
-    private handlerEnv(dataType: DataType, record: SpanFoldRecord, outer: CostEnv): CostEnv {
+    private handlerEnv(
+        dataType: DataType,
+        record: Extract<SpanFoldRecord, { kind: "variant" }>,
+        outer: CostEnv,
+    ): CostEnv {
         let env = outer
         const variant = dataType.findVariant(record.variantName)
         if (variant === undefined) return env
@@ -2552,12 +2580,26 @@ export class CostPass extends SemanticPass<CostPassShape> {
     }
 }
 
-/** The checker's `spanFoldHandler` record shape. */
-interface SpanFoldRecord {
-    readonly variantName: string
-    readonly bindings: string[]
-    readonly bodySpan: { start: number; end: number }
-}
+/**
+ * The checker's `spanFoldHandler` record shape — the DISCRIMINATED arm
+ * record the merged fold produces: a VARIANT arm carries the constructor's
+ * name, bindings, and body span (the context rides in the parser's value);
+ * a PATTERN arm carries the pattern's CANONICAL source and its body span.
+ * The kind tag is the fold assembly's dispatch. (Structural — the checker's
+ * record type is module-private; the pass reads the runtime value's shape.)
+ */
+type SpanFoldRecord =
+    | {
+        readonly kind: "variant"
+        readonly variantName: string
+        readonly bindings: string[]
+        readonly bodySpan: { start: number; end: number }
+    }
+    | {
+        readonly kind: "pattern"
+        readonly patternSource: string
+        readonly bodySpan: { start: number; end: number }
+    }
 
 /** The pass's identity summary (no work, no records). */
 function passthroughSummary(_env: CostEnv): CostSummary {

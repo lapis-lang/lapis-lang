@@ -161,14 +161,12 @@ export function isSubtype(
         return isSubtype(sub.body, super_.body, delta1)
     }
 
-    // S-Data-Width + S-Data-Depth: μ-type subtyping
+    // S-Data-Width + S-Data-Depth: μ-type subtyping. ONE branch — the
+    // unified carrier's rule: width covers the pattern members
+    // (`isDataTypeSubtype`'s member clause), so a second reflexive-only
+    // DataType branch here would be unreachable.
     if (sub instanceof DataType && super_ instanceof DataType) {
         return isDataTypeSubtype(sub, super_, delta)
-    }
-
-    // Pattern-matched data types: only reflexive (same name)
-    if (sub instanceof DataType && super_ instanceof DataType) {
-        return sub.equals(super_)
     }
 
     // S-Codata-Width + S-Codata-Depth: ν-type subtyping

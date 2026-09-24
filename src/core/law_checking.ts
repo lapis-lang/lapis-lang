@@ -72,6 +72,8 @@ import { DataType, FamilyType, isPatternCarrierType, type Type, Variant } from "
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
 
+import { type PatternTypeShape } from "./pattern_shape.ts"
+
 import { setPatternLookup } from "./type_algebra.ts"
 
 import { derivableFragment, type DerivationCertificate, deriveLaw } from "./derivation.ts"
@@ -169,11 +171,14 @@ function construct(
             // matched token for a pattern-bearing field (see
             // `patternSamples`); `undefined` (no sample vocabulary) when the
             // field type is not sampleable. `Any`-typed fields have no
-            // declared sample vocabulary either — unsampleable.
+            // declared sample vocabulary either — unsampleable. The member
+            // predicates are LINEAGE-WIDE (hasVariants/hasPatterns — a comb
+            // child inherits both member kinds), matching the algebra's
+            // own member table.
             const fieldSamples = field.type instanceof DataType
-                ? field.type.variants.length > 0
+                ? field.type.hasVariants
                     ? samplesFor(field.type, Math.min(depth, 1), eval_)
-                    : field.type.patterns.length > 0
+                    : field.type.hasPatterns
                     ? patternSamples(field.type, eval_)
                     : []
                 : []
@@ -589,7 +594,7 @@ export function makeEvalTerm(
  * prefix and the coefficients agree.)
  */
 function patternSamples(type: DataType, eval_: EvalTerm): Value[] {
-    if (type.patterns.length === 0) return []
+    if (!type.hasPatterns) return []
     // The token atom evaluates via the evaluator's `matchedToken` (a
     // `TokenVal` of the pattern type) — construction goes through the
     // evaluator so the value's type resolution follows the same registry
@@ -758,15 +763,16 @@ function patternSpaceOf(
     spec: SubSpaceSpec | undefined,
     eval_: EvalTerm,
 ): readonly TokenVal[] {
-    if (type.patterns.length === 0) return []
+    if (!type.hasPatterns) return []
     const env = makePatternCountEnv(patternTypeLookup)
     // The sweep space: the enumeration's COUNT must fit the exhaustion
     // ceiling — with a scope, the FILTERED result must fit (a huge full
     // language with a tiny sub-space is still exhaustible: the scope is
-    // the point).
+    // the point). The vocabulary is the LINEAGE union (allPatterns — an
+    // inherited pattern is a member the sweep must cover).
     const budget = MAX_FINITE_INHABITANTS
     const seen = new Set<string>()
-    for (const ast of type.patterns) {
+    for (const ast of type.allPatterns()) {
         const strings = enumeratePattern(ast, MAX_PATTERN_LENGTH, env, budget)
         if (strings === undefined) {
             throw new LawDeclarationError(
@@ -957,7 +963,7 @@ export function inhabitantsUpToSize(
     if (k < 0) {
         throw new RangeError(`inhabitantsUpToSize(${type.name}): the size bound k must be ≥ 0`)
     }
-    if (type instanceof DataType && type.patterns.length > 0) {
+    if (type instanceof DataType && type.hasPatterns) {
         // The language-equation enumeration: the carrier's PATTERN members'
         // size-≤ k token set — every matched string of length ≤ k becomes a
         // token (`TokenVal(type, text)`; the token is an axiom of the
@@ -965,12 +971,18 @@ export function inhabitantsUpToSize(
         // ε string when the language is nullable (`a*`, `a?`): its size is
         // 0, so it is the size-0 class's sole member — c₀ counts it, and
         // the size-≤ k prefix must hold it or the enumerator under-reports
-        // the coefficient count. The read goes through the type's UNION
-        // (`typeUnionStrings` — variants may overlap; one merged set), so
-        // the enumerator and the coefficients read the same language. A
-        // prefix past the budget is a DECLINE (the caller rejects loudly —
-        // an enumeration hole must not masquerade as coverage).
-        const strings = typeUnionStrings(type, k, PREFIX_BUDGET)
+        // the coefficient count. The read goes through the type's lineage
+        // UNION (the shape built from `allPatterns()` — a comb child's
+        // inherited patterns are members too; reading the local slot alone
+        // would drop every ancestor's language), so the enumerator and the
+        // coefficients read the same language. A prefix past the budget is
+        // a DECLINE (the caller rejects loudly — an enumeration hole must
+        // not masquerade as coverage).
+        const lineageShape = {
+            name: type.name,
+            patterns: type.allPatterns(),
+        } satisfies PatternTypeShape
+        const strings = typeUnionStrings(lineageShape, k, PREFIX_BUDGET)
         if (strings === undefined) {
             throw new LawDeclarationError(
                 type.name,
@@ -979,7 +991,7 @@ export function inhabitantsUpToSize(
         }
         const tokens: Value[] = [...strings]
             .map((text) => new TokenVal(type.name, text))
-        if (type.variants.length === 0) {
+        if (!type.hasVariants) {
             // A pattern-ONLY carrier's space is exactly the token set —
             // sort to the certificate's per-length order and return.
             return tokens.sort((a, b) => a.size() - b.size())
@@ -1543,7 +1555,7 @@ export function screeningRegime(
             // pattern-only carriers (patterns > 0, variants = 0).
             const carrier = op.paramTypes[position]! as DataType
             if (
-                carrier.variants.length === 0 &&
+                !carrier.hasVariants &&
                 law.subSpace?.some((spec) => spec.position === position)
             ) {
                 patternCarrierPositions++
@@ -1961,11 +1973,13 @@ function exhaustLaw(
     }
     // The sweep's visible extent (the machineFinite certificate): scoped
     // positions state their admitted cardinality, and the length bound
-    // states how far the enumeration reached. Recorded ONLY for the
-    // pattern-typed scoped positions (a finite data carrier's full space
-    // needs no extent note — the regime itself certifies it).
+    // states how far the enumeration reached. Recorded ONLY for
+    // PATTERN-CARRIER positions (the shared member-shape predicate — the
+    // length bound is the token enumeration's reach; a variant-only
+    // carrier's full space has no token classes to certify, and a bogus
+    // entry would misstate the certificate's extent).
     const sweepPositions = (law.subSpace ?? [])
-        .filter((spec) => op.paramTypes[spec.position] instanceof DataType)
+        .filter((spec) => isPatternCarrierType(op.paramTypes[spec.position]))
         .map((spec) => ({
             position: spec.position,
             where: spec.where,

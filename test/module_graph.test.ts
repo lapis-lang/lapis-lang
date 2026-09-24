@@ -55,10 +55,13 @@ async function runOrderCheck(label: string, firstUrl: string, secondUrl: string)
         // (types / pattern), never by load position — position-based
         // naming would read the wrong module's exports on one of the two
         // orders.
-        const [first, second] = await Promise.all([
-            import(${JSON.stringify(firstUrl)}),
-            import(${JSON.stringify(secondUrl)}),
-        ])
+        // The imports are SEQUENTIAL — the order is the variable under test,
+        // and Promise.all (the concurrent form) starts both dynamic loads
+        // at once, letting the module system interleave their
+        // initializations (the claimed order would not be exercised). The
+        // first import fully initializes before the second begins.
+        const first = await import(${JSON.stringify(firstUrl)});
+        const second = await import(${JSON.stringify(secondUrl)});
         const firstIsTypes = ${JSON.stringify(firstUrl === TYPES_URL)}
         const t = firstIsTypes ? first : second
         const p = firstIsTypes ? second : first

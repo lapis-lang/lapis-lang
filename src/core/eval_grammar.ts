@@ -625,10 +625,34 @@ export class LCEval extends AbstractLC<EvalShape> {
         ambientEnv: ValueEnv,
     ): Value {
         const tokenOwner = this.registry.lookup(scrutinee.dataTypeName)
-        const carrierHandles = tokenOwner !== undefined &&
-            (scrutinee.dataTypeName === dataType.name ||
-                (tokenOwner instanceof DataType &&
-                    tokenOwner.allPatterns().some((p) => patternToString(p) === scrutinee.text)))
+        // The carrier check reads the LINEAGE in the subtyping direction:
+        // the token's owner must be the fold carrier itself OR one of its
+        // ANCESTORS (the child <: parent direction makes an ancestor-named
+        // token valid everywhere the descendant carrier's fold is — the
+        // same rule the checker's scrutinee premise applies via isSubtype).
+        // An UNRELATED carrier that declares the identical pattern is NOT
+        // an ancestor: its token cannot dispatch through this fold, however
+        // equal the canonical sources are — a shared pattern string does
+        // not put one carrier in the other's lineage.
+        //
+        // The pattern-membership clause applies to the ANCESTOR arm only
+        // (the inherited pattern is what carries the token into this
+        // lineage): the carrier's OWN token (owner === dataType) passes the
+        // carrier check unconditionally — the bare atom is the carrier's
+        // value whatever its text, and the HANDLER dispatch below is what
+        // reports the no-handler miss for a text that names no declared
+        // pattern.
+        const tokenOwnerIsAncestor = tokenOwner instanceof DataType &&
+            tokenOwner !== dataType &&
+            (() => {
+                for (let p = dataType.parent; p !== null; p = p.parent) {
+                    if (p === tokenOwner) return true
+                }
+                return false
+            })()
+        const carrierHandles = tokenOwner === dataType ||
+            (tokenOwnerIsAncestor &&
+                tokenOwner.allPatterns().some((p) => patternToString(p) === scrutinee.text))
         if (!carrierHandles) {
             return EVAL_ERROR(
                 `token type ${scrutinee.dataTypeName} does not match fold carrier ${dataType.name}`,
