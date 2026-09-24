@@ -5,8 +5,9 @@
  *
  *   σ, τ ::= α                  type variable
  *          | σ → τ              function type
- *          | μ α. Σᵢ Cᵢ(σᵢ)      recursive data type (sum of named variants)
- *          | μ α. Σᵢ pᵢ          pattern-matched data type (sum of pattern constructors)
+ *          | μ α. Σᵢ mᵢ          data type (sum of named variants and/or
+ *                                 pattern constructors — a MIXED carrier
+ *                                carries both member kinds)
  *          | ν α. Πⱼ oⱼ(σⱼ)      corecursive codata type (product of named observers)
  *          | Token               raw matched text
  *          | Any                 top
@@ -38,8 +39,11 @@
  * `Family` μ-bound singleton is orthogonal to the protocol. */
 
 // The pattern AST type — pattern_lang.ts owns the language; this import is
-// type-only (a cycle-free edge: pattern_lang.ts imports the pattern TYPE here).
+// type-only on the AST (a cycle-free edge: pattern_lang.ts imports the
+// pattern TYPE here — a type-only import, erased at runtime, so the value
+// import of `patternToString` below does not close a runtime cycle).
 import type { PatternAST } from "./pattern_lang.ts"
+import { patternToString } from "./pattern_lang.ts"
 
 /**
  * The nominal brand symbol for the Type universe — MODULE-PRIVATE. An outside
@@ -395,16 +399,36 @@ export class DataType extends Type {
     // the resolved (knotted) variants replace them. A published instance
     // never changes again — `private` keeps the swap module-internal.
     private _variants: readonly Variant[]
+    // The patterns array is frozen in the constructor (it never resolves
+    // through the build group — a pattern is an AST, not a type reference).
+    readonly patterns: readonly PatternAST[]
     readonly parent: DataType | null
+    // The parent-chain pattern cache, computed AT CONSTRUCTION: the parent
+    // must be a published (already cached) instance before any child can
+    // reference it, so the chain walk reads only primed caches and the
+    // whole instance freezes over the completed memo at `buildAll`. The
+    // parse/typecheck/eval gates consult the pattern predicates per token —
+    // the walk must not re-allocate per call.
+    private readonly _allPatternsCache: readonly PatternAST[]
 
     private constructor(
         readonly name: string,
         variants: readonly Variant[],
+        patterns: readonly PatternAST[],
         parent: DataType | null,
     ) {
         super()
         this._variants = Object.freeze(variants)
+        this.patterns = Object.freeze([...patterns])
         this.parent = parent
+        // The chain walk reads the PARENT's already-primed cache (a parent
+        // is always a published, frozen instance — `define(name, parent)`
+        // takes a built `DataType`, never a builder), so each comb link's
+        // array is computed exactly once, at its own construction.
+        this._allPatternsCache = Object.freeze([
+            ...patterns,
+            ...(parent?._allPatternsCache ?? []),
+        ])
     }
 
     /** Begin construction: a builder handle for a data type definition. */
@@ -436,7 +460,12 @@ export class DataType extends Type {
         // knotted field names the final instance of its lineage. A mixed-kind
         // group (a data builder reaching a codata publication) rejects with a
         // message naming both kinds — the group is single-kind, never mixed.
-        const instances = builders.map((b) => new DataType(b.name, b.variants, b.parent))
+        // The pattern chain cache computes in each constructor (the parent's
+        // own cache predates every child's construction — a parent reference
+        // requires a published instance), so no separate priming walk runs.
+        const instances = builders.map((b) =>
+            new DataType(b.name, b.variants, b.patterns, b.parent)
+        )
         builders.forEach((b, i) => group.set(b.lineage, instances[i]!))
         builders.forEach((b, i) => {
             instances[i]!._variants = Object.freeze(resolveVariantFields(b.variants, group))
@@ -487,6 +516,58 @@ export class DataType extends Type {
     findVariant(name: string): Variant | undefined {
         return this.allVariants().find((v) => v.name === name)
     }
+
+    /**
+     * All patterns from this type and its parent chain (comb inheritance,
+     * mirroring `allVariants`). The identity is the CANONICAL source
+     * (`patternToString` — the round-trip normalization): callers key by
+     * the canonical form, the same identity the registry's reverse index
+     * and the token introduction carry.
+     *
+     * The result is CACHED at construction (`_allPatternsCache` — see the
+     * field): the parent must be a published, already-cached instance before
+     * any child references it, so the chain walk runs once per carrier at
+     * its own construction. The parse/typecheck/eval gates consult the
+     * pattern predicates per token, so the walk must not re-allocate per
+     * call: a repeated call is an array read, not a chain traversal. The
+     * cached array is frozen — a caller cannot mutate the carrier's view of
+     * its own lineage.
+     */
+    allPatterns(): readonly PatternAST[] {
+        return this._allPatternsCache
+    }
+
+    /**
+     * Find a declared pattern by its CANONICAL source, searching the parent
+     * chain. The canonical comparison (a parsed spelling vs the declared
+     * AST's rendering) makes two spellings of one AST agree.
+     */
+    findPattern(canonicalSource: string): PatternAST | undefined {
+        return this.allPatterns().find((p) => patternToString(p) === canonicalSource)
+    }
+
+    /** Whether this carrier (through its parent chain) declares variants. */
+    get hasVariants(): boolean {
+        // Short-circuit WITHOUT allocation: the own slot first, then the
+        // parents' precomputed answer — no intermediate arrays. The same
+        // memo discipline `allPatterns` applies (the variants walk runs at
+        // publication through buildAll's freeze, so the answer is stable).
+        if (this.variants.length > 0) return true
+        return this.parent?.hasVariants ?? false
+    }
+
+    /**
+     * Whether this carrier (through its parent chain) declares patterns.
+     *
+     * The hot-path predicate (every token gate consults it), short-circuited
+     * WITHOUT allocation: the own slot's length check first, then the
+     * parents' precomputed answer. No intermediate arrays — a variant-only
+     * carrier's gate check costs one property read.
+     */
+    get hasPatterns(): boolean {
+        if (this.patterns.length > 0) return true
+        return this.parent?.hasPatterns ?? false
+    }
 }
 
 /**
@@ -503,13 +584,14 @@ export class DataTypeBuilder {
         readonly name: string,
         readonly parent: DataType | null,
         readonly variants: readonly Variant[],
+        readonly patterns: readonly PatternAST[],
         lineage: object,
     ) {
         this.lineage = lineage
     }
 
     static initial(name: string, parent: DataType | null): DataTypeBuilder {
-        return new DataTypeBuilder(name, parent, [], {})
+        return new DataTypeBuilder(name, parent, [], [], {})
     }
 
     /** Derive a builder carrying these variants in addition to the current ones. */
@@ -518,6 +600,26 @@ export class DataTypeBuilder {
             this.name,
             this.parent,
             [...this.variants, ...variants],
+            this.patterns,
+            this.lineage,
+        )
+    }
+
+    /**
+     * Derive a builder carrying these pattern members in addition to the
+     * current ones. Patterns are given as PARSED ASTs (the same shape the
+     * declaration machinery produces — `parsePattern` at the source edge); a
+     * source string is spelled through `parsePattern` first. The pattern
+     * slot freezes at publication exactly as the variants slot does — a
+     * registered type's declared patterns cannot mutate after the fact (the
+     * registry's reverse index would otherwise drift from the declaration).
+     */
+    addPattern(...patterns: PatternAST[]): DataTypeBuilder {
+        return new DataTypeBuilder(
+            this.name,
+            this.parent,
+            this.variants,
+            [...this.patterns, ...patterns],
             this.lineage,
         )
     }
@@ -553,54 +655,20 @@ function resolveObserverFields(
     return observers.map((observer) => observer.resolveBuild(group) ?? observer)
 }
 
-// ── Pattern-matched data type (μ with patterns) ───────────────────────────────
-
 /**
- * `μ α. Σᵢ pᵢ` — a pattern-matched data type.
+ * The PATTERN-CARRIER type guard: a `DataType` whose declaration (through
+ * its parent chain — comb inheritance) carries pattern members. A carrier
+ * with pattern members is the ONE pattern-carrying shape — a carrier whose
+ * members are pattern constructors is a `DataType` with a patterns slot, the
+ * same class the variant dispatches read, so both member kinds flow through
+ * one type.
  *
- * Each `pᵢ` is a parsed pattern (a restricted regular expression — see
- * `pattern_lang.ts`) specifying an infinite set of constructors. There are
- * no fields (no Family); the sole inhabitant of a matched constructor is the
- * `Token` — the raw matched text. The AST is stored (not the source string):
- * the language-equation reading (`pattern_lang.ts` — concatenation multiplies,
- * alternation sums, Kleene star inverts (1−P)) reads the structure, and
- * rendering back to source is the AST's `toString`.
- *
- * The declared patterns are IMMUTABLE: the constructor copies the argument
- * into a frozen array, so a registered type's declarations cannot be
- * mutated after the fact — the registry's reverse index (the pattern source
- * → type map, built once at registration) would otherwise drift from the
- * type's own declaration (a post-registration `patterns.push` or splice
- * would leave removed patterns constructible and added patterns rejected).
- * A revised declaration set constructs a fresh `PatternDataType` (and a
- * fresh registry — registration is final).
+ * As a type predicate it narrows `Type` to `DataType` — the checker's
+ * `matchedToken`/`matchedPattern` premise checks and every grammar gate
+ * consult the same shape test the action's return type trusts.
  */
-export class PatternDataType extends Type {
-    readonly patterns: readonly PatternAST[]
-    constructor(
-        readonly name: string,
-        patterns: readonly PatternAST[],
-    ) {
-        super()
-        this.patterns = Object.freeze([...patterns])
-    }
-
-    equals(other: Type): boolean {
-        return other instanceof PatternDataType && this.name === other.name
-    }
-
-    toString(): string {
-        return this.name
-    }
-
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.patternData(this)
-    }
-
-    /** An atom: the base `map` default applies (no traversable sub-types). */
-    override map(cases: TypeCases<Type>): Type {
-        return cases.patternData?.(this) ?? this
-    }
+export function isPatternCarrierType(t: Type | undefined): t is DataType {
+    return t instanceof DataType && t.hasPatterns
 }
 
 // ── Codata type (ν) ───────────────────────────────────────────────────────────
@@ -1025,7 +1093,6 @@ export interface TypeCases<T> {
     family?: (t: FamilyType) => T | undefined
     fun?: (t: FunType, param: T, result: T) => T | undefined
     data?: (t: DataType) => T | undefined
-    patternData?: (t: PatternDataType) => T | undefined
     codata?: (t: CodataType) => T | undefined
     token?: (t: TokenType) => T | undefined
     any?: (t: AnyType) => T | undefined

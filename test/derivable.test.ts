@@ -3,10 +3,10 @@
  * of law claims from primitive/discharged laws, and the honest residual
  * fallback when the engine cannot close.
  *
- * See _docs/theory/type-algebra.md §6 (the derivable regime's design) and
- * _docs/issue63-plan.md (the worked derivation the tests pin).
+ * See _docs/theory/type-algebra.md §6 (the derivable regime's design) —
+ * the tests pin its worked derivation.
  *
- * The tests pin the three canonical outcomes (the plan's §3):
+ * The tests pin the three canonical outcomes:
  * - **Claim 1** — `identity: Zero` on `add` derives from the fold schema
  *   alone (zero axiom steps);
  * - **Claim 2** — `identity: Zero` on `addZero` derives from `add`'s
@@ -20,6 +20,7 @@
  */
 
 import {
+    DataType,
     declareCheckedLaw,
     DefinitionShapeError,
     type DefShape,
@@ -230,7 +231,7 @@ Deno.test("derivableFragment: a fold-built definition passes; others decline", (
         false,
     )
 
-    // Relational kinds route residual (deferred — the plan's D9).
+    // Relational kinds route residual (deferred by design).
     assertEquals(
         derivableFragment(
             { kind: "distributive", target: "add", argument: "add" },
@@ -276,7 +277,7 @@ Deno.test("deriveLaw: identity: Zero on addZero derives from add's primitive law
     const h = natHarness()
     declareNatOp(h, "add", ADD_DEF)
     declareNatOp(h, "addZero", ADD_ZERO_DEF)
-    // The primitive tier (language fiat — the test IS the fiat; D5).
+    // The primitive tier (language fiat — the test IS the fiat).
     h.laws.declareLaw(
         { kind: "identity", target: "add", argument: ZERO_ARG },
         h.opRegistry,
@@ -505,7 +506,7 @@ Deno.test("routing: a registry-free caller keeps residual routing (additive unio
     const h = natHarness()
     declareNatOp(h, "add", ADD_DEF)
     // Without the registries threaded, the derivable arm never runs — the
-    // claim routes residual and screens, exactly as before this PBI.
+    // claim routes residual and screens, the additive union's fallback.
     const outcome = declareCheckedLaw(
         { kind: "identity", target: "add", argument: ZERO_ARG },
         h.opRegistry,
@@ -535,7 +536,7 @@ function readDefShapeRaw(
         registry: TypeRegistry
         opRegistry: OpRegistry
         tc: LCTypeCheck
-        nat: import("../src/core/types.ts").DataType
+        nat: DataType
     },
     definition: string,
 ): DefShape {

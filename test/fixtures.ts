@@ -11,16 +11,7 @@
  */
 
 import { TypeRegistry, type Value } from "../src/index.ts"
-import {
-    Any,
-    CodataType,
-    DataType,
-    Family,
-    Field,
-    Observer,
-    PatternDataType,
-    Variant,
-} from "../src/core/types.ts"
+import { Any, CodataType, DataType, Family, Field, Observer, Variant } from "../src/core/types.ts"
 import { parsePattern } from "../src/core/pattern_lang.ts"
 import { LCTypeCheck } from "../src/core/typing_grammar.ts"
 import { type EvalTerm, makeEvalTerm } from "../src/core/law_checking.ts"
@@ -342,18 +333,41 @@ export const slowTestsEnabled = (() => {
 // ── Pattern-type factory ─────────────────────────────────────────────────────
 
 /**
- * Constructs a pattern-matched data type from pattern SOURCE strings — the
- * same surface form the `data` declaration carries, parsed through
+ * Constructs a pattern carrier from pattern SOURCE strings — the same
+ * surface form the `data` declaration carries, parsed through
  * `parsePattern` (patterns are ASTs; a test helper mirrors what
  * the declaration machinery will do). A parse failure throws — loud, like
- * the declaration path.
+ * the declaration path. Since the absorption sweep there is ONE carrier
+ * shape: a `DataType` whose declaration carries the patterns (a
+ * patterns-only carrier has no variants — the degenerate case the fold's
+ * pattern arm degenerates from).
  */
 export function createPatternType(
     name: string,
     patternSources: readonly string[],
-): PatternDataType {
-    return new PatternDataType(
-        name,
-        patternSources.map((source) => parsePattern(source)),
-    )
+): DataType {
+    return DataType.define(name)
+        .addPattern(...patternSources.map((source) => parsePattern(source)))
+        .build()
+}
+
+// ── Mixed-carrier factory ────────────────────────────────────────────────────
+
+/**
+ * Constructs a MIXED data carrier — a `DataType` declaring both named
+ * variants and pattern members from pattern SOURCE strings (parsed through
+ * `parsePattern`, the same shape the declaration machinery produces). The
+ * mixed form is the Stage-1 additive carrier: the same `DataType` builder
+ * carries both member kinds, so a mixed type is reachable from the variant
+ * dispatches AND the token/pattern dispatches.
+ */
+export function createMixedType(
+    name: string,
+    variants: readonly Variant[],
+    patternSources: readonly string[],
+): DataType {
+    return DataType.define(name)
+        .addVariant(...variants)
+        .addPattern(...patternSources.map((source) => parsePattern(source)))
+        .build()
 }

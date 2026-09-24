@@ -38,8 +38,10 @@
  *
  * Productions:
  *
- *   exprProd      = lambdaProd | typeAbsProd | letProd | patternFoldProd
- *                 | foldProd | unfoldProd | cofoldProd | obsProd
+ *   exprProd      = lambdaProd | typeAbsProd | letProd | foldProd
+ *                 | unfoldProd | cofoldProd | obsProd   (fold: variant +
+ *                                                        pattern heads in
+ *                                                        ONE handler list)
  *   obsProd       = appProd ( "." ident | "[" type "]" )*
  *   appProd       = typeAppProd ( ws1 typeAppProd )*
  *   typeAppProd   = atomProd ( "[" type "]" )*
@@ -79,8 +81,8 @@ import {
     DataType,
     Field,
     FunType,
+    isPatternCarrierType,
     Nothing,
-    PatternDataType,
     Token,
     type Type,
     TypeVar,
@@ -145,7 +147,7 @@ export interface LCShape {
  * The grammar needs to know what `Stack`, `Stream`, etc. refer to.
  *
  * Also provides reverse lookups: variant name → DataType, observer name →
- * CodataType, pattern source → PatternDataType. These let `variantCon`, `obs`,
+ * CodataType, pattern source → DataType. These let `variantCon`, `obs`,
  * and `matchedPattern` semantic actions resolve the containing type from just
  * the constructor/observer/pattern name.
  *
@@ -181,10 +183,29 @@ export class TypeRegistryError extends Error {
 }
 
 export class TypeRegistry {
-    private readonly types = new Map<string, DataType | CodataType | PatternDataType>()
+    private readonly types = new Map<string, DataType | CodataType>()
     private readonly variantIndex = new Map<string, DataType>()
     private readonly observerIndex = new Map<string, CodataType>()
-    private readonly patternIndex = new Map<string, PatternDataType>()
+    private readonly patternIndex = new Map<string, DataType>()
+
+    /**
+     * The registered type's DECLARED patterns as CANONICAL sources — the
+     * indexing vocabulary, defined in exactly one place. A `DataType` walks
+     * `allPatterns()` (the parent chain — comb inheritance: a comb child
+     * whose PARENT declared the pattern is equally a declaring carrier,
+     * mirroring the variant walk's `allVariants()`); a `DataType` has
+     * no parent chain, so its own slot is the whole language. Rendering
+     * through `patternToString` (the round-trip normalization) is part of
+     * this contract: every index key is canonical, so the reverse lookup and
+     * the term gates agree on the identity without per-site normalization.
+     */
+    private canonicalPatternSourcesOf(
+        type: DataType,
+    ): readonly string[] {
+        // The carrier's full lineage language: own slot + ancestors (comb
+        // inheritance — the same member set the fold gates read).
+        return type.allPatterns().map((p) => patternToString(p))
+    }
 
     /**
      * Register a type. A type whose NAME is already registered is rejected —
@@ -192,7 +213,7 @@ export class TypeRegistry {
      *
      * @throws TypeRegistryError when the name is already registered.
      */
-    register(type: DataType | CodataType | PatternDataType): void {
+    register(type: DataType | CodataType): void {
         if (this.types.has(type.name)) {
             throw new TypeRegistryError(
                 `"${type.name}" is already registered — registration is final; ` +
@@ -213,23 +234,62 @@ export class TypeRegistry {
             }
         }
         // Index patterns for reverse lookup: the pattern's canonical source
-        // (patternToString — the round-trip normalization) maps to its type.
-        // A source already indexed is LEFT at its first declaration — matching
-        // the lexer's declaration-order tie-break; a later type declaring the
-        // identical pattern is shadowed (two types declaring the same pattern
-        // is an ambiguity the surface declaration machinery must reject; at
-        // the core layer the first declaration wins, deterministically).
-        if (type instanceof PatternDataType) {
-            for (const pattern of type.patterns) {
-                const source = patternToString(pattern)
-                if (!this.patternIndex.has(source)) {
+        // (the shared `canonicalPatternSourcesOf` vocabulary) maps to its
+        // type. Two claim disciplines meet here, and the INHERITANCE one
+        // wins: a subtype carrier RE-CLAIMS a pattern its lineage declares,
+        // replacing an ancestor's index entry — the index owner is the
+        // MOST-SPECIFIC registered carrier, so `match("…")` for an inherited
+        // pattern introduces a token of the most specific registered carrier
+        // (the comb subtyping direction makes that token valid everywhere
+        // the ancestor's would be: child <: parent). A NON-lineage collision
+        // (two unrelated types declaring the identical pattern) keeps the
+        // first-declaration tie-break — the ambiguity the surface
+        // declaration machinery must reject; at the core layer the first
+        // declaration wins, deterministically. The lineage test (is the
+        // previous owner an ancestor of the new registrant?) is what
+        // separates an inheritance re-claim from a genuine collision.
+        // A mixed carrier indexes BOTH its member kinds: the variant walk
+        // above AND the pattern walk here — a mixed `data Color { Red,
+        // Green, Blue, #[A-F0-9]{6} }` is reachable from both dispatches.
+        if (type instanceof DataType) {
+            for (const source of this.canonicalPatternSourcesOf(type)) {
+                const existing = this.patternIndex.get(source)
+                if (existing === undefined) {
+                    this.patternIndex.set(source, type)
+                    continue
+                }
+                // Re-claim: the new registrant is a DESCENDANT of the
+                // indexed owner (the owner's lineage contains the pattern
+                // AND the new type's chain passes through it) — the most
+                // specific carrier takes ownership, so the introduction
+                // form's carrier name follows the term's expected carrier.
+                // Anything else (a sibling collision) leaves the first
+                // declaration standing.
+                if (
+                    type instanceof DataType && existing instanceof DataType &&
+                    this.isAncestorOf(existing, type)
+                ) {
                     this.patternIndex.set(source, type)
                 }
             }
         }
     }
 
-    lookup(name: string): DataType | CodataType | PatternDataType | undefined {
+    /**
+     * Whether `ancestor` is in `type`'s parent chain — the lineage test the
+     * pattern re-claim applies (a subtype's registration re-points inherited
+     * patterns to itself; a collision between unrelated carriers does not
+     * re-point). Chain identity is object identity (`parent` links are
+     * published instances).
+     */
+    private isAncestorOf(ancestor: DataType, type: DataType): boolean {
+        for (let p = type.parent; p !== null; p = p.parent) {
+            if (p === ancestor) return true
+        }
+        return false
+    }
+
+    lookup(name: string): DataType | CodataType | undefined {
         return this.types.get(name)
     }
 
@@ -244,18 +304,45 @@ export class TypeRegistry {
     }
 
     /**
-     * Reverse lookup: find the PatternDataType that declares a pattern by its
+     * Reverse lookup: find the type that declares a pattern by its
      * canonical source. The key is `patternToString`'s rendering (the
      * round-trip normalization), so a caller's source string must be in the
      * same canonical form — the `match("…")` form's payload parses through
      * `parsePattern` and compares canonically, so two spellings of one AST
      * (`[0123456789]` and `[0-9]`) agree.
      *
-     * Returns the FIRST type that declared the pattern (registration order —
+     * Returns the FIRST type that registered the pattern (registration order —
      * the lexer's declaration-order tie-break, `surface-syntax.md` §1.3).
+     * A `DataType` whose declaration carries pattern members resolves here
+     * too (Stage-1: the two carrier shapes coexist until absorption).
+     *
+     * The returned owner is the INDEX owner — the registration-order pick —
+     * NOT necessarily the carrier a term's fold names: a comb child whose
+     * PARENT declared the pattern inherits it (`allPatterns`), so
+     * pattern-carrier MEMBERSHIP on a specific carrier is answered by
+     * `declaresPattern` below. Consumers that ask "which type owns this
+     * pattern" (the introduction form's carrier name) read the index;
+     * consumers that ask "can THIS carrier handle this pattern" (the fold
+     * handler gates) read the lineage predicate — the two questions have
+     * different answers under comb inheritance, and conflating them is what
+     * breaks a child-carrier fold over an inherited pattern.
      */
-    lookupPatternSource(patternSource: string): PatternDataType | undefined {
+    lookupPatternSource(patternSource: string): DataType | undefined {
         return this.patternIndex.get(patternSource)
+    }
+
+    /**
+     * Whether the given carrier's lineage DECLARES the pattern — the
+     * membership test the fold-path gates read. A carrier handles an
+     * inherited pattern: its own slot, or any ancestor's (the same chain
+     * `allPatterns` walks, and the same rule the variant fold applies —
+     * `findVariant` searches the parent chain, so a comb child's fold
+     * handles an inherited variant; the pattern side must agree). The
+     * `DataType` arm is exact: its own slot is its whole language.
+     * The canonical comparison mirrors the index's key normalization.
+     */
+    declaresPattern(type: DataType, canonicalSource: string): boolean {
+        return type.findPattern(canonicalSource) !== undefined
     }
 }
 
@@ -300,10 +387,22 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected abstract paren(e: S["expr"]): S["atom"]
     protected abstract variantCon(name: string, args: S["atom"][]): S["atom"]
     protected abstract obs(scrutinee: S["atom"], observerName: string): S["expr"]
+    /**
+     * A fold handler arm — ONE discriminated record for both member kinds
+     * (the merged fold form, lc.md §5.2): a VARIANT arm carries the
+     * constructor name and its field bindings; a PATTERN arm carries the
+     * pattern's CANONICAL source (the same `patternToString` identity the
+     * introduction form carries, so dispatch and exhaustiveness key on
+     * canonical form everywhere). Exactly one of the two payloads is
+     * present — the `kind` tag is the record's discriminant.
+     */
     protected abstract fold(
         dataType: DataType,
         scrutinee: S["expr"],
-        handlers: { variantName: string; bindings: string[]; body: S["expr"] }[],
+        handlers: (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: S["expr"] }
+            | { kind: "pattern"; patternSource: string; body: S["expr"] }
+        )[],
         resultType: Type,
     ): S["expr"]
     protected abstract unfold(
@@ -323,28 +422,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     protected abstract opApp(opName: string, args: S["atom"][]): S["atom"]
 
     /**
-     * A pattern-matched fold: `fold [T] e { match("pᵢ") → tᵢ }` — the
-     * elimination form over a pattern-matched data type (T/E-FoldMatch, lc.md
-     * §5.2b + §3.1). The action receives the carrier (the registered
-     * `PatternDataType` the annotation resolves to), the scrutinee, the
-     * handlers — each carrying the pattern's CANONICAL source (the same
-     * `patternToString` identity the introduction form carries, so dispatch
-     * and exhaustiveness key on canonical form everywhere) — and the result
-     * type slot (the checker's σ; `Any` at the base grammar, as `fold()`
-     * receives). There is NO binding position: the handler body references
-     * `match`, the fixed binding (`match : Token`, lc.md §5.2b's `tᵢ : Token
-     * → σ`) — the base production extends the context with it before parsing
-     * the body, exactly as `foldHandler` extends with field types.
-     */
-    protected abstract patternFold(
-        dataType: PatternDataType,
-        scrutinee: S["expr"],
-        handlers: { patternSource: string; body: S["expr"] }[],
-        resultType: Type,
-    ): S["expr"]
-
-    /**
-     * A matched token: `Ident` resolving to a registered `PatternDataType`.
+     * A matched token: `Ident` resolving to a registered `DataType`.
      * The action receives both the type name and the raw matched text (they
      * coincide in this grammar-based lexer — the token's source IS its
      * content; a richer lexer would pass the lexed span's text here).
@@ -358,7 +436,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
      * CANONICAL source (`patternToString` — the declared pattern's identity,
      * so two spellings of one AST yield identical tokens), and the raw
      * spelling the term carried (diagnostics). The premises (the pattern is
-     * declared on a registered `PatternDataType`, anchored, and its type
+     * declared on a registered `DataType`, anchored, and its type
      * references resolve) are enforced by `patternMatchProd`'s gate before
      * this action is reached.
      */
@@ -527,7 +605,6 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.lambdaProd(ctx),
             this.typeAbsProd(ctx),
             this.letProd(ctx),
-            this.patternFoldProd(ctx),
             this.foldProd(ctx),
             this.unfoldProd(ctx),
             this.cofoldProd(ctx),
@@ -700,116 +777,6 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         })
     }
 
-    // fold [T] e { match("pᵢ") → tᵢ, ... }  — the pattern-matched fold
-    // (T/E-FoldMatch, lc.md §5.2b + §3.1)
-    //
-    // Ordered BEFORE `foldProd`: the two productions are lexically IDENTICAL
-    // up to the annotation's type gate (both `fold [T] e { … }`), so the
-    // ordering — not lexical shape — decides which branch owns a source. This
-    // branch owns pattern-typed carriers (a `PatternDataType` annotation) and
-    // REJECTS every other kind (`empty`); `foldProd`, now reached only with a
-    // non-pattern annotation, keeps its own gate as a caller-bug guard. The
-    // base grammar never throws on a user program — a wrong-kind annotation is
-    // a failed parse, not a crash.
-    @rule
-    protected patternFoldProd(ctx: unknown): Parser<S["expr"]> {
-        return seq(
-            this.kw("fold"),
-            this.ws1,
-            char("["),
-            this.ws,
-            this.typeProd(this.typeVarCtx(ctx)),
-            this.ws,
-            char("]"),
-            this.ws,
-        ).bind(([, , , , ty]) => {
-            // The annotation must be a PatternDataType — the wrong-kind branch
-            // rejects (the caller falls through to `foldProd`'s reading; a
-            // failed premise is `empty`, never a throw out of the parse).
-            if (!(ty instanceof PatternDataType)) {
-                return empty<S["expr"]>()
-            }
-            const patternType = ty
-            return this.exprProd(ctx)
-                .bind((scrutinee) =>
-                    seq(this.ws, char("{"), this.ws)
-                        .bind(() =>
-                            this.patternFoldHandlers(patternType, ctx)
-                                .bind((handlers) =>
-                                    seq(this.ws, char("}"))
-                                        .map(() =>
-                                            this.patternFold(
-                                                patternType,
-                                                scrutinee,
-                                                handlers,
-                                                Any,
-                                            )
-                                        )
-                                )
-                        )
-                )
-        })
-    }
-
-    // Pattern-fold handlers: match("pᵢ") → tᵢ, ...
-    @rule
-    protected patternFoldHandlers(
-        dataType: PatternDataType,
-        ctx: unknown,
-    ): Parser<{ patternSource: string; body: S["expr"] }[]> {
-        return sepBy(
-            this.patternFoldHandler(dataType, ctx),
-            seq(this.ws, char(","), this.ws),
-        )
-    }
-
-    // match("pᵢ") → tᵢ  (pattern-fold handler)
-    //
-    // The handler head is the CONSTRUCTOR (T-Pattern's premise: `input
-    // matches pₖ ∈ {pᵢ}`) spelled exactly as the introduction form — the same
-    // `match` + tight paren + quoted pattern shape, and the SAME gate walk
-    // (`patternTypeName`: parses, anchored, declared on a registered pattern
-    // type, references resolve). One additional premise: the pattern is
-    // declared on THIS fold's carrier — a pattern owned by a different
-    // registered type would be unmatchable (the scrutinee's `isSubtype` to the
-    // carrier can never reach it) and would corrupt the exhaustiveness
-    // accounting, so the branch rejects it. The handler carries the CANONICAL
-    // source (the gate's resolution), not the raw spelling — dispatch,
-    // exhaustiveness, and the evaluator's handler lookup all key canonical
-    // form.
-    //
-    // The body parses under `match : Token` (lc.md §5.2b: `tᵢ : Token → σ`) —
-    // the fixed binding, extended through the context hook exactly as a fold
-    // handler's field bindings are. A user binder named `match` in an outer
-    // scope is shadowed for the body, the usual lexical rule.
-    @rule
-    protected patternFoldHandler(
-        dataType: PatternDataType,
-        ctx: unknown,
-    ): Parser<{ patternSource: string; body: S["expr"] }> {
-        return seq(
-            this.kw("match"),
-            char("("), // tight paren — the pattern form's discipline
-            this.ws,
-            this.patternString,
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([, , , patternSource]) => {
-            const resolved = this.patternTypeName(patternSource as string)
-            if (resolved === undefined || resolved.typeName !== dataType.name) {
-                return empty<{ patternSource: string; body: S["expr"] }>()
-            }
-            // The body parses under `match : Token` — through the binding
-            // hook, which carries the CANONICAL source (a subclass may bind
-            // the token's identity, not just the type).
-            return this.exprProd(this.patternFoldBinding(ctx, dataType.name, resolved.source))
-                .map((body) => ({ patternSource: resolved.source, body }))
-        })
-    }
-
     // fold [T] e { C(x₁ x₂) → t, ... }
     @rule
     protected foldProd(ctx: unknown): Parser<S["expr"]> {
@@ -823,13 +790,13 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             char("]"),
             this.ws,
         ).bind(([, , , , ty]) => {
-            // The annotation must be a DataType. `patternFoldProd` is ordered
-            // BEFORE this branch, so a pattern-typed annotation is consumed
-            // there; a wrong-kind annotation (e.g. `fold [Stream] ...` —
-            // codata) REJECTS the branch like any other failed premise — an
-            // `assert` here would throw out of the parse instead of rejecting
-            // it (the caller-bug guard lives on the checker's/evaluator's
-            // action overrides, where the premise is formally owned).
+            // The annotation must be a DataType (ONE fold form — the merged
+            // production owns both member kinds via the handler alternation).
+            // A wrong-kind annotation (e.g. `fold [Stream] ...` — codata)
+            // REJECTS the branch like any other failed premise — an `assert`
+            // here would throw out of the parse instead of rejecting it (the
+            // caller-bug guard lives on the checker's/evaluator's action
+            // overrides, where the premise is formally owned).
             if (!(ty instanceof DataType)) {
                 return empty<S["expr"]>()
             }
@@ -849,57 +816,137 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     // Fold handlers: C(x₁ x₂) → t, ...
+    // Fold handlers — ONE alternation over both member kinds (the merged
+    // fold form, lc.md §5.2): a variant head `C(x₁ x₂) → t` OR a pattern head
+    // `match("pᵢ") → t`. The two heads are lexically disjoint (PascalCase+
+    // paren vs `match`+paren), so an `or` is unambiguous. Each head produces
+    // its OWN discriminated record — the `kind` tag is the action's
+    // dispatch, per-arm premises live on the heads (exactly the per-arm
+    // premise shape the reviewer's thread Fc asks the merged rule to
+    // enforce).
+
     @rule
     protected foldHandlers(
         dataType: DataType,
         ctx: unknown,
-    ): Parser<{ variantName: string; bindings: string[]; body: S["expr"] }[]> {
+    ): Parser<
+        (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: S["expr"] }
+            | { kind: "pattern"; patternSource: string; body: S["expr"] }
+        )[]
+    > {
         return sepBy(
             this.foldHandler(dataType, ctx),
             seq(this.ws, char(","), this.ws),
         )
     }
 
-    // C(x₁ x₂) → t  (fold handler)
+    // C(x₁ x₂) → t  |  match("pᵢ") → tᵢ  (fold handler — the alternation)
     @rule
     protected foldHandler(
         dataType: DataType,
         ctx: unknown,
-    ): Parser<{ variantName: string; bindings: string[]; body: S["expr"] }> {
-        return seq(
-            this.variantName,
-            this.ws,
-            char("("),
-            this.ws,
-            sepBy(this.ident, this.ws1),
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([vName, , , , bindings]) => {
-            const variant = dataType.findVariant(vName)
-            if (!variant) {
-                return empty<
-                    { variantName: string; bindings: string[]; body: S["expr"] }
-                >()
-            }
-            const bindingList = (bindings as string[] | undefined) ?? []
-            // Extend context with bindings
-            let extendedCtx = ctx
-            for (let i = 0; i < bindingList.length; i++) {
-                const field = variant.fields[i]
-                if (field) {
-                    extendedCtx = this.extendCtx(
-                        extendedCtx,
-                        bindingList[i]!,
-                        this.foldFieldType(field, dataType),
-                    )
+    ): Parser<
+        { kind: "variant"; variantName: string; bindings: string[]; body: S["expr"] } | {
+            kind: "pattern"
+            patternSource: string
+            body: S["expr"]
+        }
+    > {
+        return or(
+            // The variant head: PascalCase + tight paren + bindings. Ordered
+            // FIRST — a variant name can never be `match` (reserved-shape:
+            // `match` is camelCase), so the order is documentation, not
+            // correctness.
+            seq(
+                this.variantName,
+                this.ws,
+                char("("),
+                this.ws,
+                sepBy(this.ident, this.ws1),
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([vName, , , , bindings]): Parser<
+                { kind: "variant"; variantName: string; bindings: string[]; body: S["expr"] } | {
+                    kind: "pattern"
+                    patternSource: string
+                    body: S["expr"]
                 }
-            }
-            return this.exprProd(extendedCtx)
-                .map((body) => ({ variantName: vName, bindings: bindingList, body }))
-        })
+            > => {
+                const variant = dataType.findVariant(vName)
+                if (!variant) {
+                    return empty<
+                        {
+                            kind: "variant"
+                            variantName: string
+                            bindings: string[]
+                            body: S["expr"]
+                        }
+                    >()
+                }
+                const bindingList = (bindings as string[] | undefined) ?? []
+                // Extend context with bindings
+                let extendedCtx = ctx
+                for (let i = 0; i < bindingList.length; i++) {
+                    const field = variant.fields[i]
+                    if (field) {
+                        extendedCtx = this.extendCtx(
+                            extendedCtx,
+                            bindingList[i]!,
+                            this.foldFieldType(field, dataType),
+                        )
+                    }
+                }
+                return this.exprProd(extendedCtx)
+                    .map((body) => ({
+                        kind: "variant" as const,
+                        variantName: vName,
+                        bindings: bindingList,
+                        body,
+                    }))
+            }),
+            // The pattern head: the CONSTRUCTOR (T-Pattern's premise: `input
+            // matches pₖ ∈ {pᵢ}`) spelled exactly as the introduction form —
+            // the same `match` + tight paren + quoted pattern shape, and the
+            // SAME gate walk (`patternTypeName`: parses, anchored, declared
+            // on a registered pattern carrier, references resolve). One
+            // additional premise: the pattern is declared on THIS fold's
+            // carrier — through the LINEAGE, not just the index owner (the
+            // same rule `findVariant` gives the variant head; a pattern owned
+            // by an unrelated registered type is unmatchable and rejects).
+            // The body parses under `match : Token` (lc.md §5.2b: `tᵢ :
+            // Token → σ`) — the fixed binding, extended through the binding
+            // hook exactly as a variant head's field bindings are.
+            seq(
+                this.kw("match"),
+                char("("), // tight paren — the pattern form's discipline
+                this.ws,
+                this.patternString,
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([, , , patternSource]) => {
+                const resolved = this.patternTypeName(patternSource as string)
+                if (
+                    resolved === undefined ||
+                    !this.registry.declaresPattern(dataType, resolved.source)
+                ) {
+                    return empty<{ kind: "pattern"; patternSource: string; body: S["expr"] }>()
+                }
+                return this.exprProd(
+                    this.patternFoldBinding(ctx, dataType.name, resolved.source),
+                ).map((body) => ({
+                    kind: "pattern" as const,
+                    patternSource: resolved.source,
+                    body,
+                }))
+            }),
+        )
     }
 
     // unfold [T] s { o → t, ... }
@@ -1032,7 +1079,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             this.opProd(ctx),
             // Variant construction: Ident(args)
             this.variantProd(ctx),
-            // Matched token: Ident — gated on the registry (a PatternDataType
+            // Matched token: Ident — gated on the registry (a DataType
             // name) and on the term context (a bound name is a variable)
             this.patternTokenProd(ctx),
             // Pattern-matched construction: match("p") — gated on the registry
@@ -1047,7 +1094,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // Ident — matched token (registry-gated, variable-binding-aware)
     //
     // A bare PascalCase atom whose name resolves to a registered
-    // `PatternDataType` is a matched token: the sole inhabitant of a
+    // `DataType` is a matched token: the sole inhabitant of a
     // pattern-matched type (T-Token, lc.md §2.3 — the bare atom is the token
     // introduction the abstract notation writes as `match(pₖ)`). Gated on the registry —
     // like `opProd`'s Ω gate — and on the term context via `nameBound`: a
@@ -1068,7 +1115,13 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
                 return empty<S["atom"]>()
             }
             const resolved = this.registry.lookup(name)
-            if (!(resolved instanceof PatternDataType)) {
+            // The dual-accept gate: a registered DataType, or a data
+            // type whose declaration (through its parent chain — comb
+            // inheritance) carries pattern members (a mixed carrier's token
+            // atom reads as its token — the same reading DataType's
+            // atoms took). A variant-only carrier is not a token type. The
+            // shared guard is the ONE member-shape definition.
+            if (!isPatternCarrierType(resolved)) {
                 return empty<S["atom"]>()
             }
             return epsilon(name).map(() => this.matchedToken(name, name))
@@ -1119,7 +1172,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     /**
-     * Resolve a pattern source to the registered `PatternDataType` that
+     * Resolve a pattern source to the registered `DataType` that
      * declares it — the owner's name AND the pattern's canonical source. The
      * source parses through `parsePattern` (the SAME parse the declaration
      * machinery uses) and compares canonically — `patternToString`
@@ -1129,7 +1182,7 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
      * 1. the source parses as a pattern (a malformed source is a REJECTION —
      *    empty parse forest, the term is ill-typed — never a thrown error out
      *    of the parse),
-     * 2. the parsed pattern is DECLARED on a registered `PatternDataType`
+     * 2. the parsed pattern is DECLARED on a registered `DataType`
      *    (canonical comparison — `patternToString` normalization — so two
      *    spellings of one AST agree),
      * 3. the pattern is ANCHORED (surface-syntax.md §1.3: it must start with a
@@ -1209,25 +1262,34 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
             case "star":
             case "plus":
             case "opt":
+            case "repeat":
                 // A postfix wrapper is transparent for anchoring: the
                 // pattern starts at its inner's first atom (`[0-9]+` anchors
-                // at the class; `".*"` anchors at the quote).
+                // at the class; `".*"` anchors at the quote) — a counted
+                // repetition `{n,m}` is transparent the same way (`#[A-F0-9]
+                // {6}` anchors at the class).
                 return this.isResolvableAndAnchored(ast.inner, seen)
             case "typeref": {
                 if (seen.has(ast.name)) return true
                 seen.add(ast.name)
                 const resolved = this.registry.lookup(ast.name)
-                if (!(resolved instanceof PatternDataType)) {
+                if (!isPatternCarrierType(resolved)) {
                     // An unresolvable reference: no registered type owns the
-                    // name — the language is unknowable (the constructor
+                    // name (or the named type declares no patterns — a
+                    // variant-only carrier's name is not a pattern language)
+                    // — the language is unknowable (the constructor
                     // would be accepted with a language the registry cannot
-                    // enumerate).
+                    // enumerate). The shared guard is the ONE member-shape
+                    // definition.
                     return false
                 }
                 // The reference's language is the target's: anchored iff the
                 // target's declared patterns all are (the transitive
-                // obligation — a chain ending in `.` is unanchored).
-                return resolved.patterns.every((p) => this.isResolvableAndAnchored(p, seen))
+                // obligation — a chain ending in `.` is unanchored). The walk
+                // reads the PARENT CHAIN (allPatterns — a comb child's
+                // inherited patterns anchor through it too).
+                const declared = resolved.allPatterns()
+                return declared.every((p) => this.isResolvableAndAnchored(p, seen))
             }
         }
     }

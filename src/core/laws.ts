@@ -42,7 +42,7 @@ import { type OpRegistry, type OpSig } from "./ops.ts"
 
 import { isSubtype } from "./subtyping.ts"
 
-import { DataType, PatternDataType, type Type, TypeEnv } from "./types.ts"
+import { DataType, type Type, TypeEnv } from "./types.ts"
 
 /**
  * The evaluation-free type-checking entry the law declarations need
@@ -449,7 +449,7 @@ export const SCHEMA_VARIABLE_COUNT: Record<LawKind, number> = {
 /**
  * Check a law's domain type: the screen walks the variants of data-typed
  * parameters (or draws matched tokens for pattern-typed ones — a
- * `PatternDataType` has a sample vocabulary, the token atom), so every
+ * `DataType` has a sample vocabulary, the token atom), so every
  * parameter must be a data type with variants or a declared pattern type.
  * Function-typed parameters (higher-order operations) are outside the first
  * cut's screen — a law over such an operation declares but cannot be
@@ -457,7 +457,7 @@ export const SCHEMA_VARIABLE_COUNT: Record<LawKind, number> = {
  * law_checking.ts).
  */
 export function screenableDomain(op: { paramTypes: readonly Type[] }): boolean {
-    return op.paramTypes.every((t) => t instanceof DataType || t instanceof PatternDataType)
+    return op.paramTypes.every((t) => t instanceof DataType)
 }
 
 /**
@@ -591,7 +591,7 @@ function isBoolType(t: Type): boolean {
  * Operand-carrier compatibility: one sample space must inhabit both slots.
  *
  * Two slots are compatible when they hold the same carrier — two `DataType`s
- * of the same name, two `PatternDataType`s of the same name, or the two
+ * of the same name, two `DataType`s of the same name, or the two
  * non-data permissive shapes (function types / anything else, which
  * `screenableDomain` separately disqualifies from screening). A mixed
  * data/pattern signature (`(Pat, Bool)`) is NOT compatible: the schema
@@ -601,14 +601,13 @@ function isBoolType(t: Type): boolean {
  * the all-holes sweep would silently pass zero-coverage validation.
  */
 function paramTypeCompatible(a: Type, b: Type): boolean {
-    // Two pattern types: same name = same carrier (the token identity is
-    // type-qualified — see `TokenVal.equals`'s type-name comparison).
-    if (a instanceof PatternDataType && b instanceof PatternDataType) return a.equals(b)
-    // Mixed data/pattern: never compatible.
-    if (a instanceof PatternDataType !== (b instanceof PatternDataType)) return false
-    // Two data types: same name.
+    // Two data carriers: same name (the token identity is type-qualified —
+    // see `TokenVal.equals`'s type-name comparison). With one carrier shape
+    // (the absorption sweep) the old mixed data/pattern rejection is gone:
+    // every slot carries a DataType value, so the schema's swap stays
+    // well-typed by construction.
     if (a instanceof DataType && b instanceof DataType) return a.equals(b)
-    // At most one of the two is a DataType/PatternDataType — the other is a
+    // At most one of the two is a DataType — the other is a
     // non-data type (function, Any, …). Unscreenable regardless
     // (`screenableDomain` routes such signatures away), so compatibility is
     // moot here; conservatively report incompatible to fail loudly.

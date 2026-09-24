@@ -68,9 +68,11 @@ import {
     MAX_FINITE_INHABITANTS,
 } from "./type_algebra.ts"
 
-import { DataType, FamilyType, PatternDataType, type Type, Variant } from "./types.ts"
+import { DataType, FamilyType, isPatternCarrierType, type Type, Variant } from "./types.ts"
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
+
+import { type PatternTypeShape } from "./pattern_shape.ts"
 
 import { setPatternLookup } from "./type_algebra.ts"
 
@@ -165,15 +167,20 @@ function construct(
             bindings.set(argNames[i]!, value)
         } else {
             // Non-recursive fields: a typed sample of the field's own type —
-            // the shallowest sample of a data type, or a matched token for a
-            // pattern-typed field (see `patternSamples`); `undefined` (no
-            // sample vocabulary) when the field type is not sampleable.
-            // `Any`-typed fields have no declared sample vocabulary either —
-            // unsampleable.
+            // the shallowest sample of a data carrier WITH variants, or a
+            // matched token for a pattern-bearing field (see
+            // `patternSamples`); `undefined` (no sample vocabulary) when the
+            // field type is not sampleable. `Any`-typed fields have no
+            // declared sample vocabulary either — unsampleable. The member
+            // predicates are LINEAGE-WIDE (hasVariants/hasPatterns — a comb
+            // child inherits both member kinds), matching the algebra's
+            // own member table.
             const fieldSamples = field.type instanceof DataType
-                ? samplesFor(field.type, Math.min(depth, 1), eval_)
-                : field.type instanceof PatternDataType
-                ? patternSamples(field.type, eval_)
+                ? field.type.hasVariants
+                    ? samplesFor(field.type, Math.min(depth, 1), eval_)
+                    : field.type.hasPatterns
+                    ? patternSamples(field.type, eval_)
+                    : []
                 : []
             const value = fieldSamples[0]
             if (value === undefined) return undefined
@@ -361,7 +368,7 @@ export type ScreenOutcome =
  * operand — the claim was exercised ZERO times); `"passed"` with the
  * instance count and the certificate when the sweep ran (evidence of
  * coverage; passing is still only evidence, never proof — the provenance
- * ladder is unchanged, D7). The caller installs the law `asserted` on a
+ * ladder is unchanged). The caller installs the law `asserted` on a
  * passed screen — `LawRegistry.declareLaw`, or the all-in-one
  * `declareCheckedLaw` (which routes `finite`-regime laws to exhaustion
  * instead — this function is the residual regime's mechanism).
@@ -586,8 +593,8 @@ export function makeEvalTerm(
  * (The size measure is TEXT LENGTH — `Value.size`'s token arm — so the
  * prefix and the coefficients agree.)
  */
-function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
-    if (type.patterns.length === 0) return []
+function patternSamples(type: DataType, eval_: EvalTerm): Value[] {
+    if (!type.hasPatterns) return []
     // The token atom evaluates via the evaluator's `matchedToken` (a
     // `TokenVal` of the pattern type) — construction goes through the
     // evaluator so the value's type resolution follows the same registry
@@ -610,7 +617,7 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
     //   sweep an arbitrary first pick.
     // - **a non-token result** (a variant, a closure): the name resolved to
     //   something else entirely — also an evaluator/registry inconsistency
-    //   (the gate checked a `PatternDataType`; the evaluator should agree).
+    //   (the gate checked a `DataType`; the evaluator should agree).
     //   Same loud failure.
     const results = [...eval_(type.name, new ValueEnv())]
     const tokens = results.filter((r): r is TokenVal => r instanceof TokenVal)
@@ -637,8 +644,10 @@ function patternSamples(type: PatternDataType, eval_: EvalTerm): Value[] {
 /**
  * The pattern language's registry hook: a type reference `<T>` in a pattern
  * resolves through the type registry (the same registry the evaluator and
- * the token gate consult). The hook reads only `PatternDataType`s (a `<T>`
- * naming a data type is a parse error inside the counting environment).
+ * the token gate consult). The hook returns any registered type; the
+ * PATTERN-CARRIER narrowing happens at consumption (`patternTypeLookup` —
+ * a `<T>` naming a variant-only carrier is not a pattern language, and
+ * resolving it would silently count an empty language).
  *
  * The hook is installed by `LawTypeChecker`-carrying check entries: the
  * checker's registry is the language's type registry, and the law checker
@@ -650,12 +659,16 @@ let typeRegistryLookup: (name: string) => Type | undefined = () => undefined
 
 /**
  * The pattern language's counting lookup: resolves a type reference name
- * through the installed registry hook (only `PatternDataType`s — a `<T>`
- * naming a data type is a parse error inside the counting environment).
+ * through the installed registry hook (only PATTERN CARRIERS — a `<T>`
+ * naming a variant-only carrier (no pattern members) resolves to an EMPTY
+ * pattern language, whose counts would read all zero — a silently
+ * mis-typed reference; the shared member-shape guard rejects it here so
+ * the counting env's own loud "does not resolve to a registered pattern
+ * type" error surfaces instead).
  */
-function patternTypeLookup(name: string): PatternDataType | undefined {
+function patternTypeLookup(name: string): DataType | undefined {
     const resolved = typeRegistryLookup(name)
-    return resolved instanceof PatternDataType ? resolved : undefined
+    return isPatternCarrierType(resolved) ? resolved : undefined
 }
 
 /**
@@ -745,20 +758,21 @@ export function declareCheckedLawWithRegistry(
  *         rejected claim, not a vacuous proof).
  */
 function patternSpaceOf(
-    type: PatternDataType,
+    type: DataType,
     law: Omit<LawDecl, "provenance">,
     spec: SubSpaceSpec | undefined,
     eval_: EvalTerm,
 ): readonly TokenVal[] {
-    if (type.patterns.length === 0) return []
+    if (!type.hasPatterns) return []
     const env = makePatternCountEnv(patternTypeLookup)
     // The sweep space: the enumeration's COUNT must fit the exhaustion
     // ceiling — with a scope, the FILTERED result must fit (a huge full
     // language with a tiny sub-space is still exhaustible: the scope is
-    // the point).
+    // the point). The vocabulary is the LINEAGE union (allPatterns — an
+    // inherited pattern is a member the sweep must cover).
     const budget = MAX_FINITE_INHABITANTS
     const seen = new Set<string>()
-    for (const ast of type.patterns) {
+    for (const ast of type.allPatterns()) {
         const strings = enumeratePattern(ast, MAX_PATTERN_LENGTH, env, budget)
         if (strings === undefined) {
             throw new LawDeclarationError(
@@ -942,39 +956,62 @@ export interface CertifiedCoverage {
  *         reading rejects it the same way).
  */
 export function inhabitantsUpToSize(
-    type: DataType | PatternDataType,
+    type: DataType,
     k: number,
     eval_: EvalTerm,
 ): readonly Value[] {
     if (k < 0) {
         throw new RangeError(`inhabitantsUpToSize(${type.name}): the size bound k must be ≥ 0`)
     }
-    if (type instanceof PatternDataType) {
-        // The language-equation enumeration: the TRUE size-≤ k token set
-        // from the pattern's language — every matched string of length ≤ k
-        // becomes a token (`TokenVal(type, text)`; the token is an axiom of
-        // the operational semantics, its text carried directly), INCLUDING
-        // the ε string when the language is nullable (`a*`, `a?`): its size
-        // is 0, so it is the size-0 class's sole member — c₀ counts it, and
+    if (type instanceof DataType && type.hasPatterns) {
+        // The language-equation enumeration: the carrier's PATTERN members'
+        // size-≤ k token set — every matched string of length ≤ k becomes a
+        // token (`TokenVal(type, text)`; the token is an axiom of the
+        // operational semantics, its text carried directly), INCLUDING the
+        // ε string when the language is nullable (`a*`, `a?`): its size is
+        // 0, so it is the size-0 class's sole member — c₀ counts it, and
         // the size-≤ k prefix must hold it or the enumerator under-reports
-        // the coefficient count. The read goes through the type's UNION
-        // (`typeUnionStrings` — variants may overlap; one merged set), so
-        // the enumerator and the coefficients read the same language.
-        // A prefix past the budget is a DECLINE (the caller rejects loudly
-        // — an enumeration hole must not masquerade as coverage),
-        // consistent with the data-carrier arm's behavior.
-        if (type.patterns.length === 0) return []
-        const strings = typeUnionStrings(type, k, PREFIX_BUDGET)
+        // the coefficient count. The read goes through the type's lineage
+        // UNION (the shape built from `allPatterns()` — a comb child's
+        // inherited patterns are members too; reading the local slot alone
+        // would drop every ancestor's language), so the enumerator and the
+        // coefficients read the same language. A prefix past the budget is
+        // a DECLINE (the caller rejects loudly — an enumeration hole must
+        // not masquerade as coverage).
+        const lineageShape = {
+            name: type.name,
+            patterns: type.allPatterns(),
+        } satisfies PatternTypeShape
+        const strings = typeUnionStrings(lineageShape, k, PREFIX_BUDGET)
         if (strings === undefined) {
             throw new LawDeclarationError(
                 type.name,
                 `the size-≤ ${k} enumeration exceeds the prefix budget — the certificate declines (an enumeration hole must not masquerade as coverage)`,
             )
         }
-        const deduped: Value[] = [...strings]
+        const tokens: Value[] = [...strings]
             .map((text) => new TokenVal(type.name, text))
-            .sort((a, b) => a.size() - b.size())
-        return deduped
+        if (!type.hasVariants) {
+            // A pattern-ONLY carrier's space is exactly the token set —
+            // sort to the certificate's per-length order and return.
+            return tokens.sort((a, b) => a.size() - b.size())
+        }
+        // A MIXED carrier's space is the UNION of both member kinds — the
+        // token walk above PLUS the variant-system walk below (the same
+        // composition `coefficients` runs: variant inhabitants are
+        // `VariantVal`s, pattern inhabitants are tokens, kind-disjoint
+        // universes whose prefixes merge). Omitting either kind would make
+        // the certified sweep under-cover the space the coefficients
+        // count — the certificate's mismatch check would reject (or worse,
+        // a field-space read would silently shrink).
+        const variantSpace = spaceUpToSize(
+            type,
+            k,
+            eval_,
+            new Map(),
+            new Map(),
+        )
+        return [...variantSpace, ...tokens].sort((a, b) => a.size() - b.size())
     }
     const spaces = new Map<DataType, readonly VariantVal[]>()
     const degrees = new Map<DataType, number>()
@@ -1050,17 +1087,31 @@ function spaceUpToSize(
     // Productive variants: those whose every field has sample vocabulary.
     // A variant with an unsampleable field contributes nothing — matched by
     // the zero polynomial in `coefficients` (the same unsampleable rule
-    // everywhere).
+    // everywhere). A pattern-BEARING field carrier is NOT unsampleable: its
+    // space is the token classes (the language-equation enumeration), even
+    // though `finiteInhabitants`' variant-system count reads 0 for it — the
+    // field's token walk below enumerates its members. Stage 5's
+    // member-shape counting replaces this interim exception.
     const variants = type.allVariants().filter((variant) => {
         const fieldTypes = variant.fields.map((field) => field.type)
-        if (fieldTypes.some((t) => t instanceof DataType && (finiteInhabitants(t) ?? 1) === 0)) {
+        if (
+            fieldTypes.some((t) =>
+                t instanceof DataType && t.patterns.length === 0 &&
+                (finiteInhabitants(t) ?? 1) === 0
+            )
+        ) {
             return false
         }
         return variant.fields.every((field) => {
             const fieldType = field.type
             if (fieldType instanceof FamilyType) return true
-            if (fieldType instanceof DataType) return true
-            if (fieldType instanceof PatternDataType) return fieldType.patterns.length > 0
+            // A data field is sampleable iff the carrier carries members:
+            // variants (the space walk) or patterns (the token read) — a
+            // bare carrier (no members) is a zero-inhabitant field, caught
+            // by the empty-field filter above.
+            if (fieldType instanceof DataType) {
+                return fieldType.variants.length > 0 || fieldType.patterns.length > 0
+            }
             return false
         })
     })
@@ -1076,14 +1127,34 @@ function spaceUpToSize(
             ) => {
                 const fieldType = field.type
                 if (fieldType instanceof FamilyType) return spaces.get(type) ?? []
-                if (fieldType instanceof DataType) {
-                    return spaceUpToSize(fieldType, size - 1, eval_, spaces, degrees)
+                if (fieldType instanceof DataType && fieldType.variants.length > 0) {
+                    // The field carrier's variant-member space at this size
+                    // (the ≤ size−1 prefix, grown through the shared memo).
+                    const variantSpace = spaceUpToSize(fieldType, size - 1, eval_, spaces, degrees)
+                    if (fieldType.patterns.length === 0) {
+                        // A variants-only field carrier's space is exactly
+                        // the walk's result.
+                        return variantSpace
+                    }
+                    // A MIXED field carrier's space unions BOTH kinds: the
+                    // variant walk's values PLUS the field's own per-length
+                    // tokens (the same composition the coefficients' token
+                    // arm runs — omitting the token members would shrink a
+                    // With(p)-shaped mixed field's space and the class
+                    // filter would silently drop constructions the
+                    // coefficients count).
+                    const tokenLen = size - 1
+                    const strings = typeUnionStrings(fieldType, tokenLen, PREFIX_BUDGET)
+                    const fieldTokens: readonly Value[] = strings === undefined ? [] : [...strings]
+                        .filter((text) => text.length === tokenLen)
+                        .map((text) => new TokenVal(fieldType.name, text))
+                    return [...variantSpace, ...fieldTokens]
                 }
-                if (fieldType instanceof PatternDataType) {
+                if (fieldType instanceof DataType && fieldType.patterns.length > 0) {
                     // The pattern field's space at this size: the TRUE
                     // size-EXACT (size−1) token set from the field type's
                     // UNION (`typeUnionStrings` — the field's language is
-                    // the union of ALL its declared variants; enumerating
+                    // the union of ALL its declared patterns; enumerating
                     // `patterns[0]` alone would drop every later variant's
                     // strings and silently shrink a With(p) carrier's
                     // space) — the size measure is TEXT LENGTH
@@ -1182,7 +1253,7 @@ function spaceUpToSize(
  * full size-≤ kᵢ prefix, and assert the count against `coefficients` —
  * the theorem, machine-checked.
  *
- * The kᵢ policy (D3):
+ * The kᵢ policy:
  * 1. The smallest nonempty size class min S(T) (from the coefficients).
  * 2. Candidate kᵢ = min(MAX_SCREEN_SIZE, max { k | prefix(k) ≤ PREFIX_BUDGET }),
  *    RAISED to min S(T) when min S(T) > MAX_SCREEN_SIZE (the wide-record
@@ -1197,10 +1268,10 @@ function spaceUpToSize(
  * @throws LawDeclarationError when the smallest nonempty class exceeds the
  *         prefix budget (the certificate cannot be swept), or when the
  *         enumerated count mismatches the coefficient count (a hole in the
- *         sweep — the loud error D5 requires).
+ *         sweep — the loud error the certificate requires).
  */
 function certifyPosition(
-    type: DataType | PatternDataType,
+    type: DataType,
     eval_: EvalTerm,
 ): CertifiedPosition {
     const coeffs = coefficients(type, MAX_SCREEN_SIZE)
@@ -1340,10 +1411,10 @@ function certifyCoverage(
             positionSamples.push([])
             continue
         }
-        const certified = certifyPosition(type as DataType | PatternDataType, eval_)
+        const certified = certifyPosition(type as DataType, eval_)
         positions.push(certified)
         const samples = inhabitantsUpToSize(
-            type as DataType | PatternDataType,
+            type as DataType,
             certified.k,
             eval_,
         )
@@ -1465,7 +1536,7 @@ export function screeningRegime(
         // size is irrelevant (this is what keeps an identity claim over
         // (Bool, 2¹⁸) exhaustible — only position 0 is ever enumerated).
         if (exponents[position] === 0) continue
-        if (op.paramTypes[position]! instanceof PatternDataType) {
+        if (isPatternCarrierType(op.paramTypes[position])) {
             // A pattern carrier routes machineFinite ONLY when the law
             // scopes it: structural exhaustion is never honest for one
             // (type-algebra.md §2.3 — a pattern type's generating function
@@ -1473,7 +1544,20 @@ export function screeningRegime(
             // the SWEPT space finite and spec-able. An unscoped pattern
             // carrier routes residual (the certified screen's token
             // samples cover a certified prefix instead).
-            if (law.subSpace?.some((spec) => spec.position === position)) {
+            //
+            // The MIXED refinement: a carrier with BOTH member kinds is
+            // not fully swept by the sub-space machinery
+            // (`patternSpaceOf` enumerates the token language only — the
+            // variant members' space is outside its reach, and may be
+            // unbounded). Its certified screen composes both kinds (see
+            // `inhabitantsUpToSize`), so a mixed carrier routes residual
+            // — scoped or not — and the machineFinite arm stays
+            // pattern-only carriers (patterns > 0, variants = 0).
+            const carrier = op.paramTypes[position]! as DataType
+            if (
+                !carrier.hasVariants &&
+                law.subSpace?.some((spec) => spec.position === position)
+            ) {
                 patternCarrierPositions++
                 continue
             }
@@ -1619,7 +1703,7 @@ export function declareCheckedLaw(
 
     // The derivable arm: attempt the derivation. A closing derivation is a
     // PROOF (discharged, with the certificate); the belt-and-braces screen
-    // (D7) runs before installation — an engine bug that fabricates a bogus
+    // certification runs before installation — an engine bug that fabricates a bogus
     // proof becomes a loud LawError on concrete instances. A non-closing
     // derivation is a DECLINE, not a falsification: the claim falls through
     // to the residual screen, and the returned regime names the mechanism
@@ -1843,12 +1927,14 @@ function exhaustLaw(
         .map((type, position): ReadonlyArray<VariantVal | TokenVal> => {
             if (exponents[position] === 0) return []
             const spec = predicates.get(position)
-            if (type instanceof PatternDataType) {
+            if (isPatternCarrierType(type)) {
                 // The pattern carrier's sub-space: enumerate the matched
                 // strings' tokens (the true size-≤ bound space from the
                 // language equation) — this is the sub-space exhaustion's
                 // sweep space; `MAX_FINITE_INHABITANTS` bounds it (the
-                // regime's routing already guaranteed the fit).
+                // regime's routing already guaranteed the fit). The
+                // member-shape gate: a variants-only carrier falls through
+                // to the full variant space below.
                 const space = patternSpaceOf(type, law, spec, eval_)
                 if (spec) sweepSpaces.set(position, space.length)
                 return space
@@ -1887,11 +1973,13 @@ function exhaustLaw(
     }
     // The sweep's visible extent (the machineFinite certificate): scoped
     // positions state their admitted cardinality, and the length bound
-    // states how far the enumeration reached. Recorded ONLY for the
-    // pattern-typed scoped positions (a finite data carrier's full space
-    // needs no extent note — the regime itself certifies it).
+    // states how far the enumeration reached. Recorded ONLY for
+    // PATTERN-CARRIER positions (the shared member-shape predicate — the
+    // length bound is the token enumeration's reach; a variant-only
+    // carrier's full space has no token classes to certify, and a bogus
+    // entry would misstate the certificate's extent).
     const sweepPositions = (law.subSpace ?? [])
-        .filter((spec) => op.paramTypes[spec.position] instanceof PatternDataType)
+        .filter((spec) => isPatternCarrierType(op.paramTypes[spec.position]))
         .map((spec) => ({
             position: spec.position,
             where: spec.where,
@@ -1997,6 +2085,17 @@ function* inhabitantsOf(
         // the completeness check below surface the truth.)
         const hasEmptyField = variant.fields.some((field) => {
             const fieldType = field.type
+            // A pattern-BEARING field carrier is NOT empty: its space is
+            // the token classes (the language-equation enumeration) —
+            // `finiteInhabitants`' variant-system count reads 0 for it (no
+            // variants), but the carrier's members are pattern
+            // constructors, and the field's space walk below enumerates
+            // them. Stage 5's member-shape counting replaces this interim
+            // exception (a finite-language pattern carrier then reports a
+            // real count).
+            if (fieldType instanceof DataType && fieldType.patterns.length > 0) {
+                return false
+            }
             return fieldType instanceof DataType && finiteInhabitants(fieldType) === 0
         })
         if (hasEmptyField) continue

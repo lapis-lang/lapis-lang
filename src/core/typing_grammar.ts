@@ -15,12 +15,12 @@
  *   T-App:      Γ ⊢ t : σ→τ  ∧  Γ ⊢ u : σ  ⟹  Γ ⊢ t u : τ
  *   T-Let:      Γ ⊢ t : σ  ∧  σ <: τ  ∧  Γ, x:τ ⊢ u : τ'  ⟹  Γ ⊢ let x:τ=t in u : τ'
  *   T-Variant:  Γ ⊢ tⱼ : Fₖ(T)[α:=T]  ⟹  Γ ⊢ Cₖ(tⱼ) : T
- *   T-Fold:     Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ  ⟹  Γ ⊢ fold [T] e {...} : σ
- *   T-FoldMatch: Γ ⊢ e : T  ∧  Γ ⊢ tᵢ : Token→σ  ⟹  Γ ⊢ fold [T] e {match("pᵢ") → tᵢ} : σ
- *               (pattern-matched fold — every handler body types as Token→σ for
- *               ONE COMMON σ (lc.md §5.2b's shared conclusion; divergence is a
- *               rejected branch); no fixpoint: a PatternDataType has no fields,
- *               so there is no σ recirculation)
+ *   T-Fold:     Γ ⊢ e : T (variant arm) ∨ e : match(pₖ) (pattern arm)
+ *               ∧ every declared member has a handler  ⟹  σ (the joined
+ *               arm types — variant arms via the fixpoint, pattern arms
+ *               σ-CONSTANT for ONE COMMON σ: divergence is a rejected
+ *               branch; the pattern bodies bind `match : Token`, no σ
+ *               recirculation)
  *   T-Obs:      Γ ⊢ e : T  ⟹  Γ ⊢ e.oₖ : Gₖ(T)[α:=T]
  *   T-Unfold:   Γ ⊢ s : Σ  ∧  Γ ⊢ gⱼ : Σ→Gⱼ(Σ)[α:=Σ]  ⟹  Γ ⊢ unfold [T] s {...} : T
  *   T-Cofold:   Γ ⊢ e : T  ∧  Γ ⊢ t : Πⱼ(Gⱼ(σ)[α:=σ])→σ  ⟹  Γ ⊢ cofold [T] e {...} : σ
@@ -37,7 +37,6 @@
  */
 
 import {
-    assert,
     char,
     empty,
     ensures,
@@ -57,9 +56,9 @@ import {
     DataType,
     FamilyType,
     FunType,
+    isPatternCarrierType,
     Nothing,
     NothingType,
-    PatternDataType,
     PolymorphicType,
     Token,
     type Type,
@@ -158,18 +157,35 @@ function isWellFormedType(t: Type | undefined): boolean {
 }
 
 /**
- * One span-captured pattern-fold handler record (T-FoldMatch's handler
+ * One span-captured pattern-fold handler record (the pattern arm's handler
  * shape): the pattern's CANONICAL source (the gate's resolution — the same
  * key the exhaustiveness check and the evaluator's dispatch read), the
  * body's source span (the evaluator replays it under the fold's ambient
  * environment), and the body's TYPE (checked once under `match : Token` —
  * the checker needs no re-parse, there is no σ to refine).
  */
-interface SpanPatternFoldHandler {
-    readonly patternSource: string
-    readonly bodySpan: Span
-    readonly bodyType: Type
-}
+/**
+ * A fold handler arm — ONE discriminated record for both member kinds (the
+ * merged fold form): a VARIANT arm carries the constructor's bindings
+ * (rebound to the fixpoint's current σ); a PATTERN arm carries the pattern's
+ * CANONICAL source and its σ-CONSTANT body type (the body never mentions σ,
+ * so it enters the join every round at no cost). Exactly one payload is
+ * present — the `kind` tag is the record's discriminant.
+ */
+type SpanFoldRecord =
+    | {
+        readonly kind: "variant"
+        readonly variantName: string
+        readonly bindings: string[]
+        readonly bodySpan: Span
+        readonly ctx: TypeCheckCtx
+    }
+    | {
+        readonly kind: "pattern"
+        readonly patternSource: string
+        readonly bodySpan: Span
+        readonly bodyType: Type
+    }
 
 // ── The type-checking grammar ─────────────────────────────────────────────────
 
@@ -532,37 +548,131 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     }
 
     /**
-     * @ensures Progress: a fold on a variant value can step (E-Fold);
-     * on a non-value, it can step (E-FoldArg). Progress holds.
-     * @ensures Preservation: the result type σ is the join of all handler body types.
+     * @ensures Progress: a fold on a variant value can step (E-Fold); on a
+     * token scrutinee the pattern arm fires (single step). Progress holds.
+     * @ensures Preservation: the result type σ is the join of the arms' body
+     * types (pattern arms are σ-constant — they enter every join round).
      */
+    @requires(
+        (
+            _self: LCTypeCheck,
+            _dataType: DataType,
+            _scrutinee: Type,
+            _handlers: unknown[],
+            _resultType: Type,
+        ) => // The merged fold's scrutinee premise, per arm: a variant arm
+        // requires `scrutinee : T` (the variant value's carrier); a
+        // pattern arm requires `scrutinee : match(pₖ)` (the token's
+        // carrier). The kind dispatch the merged rule applies per arm.
+        true,
+        {
+            rule: "T-Fold",
+            role: "premise",
+            formula: "scrutinee : T (variant arm) ∨ scrutinee : match(pₖ) (pattern arm)",
+        },
+    )
     @ensures(
         (_self: LCTypeCheck, _args: [DataType, Type, unknown[], Type], _old, result: Type) =>
             isWellFormedType(result),
-        { rule: "T-Fold", role: "conclusion", formula: "result : σ (join of handler body types)" },
+        { rule: "T-Fold", role: "conclusion", formula: "result : σ (the joined arm types)" },
     )
     protected fold(
         dataType: DataType,
         scrutinee: Type,
-        handlers: { variantName: string; bindings: string[]; body: Type }[],
+        handlers: (
+            | { kind: "variant"; variantName: string; bindings: string[]; body: Type }
+            | { kind: "pattern"; patternSource: string; body: Type }
+        )[],
         _resultType: Type,
     ): Type {
-        // T-Fold: Γ ⊢ e : T ∧ Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ ⟹ Γ ⊢ fold [T] e {...} : σ
+        // The MERGED fold's premises, kind-dispatched per arm:
         //
-        // Premise 1: scrutinee : T (scrutinee type must be a subtype of dataType)
+        // T-Fold (variant arms): Γ ⊢ e : T ∧ Γ ⊢ tᵢ : Fᵢ(σ)[α:=σ]→σ ⟹ σ
+        // The pattern arms' premises (kind-dispatched): scrutinee : T; every declared
+        // pattern has a handler (CANONICAL source key); ONE COMMON σ per
+        // pattern-arm group — the strict typeEquals, NOT a join (a divergent
+        // pattern arm rejects the fold; never a laundered `Any`).
+        //
+        // The scrutinee premise applies ONCE: a TokenVal scrutinee can only
+        // fire a pattern arm (E-Fold's token route), a VariantVal scrutinee can only
+        // fire a variant arm (E-Fold's variant route) — the value-kind disjointness makes the
+        // per-kind premise sets independent, and BOTH sets hold when both
+        // arm kinds are present.
         if (!isSubtype(scrutinee, dataType)) return Any // ill-typed
 
-        // Premise 2: handlers must be exhaustive (cover all variants)
+        // The variant arms' premise: exhaustiveness — every variant has a
+        // handler (when ANY variant arm exists, all variants must be covered —
+        // the structural-exhaustion contract is all-or-nothing).
+        const variantArms = handlers.filter((h) => h.kind === "variant")
+        const patternArms = handlers.filter((h) => h.kind === "pattern")
         const allVariants = dataType.allVariants()
-        for (const variant of allVariants) {
-            const handler = handlers.find((h) => h.variantName === variant.name)
-            if (!handler) return Any // missing handler → ill-typed
+        if (variantArms.length > 0) {
+            for (const variant of allVariants) {
+                const handler = variantArms.find((h) =>
+                    h.kind === "variant" && h.variantName === variant.name
+                )
+                if (!handler) return Any // missing handler → ill-typed
+            }
         }
 
-        // Premise 3: all handler body types must agree (infer σ)
-        // σ is the join (least upper bound) of all handler body types.
-        // This uses the lattice operation from TAPL §16.4 — the join finds
-        // the smallest type that all handler bodies are subtypes of.
+        // The pattern arms' premise: exhaustiveness over the DECLARED
+        // patterns (CANONICAL source key — the same normalization the
+        // registry's reverse index and the evaluator's dispatch read).
+        //
+        // The TOKEN-SPECIFIC scrutinee premise (Progress at the value-kind
+        // dispatch): a pattern arm fires ONLY on a TokenVal scrutinee, so a
+        // fold whose handler list has pattern arms must be able to step for
+        // EVERY value its scrutinee's type admits. A variant value fires a
+        // variant arm (E-Fold's variant route) — so when the carrier has
+        // variants, the variant arm set must cover every variant; a carrier
+        // with NO variants has only token values (its sole introduction is
+        // the match form), so pattern arms alone are sufficient. Without
+        // this, a well-typed program (a variant value of a mixed carrier,
+        // pattern arms only) would fail only at evaluation — the checker
+        // would admit a fold the evaluator necessarily rejects.
+        //
+        // Concretely: `fold [Color] Red() { match("…") → … }` on a MIXED
+        // carrier is REJECTED here — `Red()` may be a variant value, and no
+        // variant arm can fire on it. The member set is LINEAGE-WIDE
+        // (allVariants — a comb child inherits its parent's variants; its
+        // local slot alone would wrongly call it patterns-only).
+        if (patternArms.length > 0 && allVariants.length > 0 && variantArms.length === 0) {
+            return Any // a variant value cannot fire any arm
+        }
+        if (patternArms.length > 0) {
+            const declared = dataType.allPatterns().map((p) => patternToString(p))
+            const handlerSources = new Set(
+                patternArms.flatMap((h) => h.kind === "pattern" ? [h.patternSource] : []),
+            )
+            for (const source of declared) {
+                if (!handlerSources.has(source)) return Any // missing handler
+            }
+            // The pattern-arm group's ONE COMMON σ (typeEquals — divergent
+            // bodies reject; the preservation argument reads that σ).
+            const first = patternArms[0]!
+            if (first.kind !== "pattern") return Any
+            const patternSigma = first.body
+            for (const h of patternArms) {
+                if (h.kind !== "pattern" || !typeEquals(h.body, patternSigma)) {
+                    return Any
+                }
+            }
+            // The pattern group's common σ joins the variant fixpoint's σ —
+            // but the join only makes sense when BOTH routes are live; a
+            // scrutinee of one kind fires only its own arms. The conservative
+            // join keeps the result sound for either scrutinee shape.
+            const variantSigma = variantArms.length > 0
+                ? variantArms.reduce<Type>(
+                    (s, h) => h.kind === "variant" ? join(s, h.body) : s,
+                    first.body,
+                )
+                : patternSigma
+            if (scrutinee instanceof NothingType) return Nothing
+            return variantSigma
+        }
+
+        // Variant arms only (or none — the empty handler list on a
+        // pattern-less carrier is ill-typed: nothing to eliminate).
         if (handlers.length === 0) return Any
 
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
@@ -573,223 +683,6 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         let sigma = handlers[0]!.body
         for (let i = 1; i < handlers.length; i++) {
             sigma = join(sigma, handlers[i]!.body)
-        }
-
-        return sigma
-    }
-
-    /**
-     * T-FoldMatch's semantic action — UNREACHABLE. The checker's
-     * `patternFoldProd` override owns the whole production (span-captured
-     * handlers feeding `typePatternFold`), the same ownership
-     * `foldProd`'s override takes for T-Fold (the base action would discard
-     * the body types the one-pass judgment needs). Kept as a loud guard for
-     * the abstract-action contract.
-     */
-    protected patternFold(
-        _dataType: PatternDataType,
-        _scrutinee: Type,
-        _handlers: { patternSource: string; body: Type }[],
-        _resultType: Type,
-    ): Type {
-        throw new Error("LCTypeCheck.patternFold: unreachable — patternFoldProd is overridden")
-    }
-
-    // ── T-FoldMatch: pattern-matched fold (one-pass — no fixpoint) ────────────
-    //
-    // A `PatternDataType` has NO fields and NO Family positions — the fold is
-    // depth-1 and there is no σ to recirculate: each handler body is a closed
-    // judgment `Γ, match:Token ⊢ tᵢ : σᵢ` checked ONCE, and the fold's result
-    // is the handlers' COMMON σ (lc.md §5.2b: every body types as `Token → σ`
-    // for one σ; a divergent branch rejects). No `parseToFixpoint`, no span
-    // re-parsing of bodies — the spans are captured for the COST PASS's
-    // benefit (the CostPass slices the bodies from the checker's tree; the
-    // checker itself never re-reads them — the evaluator captures its own
-    // spans).
-    //
-    // The handler heads are GATED by this override's own handler production
-    // (`spanPatternFoldHandler`, below — the checker's production override
-    // owns the whole parse, so the base `patternFoldHandler` never runs
-    // here): the same `patternTypeName` walk the `match("p")` introduction
-    // form runs, plus the carrier-name premise. The established shape: the
-    // gate owns registry-side premises, the judgment (`typePatternFold`) owns
-    // context-side ones.
-
-    /**
-     * Parse the pattern-matched fold production, capturing handler body
-     * spans (the shape T-Fold's override captures; the checker never
-     * re-parses them — there is no σ to refine — but the record shape is
-     * shared with the evaluator's span-capture idiom).
-     */
-    // fold [T] e { match("pᵢ") → tᵢ }  — T-FoldMatch (one-pass join)
-    @rule
-    protected override patternFoldProd(ctx: unknown): Parser<Type> {
-        return seq(
-            this.kw("fold"),
-            this.ws1,
-            char("["),
-            this.ws,
-            this.typeProd(this.typeVarCtx(ctx)),
-            this.ws,
-            char("]"),
-            this.ws,
-        ).bind(([, , , , ty]) => {
-            // Premise: the annotation must be a PatternDataType. A wrong-kind
-            // annotation rejects the branch (`empty<Type>()`) like any other
-            // failed premise — an `assert` here would throw out of the parse
-            // instead of rejecting it.
-            if (!(ty instanceof PatternDataType)) {
-                return empty<Type>()
-            }
-            const patternType = ty
-            return this.exprProd(ctx)
-                .bind((scrutineeType) =>
-                    seq(this.ws, char("{"), this.ws)
-                        .bind(() =>
-                            this.spanPatternFoldHandlers(patternType, ctx as TypeCheckCtx)
-                                .bind((spanHandlers) =>
-                                    seq(this.ws, char("}"))
-                                        .map(() =>
-                                            this.typePatternFold(
-                                                patternType,
-                                                scrutineeType,
-                                                spanHandlers,
-                                            )
-                                        )
-                                        // T-FoldMatch premises are checked inside
-                                        // typePatternFold; a failure is `undefined`
-                                        // — reject the branch.
-                                        .bind((result) =>
-                                            result === undefined
-                                                ? empty<Type>()
-                                                : epsilon<Type>(result)
-                                        )
-                                )
-                        )
-                )
-        })
-    }
-
-    /** Parse pattern-fold handlers, capturing body spans (no re-parse needed). */
-    // match("pᵢ") → tᵢ, ...  — pattern-fold handlers (span-captured)
-    @rule
-    protected spanPatternFoldHandlers(
-        dataType: PatternDataType,
-        ctx: TypeCheckCtx,
-    ): Parser<SpanPatternFoldHandler[]> {
-        return sepBy(
-            this.spanPatternFoldHandler(dataType, ctx),
-            seq(this.ws, char(","), this.ws),
-        )
-    }
-
-    // match("pᵢ") → tᵢ  — single pattern-fold handler (span-captured)
-    //
-    // The base production's gate (`patternFoldHandler`) already proves the
-    // pattern is declared on the carrier and canonicalizes the source; the
-    // checker's override re-runs the same production shape so the body's TYPE
-    // is computed under `match : Token` (the base AST-builder action discards
-    // types). The gate premises are re-checked here — the override does not
-    // inherit the base's bind chain (the same re-check discipline the fold
-    // override's spanFoldHandler applies).
-    @rule
-    protected spanPatternFoldHandler(
-        dataType: PatternDataType,
-        ctx: TypeCheckCtx,
-    ): Parser<SpanPatternFoldHandler> {
-        return seq(
-            this.kw("match"),
-            char("("),
-            this.ws,
-            this.patternString,
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([, , , patternSource]) => {
-            const resolved = this.patternTypeName(patternSource as string)
-            if (resolved === undefined || resolved.typeName !== dataType.name) {
-                return empty<SpanPatternFoldHandler>()
-            }
-            // The body's context: `match : Token` (the fixed binding,
-            // lc.md §5.2b's `tᵢ : Token → σ`).
-            const handlerCtx = this.extendCtx(ctx, "match", Token) as TypeCheckCtx
-            return this.exprProd(handlerCtx)
-                .map((bodyType, span) => ({
-                    patternSource: resolved.source,
-                    bodySpan: { start: span.start, end: span.end },
-                    bodyType,
-                }))
-        })
-    }
-
-    /**
-     * T-FoldMatch's premises, checked in order (a failure at any step is
-     * `undefined` — the caller rejects the branch):
-     *
-     * 1. scrutinee : T — `isSubtype(scrutineeType, T)`.
-     * 2. exhaustiveness — every declared pattern of T has a handler, keyed on
-     *    CANONICAL pattern source (the same key the registry's reverse index
-     *    and the evaluator's dispatch use; a raw-spelling key would make
-     *    exhaustiveness depend on which spelling was registered).
-     * 3. Nothing propagation — a scrutinee of type Nothing makes the fold
-     *    uninhabited (principle of explosion; checked after the structural
-     *    premises so a genuine type error is never masked).
-     * 4. ONE COMMON σ — every handler body (each already checked under
-     *    `match : Token` in spanPatternFoldHandler) types at the SAME
-     *    `Token → σ` (lc.md §5.2b's single-σ conclusion; the preservation
-     *    argument reads that σ). The fold's result is that σ. Exhaustiveness
-     *    with a ≥1-pattern carrier guarantees ≥1 handlers; a zero-pattern
-     *    carrier has no tokens (its fold is unreachable) and rejects here.
-     */
-    @ensures(
-        (
-            _self: LCTypeCheck,
-            _args: [PatternDataType, Type, SpanPatternFoldHandler[]],
-            _old,
-            result: Type | undefined,
-        ) => result === undefined || isWellFormedType(result),
-        {
-            rule: "T-FoldMatch",
-            role: "conclusion",
-            formula: "result : σ (the handlers' common Token→σ)",
-            production: "patternFoldProd",
-        },
-    )
-    private typePatternFold(
-        dataType: PatternDataType,
-        scrutineeType: Type,
-        spanHandlers: SpanPatternFoldHandler[],
-    ): Type | undefined {
-        // Premise 1: scrutinee : T
-        if (!isSubtype(scrutineeType, dataType)) return undefined
-
-        // Premise 2: exhaustiveness — every declared pattern has a handler.
-        // Keyed on CANONICAL source (patternToString), the same normalization
-        // the registry's reverse index and the handler gate apply: a raw
-        // spelling key would make exhaustiveness depend on which spelling was
-        // registered.
-        const declared = dataType.patterns.map((p) => patternToString(p))
-        const handlerSources = new Set(spanHandlers.map((h) => h.patternSource))
-        for (const source of declared) {
-            if (!handlerSources.has(source)) return undefined
-        }
-
-        // Premise 3: Nothing propagation (principle of explosion).
-        if (scrutineeType instanceof NothingType) return Nothing
-
-        // Premise 4: ONE COMMON σ — every handler body types at the SAME
-        // `Token → σ` (lc.md §5.2b: `Γ ⊢ tᵢ : Token → σ (for each pattern
-        // pᵢ)` — one σ, not a lattice-joined one; the preservation argument
-        // reads that σ). A branch whose body diverges from the first body's
-        // type rejects the fold (an empty forest — the branch-reject shape,
-        // never a laundered `Any`).
-        if (spanHandlers.length === 0) return undefined
-
-        const sigma = spanHandlers[0]!.bodyType
-        for (let i = 1; i < spanHandlers.length; i++) {
-            if (!typeEquals(spanHandlers[i]!.bodyType, sigma)) return undefined
         }
 
         return sigma
@@ -851,69 +744,108 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     }
 
     /** Parse fold handlers, capturing body spans for fixpoint iteration. */
-    // Cᵢ(xⱼ) → tᵢ, ...  — fold handlers (span-captured for fixpoint)
+    // Cᵢ(xⱼ) → tᵢ  |  match("pᵢ") → tᵢ  — fold handlers (span-captured for fixpoint)
     @rule
     protected spanFoldHandlers(
         dataType: DataType,
         ctx: TypeCheckCtx,
-    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }[]> {
+    ): Parser<SpanFoldRecord[]> {
         return sepBy(
             this.spanFoldHandler(dataType, ctx),
             seq(this.ws, char(","), this.ws),
         )
     }
 
-    // Cᵢ(xⱼ) → tᵢ  — single fold handler (span-captured)
+    // Cᵢ(xⱼ) → tᵢ  |  match("pᵢ") → tᵢ  — single fold handler (the alternation)
+    //
+    // The variant head's body parses under the FIELD bindings (the fixpoint
+    // rebinds Family fields to σ); the pattern head's body parses under
+    // `match : Token` (lc.md §5.2b) — its TYPE is σ-constant, computed once
+    // here and carried in the record for the fixpoint's join.
     @rule
     protected spanFoldHandler(
         dataType: DataType,
         ctx: TypeCheckCtx,
-    ): Parser<{ variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }> {
-        return seq(
-            this.variantName,
-            this.ws,
-            char("("),
-            this.ws,
-            sepBy(this.ident, this.ws1),
-            this.ws,
-            char(")"),
-            this.ws,
-            this.arrow,
-            this.ws,
-        ).bind(([vName, , , , bindings]) => {
-            const variant = dataType.findVariant(vName)
-            if (!variant) {
-                return empty<
-                    { variantName: string; bindings: string[]; bodySpan: Span; ctx: TypeCheckCtx }
-                >()
-            }
-            const bindingList = (bindings as string[] | undefined) ?? []
-            // Build the handler context: non-recursive fields at their declared
-            // types, Family fields at σ (initially the carrier — the fixpoint
-            // rebinds Family fields to the current σ each iteration).
-            let handlerCtx = ctx
-            for (let i = 0; i < bindingList.length; i++) {
-                const field = variant.fields[i]
-                if (field) {
-                    handlerCtx = new TypeCheckCtx(
-                        handlerCtx.gamma.extend(
-                            bindingList[i]!,
-                            field.type.resolveFamily(dataType),
-                        ),
-                        handlerCtx.delta,
-                    )
+    ): Parser<SpanFoldRecord> {
+        return or(
+            seq(
+                this.variantName,
+                this.ws,
+                char("("),
+                this.ws,
+                sepBy(this.ident, this.ws1),
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([vName, , , , bindings]): Parser<SpanFoldRecord> => {
+                const variant = dataType.findVariant(vName)
+                if (!variant) {
+                    return empty<SpanFoldRecord>()
                 }
-            }
-            // Parse the body to capture the span (the type is discarded — it was
-            // computed under the placeholder σ = Any)
-            return this.exprProd(handlerCtx)
-                .map((_body, span) => ({
-                    variantName: vName,
-                    bindings: bindingList,
-                    bodySpan: { start: span.start, end: span.end },
-                    ctx: handlerCtx,
-                }))
-        })
+                const bindingList = (bindings as string[] | undefined) ?? []
+                // Build the handler context: non-recursive fields at their
+                // declared types, Family fields at σ (initially the carrier —
+                // the fixpoint rebinds Family fields to the current σ each
+                // iteration).
+                let handlerCtx = ctx
+                for (let i = 0; i < bindingList.length; i++) {
+                    const field = variant.fields[i]
+                    if (field) {
+                        handlerCtx = new TypeCheckCtx(
+                            handlerCtx.gamma.extend(
+                                bindingList[i]!,
+                                field.type.resolveFamily(dataType),
+                            ),
+                            handlerCtx.delta,
+                        )
+                    }
+                }
+                // Parse the body to capture the span (the type is discarded —
+                // it was computed under the placeholder σ = Any)
+                return this.exprProd(handlerCtx)
+                    .map((_body, span) => ({
+                        kind: "variant" as const,
+                        variantName: vName,
+                        bindings: bindingList,
+                        bodySpan: { start: span.start, end: span.end },
+                        ctx: handlerCtx,
+                    }))
+            }),
+            seq(
+                this.kw("match"),
+                char("("), // tight paren — the pattern form's discipline
+                this.ws,
+                this.patternString,
+                this.ws,
+                char(")"),
+                this.ws,
+                this.arrow,
+                this.ws,
+            ).bind(([, , , patternSource]): Parser<SpanFoldRecord> => {
+                const resolved = this.patternTypeName(patternSource as string)
+                // The handler-head premise reads the LINEAGE (the same rule
+                // the variant fold's `findVariant` applies): a comb child's
+                // fold handles a pattern its parent declared.
+                if (
+                    resolved === undefined ||
+                    !this.registry.declaresPattern(dataType, resolved.source)
+                ) {
+                    return empty<SpanFoldRecord>()
+                }
+                // The body's context: `match : Token` (the fixed binding,
+                // lc.md §5.2b's `tᵢ : Token → σ`).
+                const handlerCtx = this.extendCtx(ctx, "match", Token) as TypeCheckCtx
+                return this.exprProd(handlerCtx)
+                    .map((bodyType, span) => ({
+                        kind: "pattern" as const,
+                        patternSource: resolved.source,
+                        bodySpan: { start: span.start, end: span.end },
+                        bodyType,
+                    }))
+            }),
+        )
     }
 
     /**
@@ -928,21 +860,48 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     private evalFoldFixpoint(
         dataType: DataType,
         scrutineeType: Type,
-        spanHandlers: {
-            variantName: string
-            bindings: string[]
-            bodySpan: Span
-            ctx: TypeCheckCtx
-        }[],
+        spanHandlers: SpanFoldRecord[],
     ): Type | undefined {
         // Premise 1: scrutinee : T
         if (!isSubtype(scrutineeType, dataType)) return undefined
 
-        // Premise 2: handlers must be exhaustive
+        // Premise 2 (kind-dispatched exhaustiveness): a VARIANT arm set
+        // must be all-or-nothing (every variant has a handler when any does);
+        // a PATTERN arm set must cover every declared pattern (CANONICAL
+        // source key — the same normalization the registry's reverse index
+        // and the evaluator's dispatch read; a raw-spelling key would make
+        // exhaustiveness depend on which spelling was registered). The
+        // declared set reads the PARENT CHAIN (allPatterns — a comb child
+        // whose parent declared a pattern owes it a handler too).
+        const variantArms = spanHandlers.filter((h) => h.kind === "variant")
+        const patternArms = spanHandlers.filter((h) => h.kind === "pattern")
         const allVariants = dataType.allVariants()
-        for (const variant of allVariants) {
-            const handler = spanHandlers.find((h) => h.variantName === variant.name)
-            if (!handler) return undefined
+        if (variantArms.length > 0) {
+            for (const variant of allVariants) {
+                const handler = variantArms.find(
+                    (h) => h.kind === "variant" && h.variantName === variant.name,
+                )
+                if (!handler) return undefined
+            }
+        }
+        if (patternArms.length > 0) {
+            // The TOKEN-SPECIFIC scrutinee premise (Progress at the
+            // value-kind dispatch — the same rule the fold action applies):
+            // pattern arms fire ONLY on tokens, so when the carrier has
+            // variants the variant arm set must be present to fire on a
+            // variant value. A patterns-only carrier's every value is a
+            // token, so pattern arms alone suffice there. The member set is
+            // LINEAGE-WIDE (allVariants — an inherited variant is a member).
+            if (allVariants.length > 0 && variantArms.length === 0) {
+                return undefined
+            }
+            const declared = dataType.allPatterns().map((p) => patternToString(p))
+            const handlerSources = new Set(
+                patternArms.flatMap((h) => h.kind === "pattern" ? [h.patternSource] : []),
+            )
+            for (const source of declared) {
+                if (!handlerSources.has(source)) return undefined
+            }
         }
 
         if (spanHandlers.length === 0) return undefined
@@ -952,7 +911,23 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // the premises so a genuine type error is never masked.
         if (scrutineeType instanceof NothingType) return Nothing
 
-        // Use parseToFixpoint to refine σ
+        // The PATTERN arms are σ-CONSTANT: their bodies never mention σ
+        // (parsed under `match : Token`), so their types enter the join every
+        // round unchanged. The pattern-arm group premise: all pattern arms share ONE
+        // common σ (the strict typeEquals — a divergent arm rejects; never a
+        // laundered join). The group's common σ seeds the join; the variant
+        // arms' fixpoint refines around it.
+        let patternSigma: Type | undefined
+        for (const h of patternArms) {
+            if (h.kind !== "pattern") continue
+            if (patternSigma === undefined) {
+                patternSigma = h.bodyType
+            } else if (!typeEquals(h.bodyType, patternSigma)) {
+                return undefined // divergent pattern arm — rejects the fold
+            }
+        }
+        // Use parseToFixpoint to refine σ (variant arms only; the pattern
+        // arms' constant types enter the join every round at no cost).
         // Start at the DataType itself (not Any) because recursive fields
         // have declared type = DataType. This gives a better initial estimate.
         //
@@ -964,12 +939,29 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // `Any` body type that silently satisfies the join.
         let reparseFailed = false
         const sigma = this.parseToFixpoint(
-            dataType as Type, // σ₀ = DataType (recursive fields' declared type)
+            // σ₀: the seed the join folds FROM — a variant-less
+            // (patterns-only) carrier would join its pattern σ against
+            // DataType itself and converge to Any (the seed is part of the
+            // fold per parseToFixpoint's contract). A patterns-only carrier's degenerate
+            // case: the fold result is the pattern group's σ
+            // EXACTLY (the pattern arms' σ-constant bodies make the variant fixpoint's
+            // contribution empty) — seed with
+            // the pattern group's σ when no variant arms exist (with no
+            // variant arms the seed is never re-read, so the pattern σ IS the
+            // result).
+            variantArms.length === 0 && patternSigma !== undefined
+                ? patternSigma
+                : dataType as Type, // recursive fields' declared type
             (currentSigma: Type) => {
-                // Re-parse each handler body under currentSigma
-                // (recursive fields rebound to currentSigma)
+                // Re-parse each VARIANT arm's body under currentSigma
+                // (recursive fields rebound to currentSigma); each PATTERN
+                // arm's σ-constant body type enters the join unchanged.
                 const bodyTypes: Type[] = []
                 for (const handler of spanHandlers) {
+                    if (handler.kind === "pattern") {
+                        bodyTypes.push(handler.bodyType)
+                        continue
+                    }
                     // Rebuild context with recursive fields bound to currentSigma
                     const variant = dataType.findVariant(handler.variantName)
                     if (!variant) {
@@ -1581,11 +1573,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
     /**
      * A matched token types as the pattern-matched type it inhabits
-     * (lc.md §5.1 T-Token: the sole inhabitant of a `PatternDataType`).
+     * (lc.md §5.1 T-Token: the sole inhabitant of a `DataType`).
      *
-     * The premise `p ∈ registry ∧ p is a PatternDataType` is enforced by the
+     * The premise `p ∈ registry ∧ p is a DataType` is enforced by the
      * base `patternTokenProd`'s gate — the branch is only taken when the
-     * lookup yields a `PatternDataType`, so a violation here is a caller
+     * lookup yields a `DataType`, so a violation here is a caller
      * bug, not an input error: it fails LOUDLY (`assert`) rather than
      * degrading to `Any`. A silent `Any` would type an unregistered token,
      * and under an `Any` annotation the wrong type satisfies S-Refl — the
@@ -1593,10 +1585,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      */
     protected matchedToken(dataTypeName: string, _text: string): Type {
         const resolved = this.registry.lookup(dataTypeName)
-        assert(
-            resolved instanceof PatternDataType,
-            `matchedToken premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the token gate (patternTokenProd) must be consulted before this action`,
-        )
+        // The dual-accept premise: a registered DataType, or a data
+        // type whose declaration (through its parent chain — comb
+        // inheritance) carries pattern members. A violation is a caller bug —
+        // the token gate (patternTokenProd) must be consulted before this
+        // action. The shared type guard both throws AND narrows: the return
+        // needs no cast, so a future change to `lookup`'s union surfaces as a
+        // compile error here, not as a silent widening.
+        if (!isPatternCarrierType(resolved)) {
+            throw new Error(
+                `matchedToken premise violated: "${dataTypeName}" does not resolve to a registered pattern carrier — the token gate (patternTokenProd) must be consulted before this action`,
+            )
+        }
         return resolved
     }
 
@@ -1607,7 +1607,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * declared pattern the form names (lc.md §5.1 T-Pattern).
      *
      * The premises — the source parses, it is anchored, it is DECLARED on a
-     * registered `PatternDataType`, and its type references resolve — are
+     * registered `DataType`, and its type references resolve — are
      * enforced by the base `patternMatchProd`'s gate (`patternTypeName`), so a
      * violation here is a caller bug, not an input error: it fails LOUDLY
      * (`assert`) rather than degrading to `Any`, the same shape as
@@ -1627,10 +1627,18 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         _rawSource: string,
     ): Type {
         const resolved = this.registry.lookup(dataTypeName)
-        assert(
-            resolved instanceof PatternDataType,
-            `matchedPattern premise violated: "${dataTypeName}" does not resolve to a registered PatternDataType — the pattern gate (patternMatchProd) must be consulted before this action`,
-        )
+        // The dual-accept premise (the pattern gate's walk already proved the
+        // pattern is DECLARED on the carrier): a registered DataType,
+        // or a data type whose declaration (through its parent chain) carries
+        // pattern members. A violation is a caller bug — the pattern gate
+        // (patternMatchProd) must be consulted before this action. The shared
+        // type guard both throws AND narrows — no cast (the same
+        // compile-error-not-silent-widening discipline matchedToken applies).
+        if (!isPatternCarrierType(resolved)) {
+            throw new Error(
+                `matchedPattern premise violated: "${dataTypeName}" does not resolve to a registered pattern carrier — the pattern gate (patternMatchProd) must be consulted before this action`,
+            )
+        }
         return resolved
     }
 
@@ -1638,13 +1646,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * Override `patternMatchProd` to enforce T-Pattern's premises in the
      * production path. The base production's gate (`patternTypeName`) covers
      * the full premise set — source parses, anchored, declared on a registered
-     * `PatternDataType` — and the checker's context is irrelevant to them (the
+     * `DataType` — and the checker's context is irrelevant to them (the
      * rule reads the REGISTRY, not Γ), so the base gate IS the premise check.
      * No Γ-dependent premise exists: T-Pattern's formal rule is `T = μ α. Σᵢ
      * pᵢ ∧ input matches pₖ ∧ tok : Token` — no Γ judgment. The conclusion is
      * committed through the base `epsilon(this.matchedPattern(...))` — the
-     * `@ensures`-contracted action is only reached on the verified path, the
-     * established production-path shape (#56).
+     * `@ensures`-contracted action is only reached on the verified path (the
+     * production commits its conclusion via `epsilon` after the gate), so
+     * this contract encodes the conclusion the rule model reads.
      */
     // match("p")  — T-Pattern (premises enforced by the base patternMatchProd gate)
 }

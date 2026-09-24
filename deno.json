@@ -5,7 +5,7 @@
     "minimumDependencyAge": "0",
     "tasks": {
         "check": "deno check src/index.ts",
-        "test": "deno test",
+        "test": "deno test --allow-run",
         "build": "deno compile --output dist/lapis src/cli.ts",
         "fmt": "deno fmt",
         "lint": "deno lint"

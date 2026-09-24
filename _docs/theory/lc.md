@@ -34,8 +34,10 @@ evaluation rule produces it; it is an axiom of the operational semantics.
 ```
 σ, τ ::= α                  type variable
        | σ → τ              function type
-       | μ α. Σᵢ Cᵢ(σᵢ)      recursive data type (sum of named variants)
-       | μ α. Σᵢ pᵢ          pattern-matched data type (sum of pattern constructors)
+       | μ α. Σᵢ mᵢ          data type (sum of named variants AND/OR pattern
+       |                      constructors — a MIXED carrier carries both
+       |                      member kinds; the absorbed pattern-only form is
+       |                      the degenerate case with an empty variant set)
        | ν α. Πⱼ oⱼ(σⱼ)      corecursive codata type (product of named observers)
        | Token               raw matched text
        | Any                 top
@@ -176,14 +178,16 @@ match("p") ⇓ tok                                    (E-Pattern)
 (λx:σ. t) v → [x ↦ v] t                              (E-App)
 
 fold [T] (Cₖ(vⱼ)) {Cᵢ(xⱼ) → tᵢ}
-  → [xⱼ ↦ vⱼ'] tₖ                                    (E-Fold)
+  → [xⱼ ↦ vⱼ'] tₖ                                    (E-Fold, variant arm)
   where for each field j:
     vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ}   if j is a recursive (Family) field
     vⱼ' = vⱼ                       otherwise
 
 fold [T] (match(pₖ)) {pᵢ → tᵢ}
-  → [match ↦ tok] tₖ                                  (E-FoldMatch)
-  where tok is the matched Token for pattern pₖ
+  → [match ↦ tok] tₖ                                  (E-Fold, pattern arm)
+  where tok is the matched Token for pattern pₖ — a token scrutinee
+  contributes NO recursion (a single step; a variant scrutinee recurses
+  through its Family fields; the two routes never mix within one step)
 
 (unfold [T] s {oⱼ → gⱼ}).oₖ → gₖ(s)                    (E-Obs)
 
@@ -334,25 +338,29 @@ T = ν α. Πⱼ oⱼ(Gⱼ(α))     T' = ν α. Πⱼ oⱼ(G'ⱼ(α))     (same 
                       Γ ⊢ tok : T
 ```
 
-### 5.2 Fold (catamorphism — data elimination)
+### 5.2 Fold (catamorphism — data elimination, merged)
 
 ```
-T = μ α. Σᵢ Cᵢ(Fᵢ(α))
+T = μ α. Σᵢ Cᵢ(Fᵢ(α))     (variant members)
 Γ ⊢ e : T
-Γ ⊢ tᵢ : Fᵢ(σ)[α := σ] → σ   (for each variant Cᵢ)
-────────────────────────────────────────────────────────────────  (T-Fold)
-Γ ⊢ fold [T] e {Cᵢ(xⱼ) → tᵢ} : σ
-```
+Γ ⊢ tᵢ : Fᵢ(σ)[α := σ] → σ   (for each variant arm Cᵢ)
+────────────────────────────────────────────────────────────────  (T-Fold, variant arm)
+Γ ⊢ fold [T] e {Cᵢ(xⱼ) → tᵢ, ...} : σ
 
-### 5.2b Pattern-matched fold
-
-```
-T = μ α. Σᵢ pᵢ
+T = μ α. Σᵢ pᵢ             (pattern members)
 Γ ⊢ e : T
-Γ ⊢ tᵢ : Token → σ   (for each pattern pᵢ)
-────────────────────────────────────────────────────────────────  (T-FoldMatch)
-Γ ⊢ fold [T] e {pᵢ → tᵢ} : σ
+Γ ⊢ tᵢ : Token → σ   (for each pattern arm pᵢ; ONE COMMON σ across the
+                      pattern-arm group — a variant arm's σ joins it)
+────────────────────────────────────────────────────────────────  (T-Fold, pattern arm)
+Γ ⊢ fold [T] e {match("pᵢ") → tᵢ, ...} : σ
 ```
+
+ONE production, ONE rule name (`T-Fold`), two arm kinds: a fold's handler list may mix variant arms
+and pattern arms. The variant arms participate in the σ-fixpoint (their Family bindings rebind each
+round); the pattern arms are σ-CONSTANT (their context never mentions σ — their body types enter the
+join every round at no cost). A pattern-arm group keeps the strict one-common- σ premise; a
+patterns-only carrier degenerates to that group's σ, a variants-only carrier to the variant
+fixpoint's σ.
 
 ### 5.3 Observation (codata elimination)
 
@@ -445,8 +453,8 @@ value or $t \to t'$ for some $t'$.
 **Sketch:** By induction on the typing derivation.
 
 - **Fold:** `fold [T] e {Cᵢ → tᵢ}` — `e` is either a value or steps. If `e = Cₖ(vⱼ)`, the fold steps
-  to `tₖ[xⱼ ↦ vⱼ']` (E-Fold). If `e = match(pₖ)`, the fold steps to `tₖ[match ↦ tok]` (E-FoldMatch).
-  Since `T` is a μ-type (finite), the recursion terminates.
+  to `tₖ[xⱼ ↦ vⱼ']` (E-Fold, variant arm). If `e = match(pₖ)`, the fold steps to `tₖ[match ↦ tok]`
+  (E-Fold, pattern arm). Since `T` is a μ-type (finite), the recursion terminates.
 
 - **Unfold:** `unfold [T] s {oⱼ → gⱼ}` is a value. It does not step until observed. Observation
   `e.oₖ` steps to `gₖ(s)` (E-Obs), productive by the typing of `gₖ`.
@@ -469,8 +477,8 @@ $\Gamma \vdash t' : \sigma$.
 - **E-Fold:** `fold [T] (Cₖ(vⱼ)) {Cᵢ → tᵢ} → tₖ[xⱼ ↦ vⱼ']`. By T-Fold, `tₖ : Fₖ(σ)[α:=σ] → σ` and
   `vⱼ' : Fₖ(σ)[α:=σ]`. By the typing of `tₖ`, the result is `σ`.
 
-- **E-FoldMatch:** `fold [T] (match(pₖ)) {pᵢ → tᵢ} → tₖ[match ↦ tok]`. By T-FoldMatch,
-  `tₖ : Token → σ` and `tok : Token`. Result is `σ`.
+- **E-Fold (pattern arm):** `fold [T] (match(pₖ)) {pᵢ → tᵢ} → tₖ[match ↦ tok]`. By T-Fold's
+  pattern-arm premise, `tₖ : Token → σ` and `tok : Token`. Result is `σ`.
 
 - **E-Obs:** `e.oₖ → gₖ(s)`. By T-Unfold, `gₖ : Σ → Gₖ(Σ)[α:=Σ]` and `s : Σ`. Result is
   `Gₖ(Σ)[α:=Σ]`, consistent with `Gₖ(T)[α:=T]` by the unfold's typing.

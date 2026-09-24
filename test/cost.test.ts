@@ -2,9 +2,9 @@
  * Cost algebra tests — the static cost/depth analysis over LC terms.
  *
  * See _docs/theory/semantics.md §5.5 (The Cost Algebra) and
- * _docs/issue52-plan.md §5 (the test plan this suite follows).
+ * _docs/design-decisions.md (the decisions this suite pins).
  *
- * The suites cover, in the plan's order:
+ * The suites cover, in this order:
  *
  * 1. the `SizeExpr`/`DepthExpr` algebra (construction, saturation,
  *    substitution, rendering, opacity propagation),
@@ -122,7 +122,7 @@ Deno.test("SizeExpr: a hostile variable name survives merge and render", () => {
 
 Deno.test("matchedPattern: the match form analyzes through the engine and the pass", () => {
     // The `CostEngine.matchedPattern` integration: a registered
-    // `PatternDataType`'s match form parses and analyzes — the cost is the
+    // `DataType`'s match form parses and analyzes — the cost is the
     // O(1) token production, the result size is the CANONICAL source's
     // length named by the sanitized per-pattern variable, and the
     // `CostPass` tree walk agrees with the engine's own parse (the two
@@ -383,7 +383,7 @@ Deno.test("flag: the Ackermann shape flags (a fold whose recursion threads funct
     // recursion result: the recursion result (function-typed, no size
     // algebra) flows into the application's fn position — the flagged
     // feedback shape. A TERM, not an op: the checker's T-Fold cannot declare
-    // function-result folds today (the plan's D7).
+    // function-result folds today (the checker rejects them by design).
     const fixtures = createOpFixtures()
     const report = analyzeTerm(
         ACKERMANN_TERM,

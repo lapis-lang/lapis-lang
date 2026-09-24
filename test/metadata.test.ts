@@ -18,8 +18,9 @@ const expectedTyping = [
     ["T-Abs", ["lam"], [], ["result : σ → τ"]],
     ["T-App", ["app"], ["fn : σ → τ  ∧  arg <: σ"], ["result : τ"]],
     ["T-Cofold", ["cofold"], [], ["result : σ"]],
-    ["T-Fold", ["fold"], [], ["result : σ (join of handler body types)"]],
-    ["T-FoldMatch", ["typePatternFold"], [], ["result : σ (the handlers' common Token→σ)"]],
+    ["T-Fold", ["fold"], ["scrutinee : T (variant arm) ∨ scrutinee : match(pₖ) (pattern arm)"], [
+        "result : σ (the joined arm types)",
+    ]],
     ["T-Let", ["let_"], ["def : σ  ∧  σ <: τ"], ["result : τ'"]],
     ["T-Obs", ["obs"], [], ["result : Gₖ(T)[α:=T]"]],
     ["T-Op", ["opApp"], ["Ω(op) = σ₁→...→σₙ→τ  ∧  arity matches"], ["result : τ"]],
@@ -34,8 +35,12 @@ const expectedTyping = [
 const expectedEval = [
     ["E-App", ["app"], ["fn : ⟨x, σ, span, ρ⟩"], ["result : w"]],
     ["E-Cofold", ["cofold"], ["scrutinee : codataVal"], ["result : w"]],
-    ["E-Fold", ["fold"], ["scrutinee : Cₖ(vⱼ)"], ["result : w"]],
-    ["E-FoldMatch", ["patternFold"], ["scrutinee : match(pₖ)"], ["result : w"]],
+    [
+        "E-Fold",
+        ["fold"],
+        ["scrutinee : Cₖ(vⱼ) (variant arm) ∨ scrutinee : TokenVal (pattern arm)"],
+        ["result : w"],
+    ],
     ["E-Lam", ["lam"], [], ["result : ⟨x, σ, span, ρ⟩"]],
     ["E-Let", ["let_"], ["def : v"], ["result : w"]],
     ["E-Obs", ["obs"], ["scrutinee : codataVal"], ["result : w"]],
