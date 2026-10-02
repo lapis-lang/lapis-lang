@@ -113,6 +113,16 @@ is standard lexer behavior — no special rule needed.
 `".*"` is fine; bare `.*` is rejected). This prevents a pattern from matching everything from any
 position.
 
+**No letter-leading patterns:** a pattern's **leftmost-matchable set — computed from its AST, not
+its source — must exclude `[A-Za-z]`**. Letter-initial matches are reserved for the grammar's other
+forms (identifiers, keywords, named variant construction); since the surface lexer is driven by
+`data` declarations (patterns > operators > identifiers), a letter-leading pattern would swallow
+every identifier and keyword in any source file. The check is computed, not syntactic:
+`[0-9]?[a-z]+` source-starts with a digit class, but its language contains letter-initial strings
+(the optional digit can be absent) — rejected. `#[0-9A-F]{6}`'s leftmost set is `{#}` — accepted.
+Rejected loudly at declaration; pinning and grammar work tracked in
+[#85](https://github.com/lapis-lang/lapis-lang/issues/85) (with `_docs/overview.md` §12.11).
+
 **Disambiguation:** longest match wins; declaration order breaks ties. Named constructors take
 precedence over patterns when both could match.
 
@@ -191,23 +201,23 @@ Color Red toHex                     "=> '#FF0000'"
 
 ## 2. Expression Precedence
 
-Expressions follow the Smalltalk message-send model with three precedence levels between message
-_types_ (unary > binary > keyword) and **uniform precedence within binary messages** (all binary
-operators have the same precedence, evaluated left-to-right).
+Expressions use three operation-application forms with three precedence levels between form _types_
+(unary > binary > keyword) and **uniform precedence within binary messages** (all binary operators
+have the same precedence, evaluated left-to-right).
 
 ### 2.1 Precedence Table
 
 | Level       | Production    | Message type                                    | Associativity      | AST Node      |
 | ----------- | ------------- | ----------------------------------------------- | ------------------ | ------------- |
-| 1 (lowest)  | `keywordExpr` | Keyword messages                                | Left               | `KeywordSend` |
-| 2           | `binaryExpr`  | Binary messages (all symbolic operators)        | **Left (uniform)** | `BinarySend`  |
-| 3 (highest) | `unaryExpr`   | Unary messages                                  | Left               | `UnarySend`   |
+| 1 (lowest)  | `keywordExpr` | Keyword calls                                   | Left               | `KeywordCall` |
+| 2           | `binaryExpr`  | Binary calls (all symbolic operators)           | **Left (uniform)** | `BinaryCall`  |
+| 3 (highest) | `unaryExpr`   | Unary calls                                     | Left               | `UnaryCall`   |
 | —           | `primary`     | literals, refs, blocks, arrays, records, parens | —                  | various       |
 
 **Uniform binary precedence:** ALL binary operators (`+`, `-`, `*`, `/`, `<`, `<=`, `=`, `,`, `&`,
 `|`, etc.) have the same precedence. `1 + 2 * 3` parses as `(1 + 2) * 3 = 9`. Explicit parentheses
 are required for mathematical grouping: `1 + (2 * 3) = 7`. This follows the Smalltalk model: binary
-messages are simply message sends, and the language does not assign one higher priority than
+calls are simply operation applications, and the language does not assign one higher priority than
 another. See [`design-decisions.md`](../design-decisions.md) §"Symbolic operation names".
 
 **Symbolic operation names:** Binary operators are fold names. They can be symbolic (`+`, `*`, `<`,
@@ -221,7 +231,7 @@ context (expression level, not pattern level).
 token) are pattern-matched constructors (data introduction). Symbolic characters in infix position
 (between whitespace-delimited tokens) are symbolic operations (folds/elimination). The lexer
 alternates between "expecting a token" (prefix — try patterns > identifiers > named constructors)
-and "expecting an operator" (infix — try operators > identifiers for named sends).
+and "expecting an operator" (infix — try operators > identifiers for named operations).
 
 ### 2.2 Railroad Diagram: Expression Hierarchy
 
@@ -248,9 +258,9 @@ flowchart TD
 precedence, left-associative. The previous 6-level ladder (`orExpr` through `consExpr`) is collapsed
 into one level.
 
-### 2.3 Message Sends (Smalltalk Model)
+### 2.3 Calls (Operation Application)
 
-Lapis uses Smalltalk-style message sends with three precedence levels:
+Lapis uses three operation-application forms with three precedence levels:
 
 **Unary messages** (tightest bind, no arguments):
 
@@ -295,7 +305,7 @@ keywordSuffix = (' ' ident ':' ' ' expr)+
 
 A primary followed by zero or more unary suffixes, optionally followed by a keyword suffix. If
 keyword suffixes are present, they collect all `key: arg` pairs greedily into a single
-`KeywordSend`.
+`KeywordCall`.
 
 ### 2.4 Railroad Diagram: Message Chain
 
@@ -306,8 +316,8 @@ flowchart LR
     unaryLoop -->|no| kwCheck{"' ' ident ':' ' ' expr"}
     kwCheck -->|yes| kwLoop{"more key:arg?"}
     kwLoop -->|yes| kwCheck
-    kwLoop -->|no| done["KeywordSend"]
-    kwCheck -->|no| done2["UnarySend chain / primary"]
+    kwLoop -->|no| done["KeywordCall"]
+    kwCheck -->|no| done2["UnaryCall chain / primary"]
 ```
 
 ## 3. Composite Expressions
@@ -462,6 +472,28 @@ flowchart TD
 | Satisfies | `satisfies:` + PascalCase  | `satisfiesClause`  |
 
 **AST:** `DataDecl(name, parent, body: DataBodyItem[])`
+
+**Extension semantics** (when `parent` is present — comb inheritance, single parent):
+
+- **Variant inheritance.** The child's variant set is the parent's variant set plus its own.
+  Inherited variants are constructible through the child (`Child ParentVariant`) and the resulting
+  values are members of both the child and the parent type. The membership direction is asymmetric:
+  every child value is a parent value (wherever the parent is expected, the child may appear), but a
+  parent value is _not_ a child value. Declaring a variant name that exists in the parent (or any
+  ancestor) is an error unless the declaration is a valid field narrowing (below).
+- **Fold inheritance.** An operation declared on the parent works on the child: the inherited
+  variants dispatch to the parent's handlers via the delegation chain. The child re-declares the
+  operation with arms only for its new variants (override-mode extension — polymorphic recursion;
+  recursive positions dispatch through the extended operation). The child may also override an
+  inherited arm outright.
+- **Field narrowing (covariant re-specification).** A child may re-declare an inherited variant,
+  specifying a (possibly partial) field record:
+  - Each re-specified field's type must be a subtype of the parent's field type (covariant);
+    widening is rejected.
+  - The child may not introduce fields absent from the parent's spec.
+  - Unmentioned fields are inherited unchanged.
+- **No `Any`/`Nothing` extension.** `[<: Any]` is rejected (every data type is already an implicit
+  subtype of `Any`); `[<: Nothing]` is rejected (the bottom type has no subtypes).
 
 ### 4.2 `behavior` — Final Coalgebra (ν-type)
 
@@ -763,11 +795,14 @@ s pop             "=> [3, Push(value:2, rest:Empty)]"
    indentation context? The grammar currently treats the block body as a single `expr` production,
    which doesn't handle multi-line block bodies. This needs resolution.
 
-7. **Pattern constructors with captures (tentative).** Should pattern constructors support named
-   captures (`<name: TypeName>`) that extract sub-matches as typed fields? E.g.,
+7. **Pattern constructors with captures (decided conceptually; pinning in
+   [#85](https://github.com/lapis-lang/lapis-lang/issues/85)).** Pattern constructors support named
+   captures (`<name: TypeName>`) that extract sub-matches as typed fields. E.g.,
    `Rect <real: Nat>\+<imag: Nat>j` for `Complex`, where `real` and `imag` are bound in fold
-   handlers. Conceptually sound (pattern = parser, captures = semantic values) but syntax and
-   handler-dispatch mechanics need validation against a real implementation. Deferred until Stage 1.
+   handlers. Conceptually sound (pattern = parser, captures = semantic values). #85 owns the surface
+   spelling, handler-schema, and capture-reading work; the fold arm-keying rule is decided in
+   `_docs/overview.md` §12.10 (constructor-name keying; single-pattern types may key on the type
+   name binding `value : Token`).
 
    Resolution note (mixed carriers + merged fold): the merged fold's two handler schemas — a variant
    arm binding its fields, a pattern arm binding `match : Token` — are the boundary a capture would

@@ -4,13 +4,13 @@
 
 This document sketches the surface syntax of the Lapis programming language.
 
-The syntax is heavily influenced by **Self** and **Smalltalk**: message sends, keyword arguments,
-blocks as the universal building block, uniform access, and `self` always in scope. Like Python,
-significant indentation defines block scope — eliminating explicit delimiters around declaration
-bodies and case tables, with newlines as statement separators. The departure from vanilla Smalltalk
-is that Lapis replaces conditionals with **fold-based structural dispatch** and adds first-class
-bialgebraic constructs — `data`, `behavior`, `relation`, and `query` — as the primary declaration
-forms.
+The syntax is heavily influenced by **Self** and **Smalltalk**: operation-application forms, keyword
+arguments, blocks as the universal building block, uniform access, and `self` always in scope. Like
+Python, significant indentation defines block scope — eliminating explicit delimiters around
+declaration bodies and case tables, with newlines as statement separators. The departure from
+vanilla Smalltalk is that Lapis replaces conditionals with **fold-based structural dispatch** and
+adds first-class bialgebraic constructs — `data`, `behavior`, `relation`, and `query` — as the
+primary declaration forms.
 
 ---
 

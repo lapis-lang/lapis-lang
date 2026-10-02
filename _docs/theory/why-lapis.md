@@ -161,7 +161,7 @@ a programming language.
   explicitly. This is a real cost, paid back as explicit algebraic properties.
 - Smaller ecosystem. Haskell has 30 years of libraries; Lapis has none. This is the practical
   barrier, not the theoretical one.
-- The surface syntax is dense. The Self/Smalltalk message-send style + the recursion-scheme
+- The surface syntax is dense. The Self/Smalltalk operation-application style + the recursion-scheme
   modifiers (`<para>`, `<histo>`, `<aux:>`) create a steep learning curve for anyone outside the
   FP/CT audience.
 
@@ -225,9 +225,10 @@ library.
 
 **Not essential (could be removed or made library/sugar without losing the unique property):**
 
-- **The surface syntax.** The Self/Smalltalk message-send style is a choice, not the contribution.
-  Per Atanassow's advice: "don't indulge in syntax design." The syntax should serve the semantics,
-  not be the point. (The current syntax is pleasant and coherent, but it is not _why_ Lapis exists.)
+- **The surface syntax.** The Self/Smalltalk operation-application style is a choice, not the
+  contribution. Per Atanassow's advice: "don't indulge in syntax design." The syntax should serve
+  the semantics, not be the point. (The current syntax is pleasant and coherent, but it is not _why_
+  Lapis exists.)
 
 - **Relation, query, IO.** These are sugar. `relation` = data + span projections + Datalog fixpoint.
   `query` = behavior + cospan projections + Prolog search. `io` = Mealy machine data value. They are
@@ -313,9 +314,10 @@ To sharpen the motivation, it helps to state what Lapis is _not_ trying to be:
   it cannot express, and where Lapis hands off to the provers — is
   [`lapis-vs-provers.md`](./lapis-vs-provers.md).
 
-- **Not "Smalltalk with ADTs."** The Self/Smalltalk influence is real (message sends, uniform
-  access, `self` always in scope), but the contribution is not "Smalltalk syntax on algebraic data."
-  The contribution is the bialgebraic structure and the exploitable laws. The syntax serves that.
+- **Not "Smalltalk with ADTs."** The Self/Smalltalk influence is real (operation applications,
+  uniform access, `self` always in scope), but the contribution is not "Smalltalk syntax on
+  algebraic data." The contribution is the bialgebraic structure and the exploitable laws. The
+  syntax serves that.
 
 - **Not "a library."** This is the crucial one. The lapis-js prototype _is_ a library (an embedded
   DSL), and it demonstrates the semantics. But the _enforcement_ — preventing general recursion —
@@ -338,9 +340,9 @@ decisions that survived the false starts — the original motivation emerges as:
 The three essentials — enforced fold/unfold, first-class exploitable laws, the μ/ν duality — are the
 irreducible core. Everything else is in service of making that core _practical_: subtyping (Meyer)
 avoids generic-type ceremony; contracts (DbC) provide correctness without effects; IO as Mealy data
-keeps the program pure; the Self/Smalltalk syntax makes the message-send uniform-access model
-natural. But strip all of that away and the three essentials remain, and they are the reason Lapis
-exists and not a library.
+keeps the program pure; the Self/Smalltalk syntax makes the uniform-access model natural. But strip
+all of that away and the three essentials remain, and they are the reason Lapis exists and not a
+library.
 
 The years of false starts, I suspect, were the search for the practical layer — the subtyping, the
 contracts, the IO, the syntax — that would make the cage habitable. The prototype proves it is

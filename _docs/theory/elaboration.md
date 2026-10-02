@@ -94,7 +94,7 @@ carried as the implicit `match` field, accessible in fold handlers.
 
 ### 2.4 Binary Operators
 
-Binary operators are **message sends** on the receiver. Each operator maps to a fold on the
+Binary operators are **operation applications** on the receiver. Each operator maps to a fold on the
 appropriate type. All binary operators have **uniform precedence** (left-to-right, no hierarchy —
 see [`surface-syntax.md`](./surface-syntax.md) §2.1):
 
@@ -110,29 +110,29 @@ see [`surface-syntax.md`](./surface-syntax.md) §2.1):
 | `a & b`  | `and(ℰ(a), ℰ(b))`      | Fold on `Bool`                                                    |
 | `a , b`  | `cons(ℰ(a), ℰ(b))`     | Array/structure cons; a built-in or fold                          |
 
-**Key principle:** There are no primitive operators in the core. Every operator is a message send
-that resolves to a fold on the appropriate type. For pattern-matched types (`Nat`, `Int`, `String`),
-these are folds with pattern- matched handlers that transform the `Token`; for user types, they are
-user-declared folds.
+**Key principle:** There are no primitive operators in the core. Every operator is an operation
+application that resolves to a fold on the appropriate type. For pattern-matched types (`Nat`,
+`Int`, `String`), these are folds with pattern- matched handlers that transform the `Token`; for
+user types, they are user-declared folds.
 
 **Symbolic operation names:** Operators can be symbolic (`+`, `*`, `<`, `<=`) or named (`add`,
 `mul`, `lessThan`). Symbolic operators are recognized by longest match among declared operators.
 Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; symbolic infix
 (between tokens) = operation.
 
-### 2.5 Unary and Keyword Sends
+### 2.5 Unary and Keyword Applications
 
 | Surface            | Core                                        | Notes                                           |
 | ------------------ | ------------------------------------------- | ----------------------------------------------- |
-| `recv selector`    | `fold_T recv {Cᵢ → hᵢ}` (applied)           | Unary send = parameterless fold access          |
-| `recv key: arg`    | `fold_T recv {Cᵢ → hᵢ}` (applied to arg)    | Keyword send = parameterized fold               |
-| `recv k1: a k2: b` | `fold_T recv {Cᵢ → hᵢ}` (applied to (a, b)) | Multi-keyword send = fold with structured input |
-| `- expr`           | `negate(ℰ(expr))`                           | Prefix negation = message send                  |
+| `recv selector`    | `fold_T recv {Cᵢ → hᵢ}` (applied)           | Unary call = parameterless fold access          |
+| `recv key: arg`    | `fold_T recv {Cᵢ → hᵢ}` (applied to arg)    | Keyword call = parameterized fold               |
+| `recv k1: a k2: b` | `fold_T recv {Cᵢ → hᵢ}` (applied to (a, b)) | Multi-keyword call = fold with structured input |
+| `- expr`           | `negate(ℰ(expr))`                           | Prefix negation = operation application         |
 | `not expr`         | `not(ℰ(expr))`                              | Boolean negation = fold on `Bool`               |
 
-**Uniform access principle:** A unary send `recv selector` where `selector` is a parameterless fold
+**Uniform access principle:** A unary call `recv selector` where `selector` is a parameterless fold
 is _not_ a function call — it is a property access (the fold is applied with no arguments, producing
-a value). A keyword send `recv key: arg` is a method call (the fold takes an argument). The
+a value). A keyword call `recv key: arg` is a method call (the fold takes an argument). The
 distinction is made by the fold's spec: if it has no `in` parameter, it's a getter; if it has `in`,
 it's a method.
 
@@ -822,7 +822,10 @@ data ExtendedColor <: Color
 1. `ExtendedColor` is a new μ-type:
    `ExtendedColor = μ α. (Red | Green | Blue | Yellow | Orange | Purple)`. The parent's variants are
    inherited.
-2. Subtyping: `ExtendedColor <: Color` (μ-width subtyping — more variants = subtype).
+2. Subtyping: `ExtendedColor <: Color` (μ-width subtyping — more variants = subtype). Inherited
+   variants construct through the child (`ExtendedColor.Red`) and belong to both types; membership
+   is asymmetric — every child value is a parent value, but a parent value is not a child value
+   (μ-width subtyping adds constructors; it never widens).
 3. Fold inheritance: `toHex` on `ExtendedColor` = parent's `toHex` handlers for
    `Red`/`Green`/`Blue` + child's handlers for `Yellow`/`Orange`/`Purple`. This is **polymorphic
    recursion**: the fold dispatches to the appropriate handler based on the variant tag, and
@@ -841,7 +844,10 @@ data NumList <: List
 
 **Elaboration:**
 
-1. `NumList` is a subtype of `List` (μ-depth subtyping — `head: Number <: head: Object`).
+1. `NumList` is a subtype of `List` (μ-depth subtyping — `head: Number <: head: Object`). The
+   narrowing rules at declaration time: each re-specified field's type must be a subtype of the
+   parent's (covariant), no new fields may be introduced, and unmentioned fields are inherited
+   unchanged.
 2. `NumList.Cons` instances are `instanceof List.Cons` and `instanceof List` (comb inheritance:
    prototype chain + delegation chain).
 3. Operations on `List` accept `NumList` instances (subsumption via `T-Sub`).
@@ -930,7 +936,7 @@ Bool = μ α. (True | False)
 ifTrue:ifFalse: b = fold [Bool] b { True → t, False → f }
 ```
 
-The surface syntax `n = 0 ifTrue: [{}] ifFalse: [...]` is a keyword message send on the result of
+The surface syntax `n = 0 ifTrue: [{}] ifFalse: [...]` is a keyword application on the result of
 `n = 0` (a `Bool`), which desugars to this fold. The "no conditional" claim is literally true:
 branching is fold-based dispatch.
 

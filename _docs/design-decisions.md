@@ -279,10 +279,10 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   the Smalltalk binary selector convention. Multi-character, longest match among declared operators.
 - **Position discriminates data from operations**: prefix (contiguous, start of token) =
   pattern-matched constructor (data introduction). Infix (between whitespace-delimited tokens,
-  message-send position) = symbolic operation (fold/elimination). The lexer alternates between
-  "expecting a token" (prefix — try patterns > identifiers > named constructors) and "expecting an
-  operator" (infix — try operators > identifiers for named sends). Whitespace is consumed between
-  tokens in both modes.
+  operation-application position) = symbolic operation (fold/elimination). The lexer alternates
+  between "expecting a token" (prefix — try patterns > identifiers > named constructors) and
+  "expecting an operator" (infix — try operators > identifiers for named sends). Whitespace is
+  consumed between tokens in both modes.
 - **Operation name rules**: symbolic (`+`, `<=`, `<+>`, `<>`, `==`) or named (`add`, `lessThan`). No
   spaces — an operation name is a contiguous sequence of non-whitespace characters. Can include
   grouping characters (`<`, `>`, `(`, `)`, `[`, `]`, `{`, `}`) as part of the name. Recognized in
@@ -356,15 +356,37 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 4. Multi-sorted: simultaneous μ-bindings for mutual recursion.
 5. Intersection types: first-class vs elaboration-time constraints? "Static where possible" suggests
    constraints by default, first-class in live-image mode.
-6. **Pattern constructors with captures (tentative).** A pattern constructor could have named
+6. **Pattern constructors with captures — DECIDED conceptually, pinning in
+   [#85](https://github.com/lapis-lang/lapis-lang/issues/85).** Pattern constructors carry named
    captures (`<name: TypeName>`) that extract sub-matches as typed fields, paralleling named
-   constructor fields. E.g., `Rect <real: Nat>\+<imag: Nat>j` for `Complex`. The captures would be
-   the fields, bound in fold handlers by the constructor name. This is conceptually sound (the
-   pattern is a parser, captures are semantic values) but the syntax and handler-dispatch mechanics
-   need validation against a real implementation. Deferred until Stage 1.
+   constructor fields. E.g., `Rect <real: Nat>\+<imag: Nat>j` for `Complex`. The captures are the
+   fields, bound in fold arms by the capture name. The pattern is a parser, captures are semantic
+   values. `_docs/overview.md` §2.2 teaches the form (`Ratio <p: Int>/<q: Int>`,
+   `Cartesian <re: Float>+<im: Float>i`). Remaining to pin (the #85 work items):
+   capture-vs-type-reference disambiguation (`<T>` vs `<name: T>`), greedy/bounded reading of
+   `String`-typed captures in delimited regions, counted-postfix interaction, and the fold
+   arm-keying rule — **decided in `overview.md` §12.10**: a pattern arm keys on the declared
+   constructor name; single-pattern types may keep the anonymous spelling keying on the type name
+   (binding the whole match as `value`). **Adjacent decision — no letter-leading patterns:** a
+   pattern's leftmost-matchable set (computed from its AST, not its source) must exclude `[A-Za-z]`;
+   letter-initial matches are reserved for identifiers/keywords/variant construction (see
+   `overview.md` §12.11, `surface-syntax.md` §1.3 anchoring).
 7. **Blame in the calculus?** Contracts currently elaborate to folds over `Bool` and `Result` —
    blame is a runtime concern, not a calculus concern. Wadler's blame calculus ("Well-typed programs
    can't be blamed", 2009) makes blame labels first-class core entities, enabling the blame theorem
    to be proved at the calculus level. Lapis's contracts are richer (DbC with `rescue`, LSP
    subcontracting tied to the subtyping lattice), and the interaction of subtyping + contracts +
    blame may require calculus-level support. Deferred to Stage 5 (contracts + laws).
+8. **`Family` in type/declaration position — DECIDED: reserved, not shadowable** (see `overview.md`
+   §12.16). The form `data Family { Cons ... rest: Family }` is legal today and not
+   compiler-ambiguous — the resolution chain (bound-Δ → built-ins → registry → `TypeVar` fallback)
+   decides deterministically, and the `FamilyType` singleton is in none of those slots. The hazard
+   is **name capture that flips semantics by scope**: in a program without a user type named
+   `Family`, `rest: Family` is the open-recursion reference (the μ-bound α); in a program with one,
+   the same spelling resolves to the user's type (closed recursion). Same text, opposite recursion
+   discipline, decided silently by context. Fix at the lexeme: `Family` is reserved in
+   type/declaration position — the language-defined μ-bound reference; user declarations that want
+   the name choose another. Enforcement gap: `LC_RESERVED_WORDS` gates only the lowercase `ident`
+   lexeme; `variantName`/`typeName` (PascalCase) never consult it — the gate must extend to those
+   two lexemes (or a dedicated check in `atomType`'s registry route). Enforcement scoped in
+   [#85](https://github.com/lapis-lang/lapis-lang/issues/85).

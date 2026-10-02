@@ -35,7 +35,7 @@ below.)_
 | [`theory/lc.md`](./theory/lc.md)                                     | LC in TAPL style: syntax, evaluation rules, typing rules, subtyping rules, soundness — the formal specification the implementation checks against                                                                                                                                                                                                                                  |
 | [`theory/semantics.md`](./theory/semantics.md)                       | Denotational semantics (fold = meaning), operational semantics (unfold = dynamics), bialgebraic laws (Turi-Plotkin), eager-data/lazy-codata strategy with Church–Rosser justification, attribute-grammar equations for static analysis, contract semantics, equality (structural for μ, bisimulation for ν)                                                                        |
 | [`theory/elaboration.md`](./theory/elaboration.md)                   | Surface → core desugaring: every construct mapped to its core term. Expression elaboration, declaration elaboration (data/behavior/protocol/relation/query/io), recursion-scheme elaboration (para/histo/zygo/map/merge/scan), contract elaboration (demands/ensures/rescue/invariant → Result), properties elaboration, subtyping elaboration                                     |
-| [`theory/surface-syntax.md`](./theory/surface-syntax.md)             | Lexical structure, pattern-matched data types (no base types), uniform binary precedence (Smalltalk model), message-send model, composite expressions (blocks, arrays, records, specs), all six declaration forms with railroad diagrams, fold/unfold/map/merge syntax, and the P4P indentation strategy                                                                           |
+| [`theory/surface-syntax.md`](./theory/surface-syntax.md)             | Lexical structure, pattern-matched data types (no base types), uniform three-level operation-application precedence, composite expressions (blocks, arrays, records, specs), all six declaration forms with railroad diagrams, fold/unfold/map/merge syntax, and the P4P indentation strategy                                                                                      |
 | [`theory/grammar-as-semantics.md`](./theory/grammar-as-semantics.md) | Implementation architecture: grammar subclassing as compiler pipeline, `chain` for one-pass L-attributed type checking, grammar-native contracts (`@requires`/`@ensures`/`@invariant`/`@rescue`) as inference-rule encoding, why Lapis's structure eliminates polymorphic recursion and let-generalization, T-Fold as a contracted production                                      |
 | [`theory/syntax-design.md`](./theory/syntax-design.md)               | The original surface syntax design document — the Self/Smalltalk-influenced syntax with all declaration forms, spec keys, contract clauses, and worked examples                                                                                                                                                                                                                    |
 
@@ -43,10 +43,13 @@ below.)_
 
 These aren't audience-specific docs — they're working notes that inform both tracks.
 
-| Document                                       | What it covers                                                                                              |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [`design-decisions.md`](./design-decisions.md) | Pinned design decisions (core calculus, evaluation, effects, laws) — the authoritative cache of repo memory |
-| [`user-preferences.md`](./user-preferences.md) | Working preferences for the design process                                                                  |
+## | Document | What it covers | | ---------------------------------------------- |
+
+|| [`overview.md`](./overview.md) | The whole language in one document — duality as spine, Hutton's
+theorems as the argument, example-first. Sanity check and marketing-site seed ||
+[`design-decisions.md`](./design-decisions.md) | Pinned design decisions (core calculus, evaluation,
+effects, laws) — the authoritative cache of repo memory | |
+[`user-preferences.md`](./user-preferences.md) | Working preferences for the design process |
 
 ## Document Relationships
 
