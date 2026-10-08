@@ -273,6 +273,33 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   ties broken by declaration order. Named constructors take precedence over patterns when both could
   match (more specific).
 
+## Comments and result annotations (see `issue83-plan.md`)
+
+- **Comments are `/* ... */` — nested block form.** Delimiters balance by counting (a comment may
+  contain further `/* ... */` pairs); no escapes inside comments; the one writer rule: prose cannot
+  contain an unbalanced `*/`. Consumed at statement boundaries before any token phase (the
+  precedence whitespace already has); present in no term of any semantic grammar — comments cost
+  nothing.
+- **Value spellings reserved:** strings `"foo"` (`String = μ α. "<Char>*"` — `\"` inside, the
+  `match("p")` convention), char values `'a'` (exactly one character; `\'` inside).
+- **A comment's position is its grade.** Trailing after an expression = a _result annotation_ (a
+  record of what it produces — documentation-grade, never checked by the language; the future
+  checker is a doc-example harness). Own-line = a _prose comment_ describing the construct beneath
+  it (forward association). The realization behind the grade rule: top-level source has no
+  expression statements — trailing annotations are a doc-fragment device; the language's checked
+  answer for result claims in real code is contracts (`ensures:`/`invariant:`/`demands:`).
+- **Reservation rules (generalizing the letter-leading pattern rule):** a user-declared pattern's
+  leftmost-matchable set (computed from its AST) must exclude `'` and `"` — reserved for the char
+  and string value forms — AND its reserved two-character PREFIX language must exclude `/*`: a
+  pattern whose matchable strings can begin with the comment opener is rejected (the prefix check
+  walks the AST's per-position first-sets, so `/[0-9]` stays legal while `/*`-spelling shapes
+  reject). Built-ins exempt (they define the spellings). Declared symbolic operation names may not
+  contain `/*` or `*/` (the comment scanner runs at every boundary before lexical phases).
+- **Retired:** the `"..."` comment form (the original §1.4 assumption — died when strings stayed
+  double-quoted: a shared delimiter reintroduces the comment-vs-value ambiguity); a `comment ...`
+  keyword (freezes descriptions into source — wrong channel for the Language-System roadmap;
+  image-time association is the metaprogramming lane's mechanism, `language-design.md` §5 Stage 7).
+
 ## Symbolic operation names and uniform binary precedence
 
 - Operation names (fold names) can be **symbolic**: `+`, `-`, `*`, `<`, `<=`, `==`, etc. Following

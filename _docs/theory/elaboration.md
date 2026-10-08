@@ -56,22 +56,22 @@ the core calculus.
 Base types are eliminated (see [`design-decisions.md`](../design-decisions.md) §"No base types").
 Literals are pattern-matched or named constructors of `data` types.
 
-| Surface           | Core                                 | Notes                                                                     |
-| ----------------- | ------------------------------------ | ------------------------------------------------------------------------- |
-| `a` (single char) | `match("a") : Char`                  | Pattern-matched constructor of `Char = μ α. .` (any single character)     |
-| `42`              | `match("42") : Nat`                  | Pattern-matched constructor of `Nat = μ α. [0-9]+`                        |
-| `-3`              | `match("-3") : Int`                  | Pattern-matched constructor of `Int = μ α. (-[0-9]+ \| [0-9]+)`           |
-| `"hello"`         | `match("hello") : String`            | Pattern-matched constructor of `String = μ α. "<Char>*"` (type reference) |
-| `#sum`            | `match("#sum") : Symbol`             | Pattern-matched constructor of `Symbol = μ α. #[a-zA-Z][a-zA-Z0-9]*`      |
-| `nil`             | `nil`                                | A built-in value of type `Any` (or `Nothing` in a strict reading)         |
-| `true`            | `True`                               | Named variant construction of `Bool = μ α. (True \| False)`               |
-| `false`           | `False`                              | Named variant construction of `Bool`                                      |
-| `self`            | `self`                               | The current instance variable (in scope in fold/unfold handlers)          |
-| `Family`          | `α` (the μ-bound type variable)      | Resolved to the recursive self-reference                                  |
-| `Self`            | `α` (the ν-bound type variable)      | Resolved to the corecursive self-reference                                |
-| `old f`           | see §4.1 (paramorphism elaboration)  | Not a direct core term                                                    |
-| `prev f`          | see §4.2 (histomorphism elaboration) | Not a direct core term                                                    |
-| `aux fold`        | see §4.3 (zygomorphism elaboration)  | Not a direct core term                                                    |
+| Surface                             | Core                                 | Notes                                                                                                                                                                                            |
+| ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `'a'` (single char, spelled quoted) | `match("a") : Char`                  | Pattern-matched constructor of `Char = μ α. .` (any single character); the surface Char value is single-quoted — `surface-syntax.md` §1.4 — and the core form's payload is the matched character |
+| `42`                                | `match("42") : Nat`                  | Pattern-matched constructor of `Nat = μ α. [0-9]+`                                                                                                                                               |
+| `-3`                                | `match("-3") : Int`                  | Pattern-matched constructor of `Int = μ α. (-[0-9]+ \| [0-9]+)`                                                                                                                                  |
+| `"hello"`                           | `match("hello") : String`            | Pattern-matched constructor of `String = μ α. "<Char>*"` (type reference)                                                                                                                        |
+| `#sum`                              | `match("#sum") : Symbol`             | Pattern-matched constructor of `Symbol = μ α. #[a-zA-Z][a-zA-Z0-9]*`                                                                                                                             |
+| `nil`                               | `nil`                                | A built-in value of type `Any` (or `Nothing` in a strict reading)                                                                                                                                |
+| `true`                              | `True`                               | Named variant construction of `Bool = μ α. (True \| False)`                                                                                                                                      |
+| `false`                             | `False`                              | Named variant construction of `Bool`                                                                                                                                                             |
+| `self`                              | `self`                               | The current instance variable (in scope in fold/unfold handlers)                                                                                                                                 |
+| `Family`                            | `α` (the μ-bound type variable)      | Resolved to the recursive self-reference                                                                                                                                                         |
+| `Self`                              | `α` (the ν-bound type variable)      | Resolved to the corecursive self-reference                                                                                                                                                       |
+| `old f`                             | see §4.1 (paramorphism elaboration)  | Not a direct core term                                                                                                                                                                           |
+| `prev f`                            | see §4.2 (histomorphism elaboration) | Not a direct core term                                                                                                                                                                           |
+| `aux fold`                          | see §4.3 (zygomorphism elaboration)  | Not a direct core term                                                                                                                                                                           |
 
 **Pattern-matched construction:** When the lexer matches input against a pattern `pₖ` of type `T`,
 the matched text (a `Token`) is introduced as a value of type `T` via T-Pattern. The `Token` is

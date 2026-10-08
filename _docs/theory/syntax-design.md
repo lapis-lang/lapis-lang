@@ -44,18 +44,18 @@ data Color
     Red Green Blue
 
     fold toHex <out: String>
-        Red -> '#FF0000'
-        Green -> '#00FF00'
-        Blue -> '#0000FF'
+        Red -> "#FF0000"
+        Green -> "#00FF00"
+        Blue -> "#0000FF"
 
     fold isWarm <out: Boolean>
         Red -> true
         Green -> false
         Blue -> false
 
-Color Red toHex                       "=> '#FF0000'"
-Color Red isWarm                      "=> true"
-Color Red instanceof: Color           "=> true"
+Color Red toHex                       /* "#FF0000" */
+Color Red isWarm                      /* true */
+Color Red instanceof: Color           /* true */
 ```
 
 Each case arm uses `->` to separate the pattern from the body. Single-expression bodies appear on
@@ -75,12 +75,12 @@ data Point
         Point3D x y z -> (x squared + y squared + z squared) sqrt
 
     fold asString <out: String>
-        Point2D x y -> '(' , x printString , ', ' , y printString , ')'
-        Point3D x y z -> '(' , x printString , ', ' , y printString , ', ' , z printString , ')'
+        Point2D x y -> "(" , x printString , ", " , y printString , ")"
+        Point3D x y z -> "(" , x printString , ", " , y printString , ", " , z printString , ")"
 
 p = Point Point2D x: 3 y: 4
-p distanceFromOrigin      "=> 5.0"
-p asString                "=> '(3, 4)'"
+p distanceFromOrigin      /* 5.0 */
+p asString                /* "(3, 4)" */
 ```
 
 Each handler case binds the variant's fields as named parameters on the left-hand side of `->`, in
@@ -120,10 +120,10 @@ data Stack
         Push -> arr notEmpty | (value: arr first, rest: arr tail)
 
 s = Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
-s size            "=> 2"
-s peek            "=> 3"
-s toArray         "=> [3, 2]"
-s contains: 2     "=> true"
+s size            /* 2 */
+s peek            /* 3 */
+s toArray         /* [3, 2] */
+s contains: 2     /* true */
 ```
 
 ---
@@ -142,11 +142,11 @@ data Stack
         Empty -> nil
         Push value rest -> value , old rest
 
-"value    — the fold result for the 'value' field (raw Object)"
-"rest     — the fold result for 'rest' (already folded)"
-"old rest — the raw pre-fold 'rest' sub-node (the original Push instance)"
+/* value    — the fold result for the "value" field (raw Object) */
+/* rest     — the fold result for "rest" (already folded) */
+/* old rest — the raw pre-fold "rest" sub-node (the original Push instance) */
 
-s pop    "=> [3, Push(value:2, rest:Empty)]"
+s pop    /* [3, Push(value:2, rest:Empty)] */
 ```
 
 ---
@@ -192,18 +192,18 @@ data ExtendedColor <: Color
     Yellow Orange Purple
 
     fold toHex
-        Yellow -> '#FFFF00'
-        Orange -> '#FFA500'
-        Purple -> '#800080'
+        Yellow -> "#FFFF00"
+        Orange -> "#FFA500"
+        Purple -> "#800080"
 
     fold isWarm
         Yellow -> true
         Orange -> true
         Purple -> false
 
-ExtendedColor Yellow instanceof: Color          "=> true"
-ExtendedColor Yellow instanceof: ExtendedColor  "=> true"
-Color Red instanceof: ExtendedColor             "=> false"
+ExtendedColor Yellow instanceof: Color          /* true */
+ExtendedColor Yellow instanceof: ExtendedColor  /* true */
+Color Red instanceof: ExtendedColor             /* false */
 ```
 
 Inherited variants and their handlers are resolved automatically. New variants require only the new
@@ -219,7 +219,7 @@ data Box
 
     map double <typeParam: Number> [v | v * 2]
 
-(Box Box contents: 5) double   "=> Box(contents: 10)"
+(Box Box contents: 5) double   /* Box(contents: 10) */
 ```
 
 ---
@@ -238,7 +238,7 @@ data List
         Nil -> Family Nil
         Cons head tail -> Family Cons head: head * 2 tail: tail
 
-    "Horner pair — single traversal when 'distributive:sum' is detected"
+    /* Horner pair — single traversal when "distributive:sum" is detected */
     merge doubleSum <#double, #sum>
 ```
 
@@ -269,10 +269,10 @@ behavior Stream
         head -> transform value: head
 
 nats = Stream From: 0
-nats head                     "=> 0"
-nats tail head                "=> 1"
-nats take: 5                  "=> [0, 1, 2, 3, 4]"
-(nats map: [n | n * 2]) take: 3   "=> [0, 2, 4]"
+nats head                     /* 0 */
+nats tail head                /* 1 */
+nats take: 5                  /* [0, 1, 2, 3, 4] */
+(nats map: [n | n * 2]) take: 3   /* [0, 2, 4] */
 ```
 
 `Self` in the observer spec declares a continuation (lazy self-reference). Observations are memoized
@@ -297,7 +297,7 @@ protocol Ordered <: Eq
     between:and: <in: lo Self, hi Self, out: Boolean>
         (self lessThan: hi) & (self greaterThan: lo)
 
-"Declare conformance"
+/* Declare conformance */
 data Num
     N value: Number
 
@@ -305,8 +305,8 @@ data Num
     fold compare <in: other Self, out: Number>
         N value -> value - other value
 
-(Num N: 3) lessThan: (Num N: 5)    "=> true"
-(Num N: 3) instanceof: Ordered     "=> true"
+(Num N: 3) lessThan: (Num N: 5)    /* true */
+(Num N: 3) instanceof: Ordered     /* true */
 ```
 
 Abstract methods declare a signature with `<spec>`; an indented body below provides the default
@@ -351,7 +351,7 @@ data Stack
         demands: [self | self size > 0]
         ensures: [self old result | result size = 2]
         rescue:  [self err args retry | retry value: 0]
-        Empty -> (Error signal: 'Cannot pop empty stack')
+        Empty -> (Error signal: "Cannot pop empty stack")
         Push value rest -> value , old rest
 
     fold append <in: val Object, out: Family>
@@ -390,14 +390,14 @@ relation Ancestor
         Transitive hop rest -> hop + rest
 
 base = {
-    Ancestor Direct from: 'alice' to: 'bob'
-    Ancestor Direct from: 'bob'   to: 'carol'
-    Ancestor Direct from: 'carol' to: 'dave'
+    Ancestor Direct from: "alice" to: "bob"
+    Ancestor Direct from: "bob"   to: "carol"
+    Ancestor Direct from: "carol" to: "dave"
 }
 
 closed = Ancestor closure: base
-Ancestor reachableFrom: closed from: {'alice'}    "=> {'bob', 'carol', 'dave'}"
-Ancestor reachingTo: closed to: {'dave'}          "=> {'alice', 'bob', 'carol'}"
+Ancestor reachableFrom: closed from: {"alice"}    /* {"bob", "carol", "dave"} */
+Ancestor reachingTo: closed to: {"dave"}          /* {"alice", "bob", "carol"} */
 ```
 
 The join invariant for `Transitive` (`hop destination = rest origin`) is auto-generated from the
@@ -423,8 +423,8 @@ query PathFinder
         done -> s exhausted
         next -> s advanceSearch
 
-PathFinder explore: (start: 'a', goal: 'e', graph: myGraph)
-PathFinder explore: (start: 'a', goal: 'e', graph: myGraph) options: (maxResults: 1)
+PathFinder explore: (start: "a", goal: "e", graph: myGraph)
+PathFinder explore: (start: "a", goal: "e", graph: myGraph) options: (maxResults: 1)
 ```
 
 `[output: #path]`, `[accept: #solved]`, `[done: #done]` are cospan projection declarations — they
@@ -444,7 +444,7 @@ io Counter
     Read state -> (state: state, output: state)
 
 Counter run: (Increment, Increment, Increment, Read) from: (state: 0)
-"=> [1, 2, 3, 3]"
+/* [1, 2, 3, 3] */
 ```
 
 IO programs are synchronous descriptions of state transitions; the runtime drives them
