@@ -279,9 +279,9 @@ behavior Stream
         tail -> n + 1
 
 nats = Stream From: 0
-nats head                     "=> 0"
-nats tail head                "=> 1"
-nats tail tail head           "=> 2"
+nats head                     /* 0 */
+nats tail head                /* 1 */
+nats tail tail head           /* 2 */
 ```
 
 `Stream` is a behavior type — a final coalgebra. `Self` marks `tail` as a continuation: observing
@@ -305,8 +305,8 @@ data Nat
 
 three = Nat Succ pred: (Nat Succ pred: (Nat Succ pred: Nat Zero))
 
-three add Nat Zero           "=> three — the identity guard fires, no traversal"
-Nat Zero add three           "=> three — same guard, other side"
+three add Nat Zero           /* three — the identity guard fires, no traversal */
+Nat Zero add three           /* three — same guard, other side */
 ```
 
 When the compiler sees `three add Zero`, it checks: does `add` have an `identity:` property? Yes —
@@ -407,13 +407,13 @@ And from this structure, a familiar operation falls out: **transitive closure**.
 
 ```lapis
 base = {
-    Ancestor Direct from: 'alice' to: 'bob'
-    Ancestor Direct from: 'bob'   to: 'carol'
-    Ancestor Direct from: 'carol' to: 'dave'
+    Ancestor Direct from: "alice" to: "bob"
+    Ancestor Direct from: "bob"   to: "carol"
+    Ancestor Direct from: "carol" to: "dave"
 }
 
 closed = Ancestor closure: base
-Ancestor reachableFrom: closed from: {'alice'}    "=> {'bob', 'carol', 'dave'}"
+Ancestor reachableFrom: closed from: {"alice"}    /* {"bob", "carol", "dave"} */
 ```
 
 `closure` computes the transitive closure: all pairs reachable by composing base facts through
@@ -455,8 +455,8 @@ query PathFinder
         done -> s exhausted
         next -> s advanceSearch
 
-PathFinder explore: (start: 'a', goal: 'e', graph: myGraph)
-PathFinder explore: (start: 'a', goal: 'e', graph: myGraph) options: (maxResults: 1)
+PathFinder explore: (start: "a", goal: "e", graph: myGraph)
+PathFinder explore: (start: "a", goal: "e", graph: myGraph) options: (maxResults: 1)
 ```
 
 `explore` drives the search: unfold the seed into an initial state, observe `accept` — if true,
@@ -503,7 +503,7 @@ data Stack
         demands: [self | self size > 0]
         ensures: [self old result | result size = 2]
         rescue:  [self err args retry | retry value: 0]
-        Empty -> Error signal: 'Cannot pop empty stack'
+        Empty -> Error signal: "Cannot pop empty stack"
         Push value rest -> value , old rest
 ```
 

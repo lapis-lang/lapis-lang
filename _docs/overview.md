@@ -48,12 +48,13 @@ data Color
 The variants are values — singletons, ready to use:
 
 ```lapis
-Color Red           "the Red singleton"
+Color Red    /* the Red singleton */
 ```
 
-That double-quoted text is a **comment** — Lapis has no separate comment syntax: anything in `"..."`
-is consumed and discarded (the Smalltalk convention). You'll see two kinds below: plain prose notes,
-and `"=> result"` annotations showing what an expression produces.
+That block is a **comment** — Lapis spells them `/* ... */`, with nesting: a comment spans lines or
+trails an expression. The trailing example below records what an expression produces; a comment on
+its own line describes the construct beneath it. The position is the meaning (details in
+[spec §1.4](./theory/surface-syntax.md#14-comments)).
 
 If you've written a Java `enum` or a Python `Enum`, this reads the same way. The difference is
 what's underneath: there is no separate `enum` mechanism. This is the same `data` declaration every
@@ -73,7 +74,7 @@ data Color
 `Red` is constructed by name; the pattern needs no name — its spelling is its constructor:
 
 ```lapis
-#1A2B3C             "a Color — six hex digits after a '#'"
+#1A2B3C             /* a Color — six hex digits after a '#' */
 ```
 
 That is: when you write `#1A2B3C`, it's `Color`'s pattern that matched it. Your declaration added a
@@ -92,15 +93,15 @@ data Point
 Construction is prefix — the variant name, then the fields:
 
 ```lapis
-Point2D x: 1 y: 2                  "a Point2D"
-Point3D x: 1 y: 2 z: 3             "a Point3D"
+Point2D x: 1 y: 2                  /* a Point2D */
+Point3D x: 1 y: 2 z: 3             /* a Point3D */
 ```
 
 Reading is symmetric — a field is read directly:
 
 ```lapis
-somePoint x                        "=> 1"
-somePoint y                        "=> 2"
+somePoint x                        /* 1 */
+somePoint y                        /* 2 */
 ```
 
 Pattern constructors carry fields too — a **capture** (`<name: Type>`) names the slice of the match
@@ -126,7 +127,7 @@ it: the "built-in" types are ordinary `data` declarations whose constructors are
 
 | Type     | Pattern(s)              | Example   |
 | -------- | ----------------------- | --------- |
-| `Char`   | `.`                     | `a`       |
+| `Char`   | `.`                     | `'a'`     |
 | `String` | `"<Char>*"`             | `"hello"` |
 | `Nat`    | `[0-9]+`                | `42`      |
 | `Float`  | `-?[0-9]*\.[0-9]+`      | `3.14`    |
@@ -134,7 +135,9 @@ it: the "built-in" types are ordinary `data` declarations whose constructors are
 
 When you write `42`, it's `Nat`'s pattern `[0-9]+` that matched it — the same move as `Color`'s
 `#[0-9A-F]{6}`, just declared for you. The literal shapes a program recognizes are chosen by the
-program, not the language.
+program, not the language. And the value spellings — `'a'` one character, `"hello"` a string — are
+the same spellings every user declaration's literals take (§1.4's reservation rules keep the forms
+disjoint from comments and from declared patterns).
 
 ### 2.4 Recursion
 
@@ -144,7 +147,7 @@ self-reference, same meaning:
 ```lapis
 data NatList
     Nil
-    Cons head: Nat rest: NatList    "by name — if NatList is in scope"
+    Cons head: Nat rest: NatList    /* by name — if NatList is in scope */
 ```
 
 And a field can reference "the rest of the type being declared" positionally with `Family`:
@@ -152,7 +155,7 @@ And a field can reference "the rest of the type being declared" positionally wit
 ```lapis
 data NatList
     Nil
-    Cons head: Nat rest: Family      "same meaning, no name needed"
+    Cons head: Nat rest: Family      /* same meaning, no name needed */
 ```
 
 `Family` is the spelling that works _before_ the type's own name could resolve — mutually recursive
@@ -192,9 +195,9 @@ constructors work on the child — inherited variants construct through the chil
 types:
 
 ```lapis
-Point2 Cartesian2 x: 1 y: 2       "a Point2 — as before"
-Point3 Cartesian2 x: 1 y: 2       "the same variant, built through the child — a Point3 AND a Point2"
-Point3 Cartesian3 x: 1 y: 2 z: 3  "a new variant — and also a Point2"
+Point2 Cartesian2 x: 1 y: 2       /* a Point2 — as before */
+Point3 Cartesian2 x: 1 y: 2       /* the same variant, built through the child — a Point3 AND a Point2 */
+Point3 Cartesian3 x: 1 y: 2 z: 3  /* a new variant — and also a Point2 */
 ```
 
 And the membership direction is asymmetric: every `Point3` is a `Point2` — wherever a `Point2` is
@@ -256,7 +259,7 @@ whole type universe:
 
   ```lapis
   data Box
-      Wrap value: Any     "accepts strings, numbers, any declared type's values"
+      Wrap value: Any     /* accepts strings, numbers, any declared type's values */
   ```
 
 - **`Nothing`** — the bottom. It has **no values** — no constructor can produce one, no pattern can
@@ -279,19 +282,19 @@ declaration set together, so declaration order doesn't matter:
 ```lapis
 data Expr
     Lit value: Nat
-    Block stmt: Stmt body: Family      "references Stmt — not yet declared"
+    Block stmt: Stmt body: Family      /* references Stmt — not yet declared */
 
 data Stmt
     Assign name: Symbol value: Nat
-    Seq first: Family second: Family   "Family = this type's rest — no name needed"
+    Seq first: Family second: Family   /* Family = this type's rest — no name needed */
 ```
 
 **Sorts.** A field's type can be _another_ declared type, and construction enforces it — values of
 the wrong sort are rejected at construction:
 
 ```lapis
-Point2D x: 1 y: 2                 "a Point — fine"
-Expr Lit value: Point2D x: 1 y: 2 "rejected — a Point is not a Nat"
+Point2D x: 1 y: 2                 /* a Point — fine */
+Expr Lit value: Point2D x: 1 y: 2 /* rejected — a Point is not a Nat */
 ```
 
 That's the whole mechanism: each type is its own declaration, cross-references are ordinary field
@@ -321,7 +324,7 @@ data NatList
 Using it is the same shape — name the operation, pass the value:
 
 ```lapis
-xs sum              "=> 3"
+xs sum              /* 3 */
 ```
 
 This is the _only_ way to consume a `NatList` — and that's the point. Every consumer of a data type
@@ -350,7 +353,7 @@ fold append <in: v Nat, out: Family>
     Nil -> NatList Cons head: v rest: NatList Nil
     Cons head rest -> NatList Cons head: head rest: (rest append: v)
 
-xs append: 3      "with input — called as a method; without input, read as a property"
+xs append: 3      /* with input — called as a method; without input, read as a property */
 ```
 
 An **auxiliary fold** fuses a companion computation into the traversal — checking balance needs each
@@ -390,7 +393,7 @@ behavior Stream
         next -> n + 1
 
 Stream From: 0
-        "observe: head => 0, tail head => 1"
+        /* observe: head 0, tail head 1 */
 ```
 
 Same declaration shape as `data`, arrows reversed. A stream is observed one step at a time and never
@@ -402,7 +405,7 @@ Observers can take input too, and one behavior can offer several generators:
 behavior Stream
     head: <out: Number>
     tail: <out: Self>
-    nth:  <in: i Number, out: Number>       "the i-th observation"
+    nth:  <in: i Number, out: Number>       /* the i-th observation */
 
     unfold From <in: n Number>
         head -> n
@@ -413,7 +416,7 @@ behavior Stream
         head -> pair a
         next -> (a: pair b, b: (pair a + pair b))
 
-Stream Fibonacci pair: (a: 0, b: 1)      "0, 1, 1, 2, 3, 5, ..."
+Stream Fibonacci pair: (a: 0, b: 1)      /* 0, 1, 1, 2, 3, 5, ... */
 ```
 
 Lazy by construction: each observation is computed on demand — `head` when you read it, the next
@@ -442,7 +445,7 @@ data NatList
 
     merge Total <#From, #sum>
 
-NatList Total: 5    "=> 15 — one pass, no list materialized"
+NatList Total: 5    /* 15 — one pass, no list materialized */
 ```
 
 You wrote the two-pass specification (generate a list of descending numbers, then sum it). The
@@ -465,7 +468,7 @@ other is derived, and the compiler enforces the pair is one-to-one:
 map toCelsius    <out: Family> [v rest | Family Cons head: (v - 32) * 5 / 9 rest: rest]
 map toFahrenheit <out: Family, inverse: #toCelsius> [v rest | Family Cons head: v * 9 / 5 + 32 rest: rest]
 
-readings toFahrenheit toCelsius      "back where you started — round-trip is identity"
+readings toFahrenheit toCelsius      /* back where you started — round-trip is identity */
 ```
 
 ([spec §5.3](./theory/surface-syntax.md#53-map-declaration))
@@ -478,8 +481,8 @@ Sometimes one final answer isn't enough — you want the fold's answer at every 
 ```lapis
 scan cumulative <#sum>
 
-xs sum                 "=> 6"
-xs cumulative          "=> [6, 5, 3, 0] — the total, then each tail's sum"
+xs sum                 /* 6 */
+xs cumulative          /* [6, 5, 3, 0] — the total, then each tail's sum */
 ```
 
 The last element is always the fold of the empty base (`0` here); the first is the whole structure's
@@ -589,8 +592,8 @@ relation Ancestor
 ```
 
 ```lapis
-Ancestor closure: base                       "everything reachable from the base facts"
-Ancestor reachableFrom: closed from: 'alice'
+Ancestor closure: base                       /* everything reachable from the base facts */
+Ancestor reachableFrom: closed from: "alice"
 ```
 
 That's Datalog's reachability, as an ordinary declaration. And `query` is the same idea reversed:
@@ -635,8 +638,8 @@ module Lists (T: Type)
     List:  data Nil / Cons head: T rest: Family
     NumList: data Nil / Cons head: Nat rest: Family
 
-Lists Num:    "an instance — its own fresh types"
-Lists Symbol: "another instance — independent"
+Lists Num:    /* an instance — its own fresh types */
+Lists Symbol: /* another instance — independent */
 ```
 
 A module can **extend** another: the child's exports layer on top of the parent's (child keys
@@ -689,7 +692,7 @@ postconditions with `old` snapshots, structured recovery:
 fold pop <out: Array>
     demands: [self | self size > 0]
     ensures: [self old result | result size = old size - 1]
-    Empty -> Error signal: 'Cannot pop empty stack'
+    Empty -> Error signal: "Cannot pop empty stack"
     Push value rest -> value , old rest
 ```
 
@@ -749,10 +752,10 @@ Three levels, strictly ordered (unary > binary > keyword); **no precedence ladde
 operators**. All binary operators name folds, evaluated left-to-right:
 
 ```lapis
-1 + 2 * 3           "=> 9 — parses as (1 + 2) * 3"
-1 + (2 * 3)         "=> 7 — explicit parentheses for mathematical grouping"
-nats take: 5        "keyword form: multi-argument"
-Color Red toHex     "unary chains: left to right"
+1 + 2 * 3           /* 9 — parses as (1 + 2) * 3 */
+1 + (2 * 3)         /* 7 — explicit parentheses for mathematical grouping */
+nats take: 5        /* keyword form: multi-argument */
+Color Red toHex     /* unary chains: left to right */
 ```
 
 No table of seventeen precedence levels to memorize. If grouping matters, say so.
@@ -762,8 +765,8 @@ No table of seventeen precedence levels to memorize. If grouping matters, say so
 with input, it's called:
 
 ```lapis
-Color Red toHex       "property — parameterless fold"
-xs append: 3          "method — the fold carries an input"
+Color Red toHex       /* property — parameterless fold */
+xs append: 3          /* method — the fold carries an input */
 ```
 
 No `()` vs property distinction to remember per operation: the declaration's shape decides, and it
@@ -782,6 +785,10 @@ data Color
     #[0-9A-F]{6}
 ```
 
+Comments follow the same layout logic: a comment on its own line describes the construct beneath it
+(forward association); a comment trailing an expression records that expression's result. Blank
+lines separate the groups — a reader-facing style rule, never a grammar rule: reformatting blank
+lines can never change which construct a comment describes.
 ([spec §6](./theory/surface-syntax.md#6-indentation-strategy))
 
 ### 7.4 Naming conventions — the position tells you the case
@@ -824,7 +831,7 @@ data Stack
         Push -> arr notEmpty | (value: arr first, rest: arr tail)
 
 Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
-        "then: size => 2, peek => 3, pop => [3, Push(value: 2, rest: Empty)]"
+        /* then: size 2, peek 3, pop [3, Push(value: 2, rest: Empty)] */
 ```
 
 Note `pop`'s `<para>`: it makes `old` available — the original sub-value _before_ folding, for
@@ -1196,3 +1203,17 @@ is a real finding for the spec:
     silent). None of these contradict the spec — they are simply absent. Owners: the spec (§5.1 fold
     options per finding 19; new subsections for lattice bounds, modules, variant invariants, naming)
     and the staging plan.
+
+21. **Comments & result annotations — pinned by
+    [#83](https://github.com/lapis-lang/lapis-lang/issues/83)'s survey; the annotation position is a
+    fragment convention, not a source-level pairing.** The decision (recorded in
+    [`issue83-plan.md`](./issue83-plan.md) and `surface-syntax.md` §1.4): comments are `/* ... */`
+    (nesting; no escapes), strings stay `"..."`, char values are `'a'`; a comment's position is its
+    grade — trailing after an expression records that expression's result, an own-line comment
+    describes the construct beneath it. The realization this survey surfaced: **top-level source has
+    no expression statements** — every trailing-annotation site in the docs (`xs sum /* 3 */`,
+    `s size /* 2 */`) is a documentation-fragment device (REPL / print-it / doctest lineage), not a
+    source pairing; a program's top level is declarations, and the language's checked answer for
+    "what does this produce" in real code is contracts (`ensures:`/`invariant:`/`demands:`). The
+    annotation checker is therefore a future doc-example harness (evaluate the fragment, compare the
+    record) — a `docs/`-CI job, never a surface-grammar feature.

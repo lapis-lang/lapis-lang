@@ -113,14 +113,14 @@ is standard lexer behavior — no special rule needed.
 `".*"` is fine; bare `.*` is rejected). This prevents a pattern from matching everything from any
 position.
 
-**No letter-leading patterns:** a pattern's **leftmost-matchable set — computed from its AST, not
-its source — must exclude `[A-Za-z]`**. Letter-initial matches are reserved for the grammar's other
-forms (identifiers, keywords, named variant construction); since the surface lexer is driven by
-`data` declarations (patterns > operators > identifiers), a letter-leading pattern would swallow
-every identifier and keyword in any source file. The check is computed, not syntactic:
-`[0-9]?[a-z]+` source-starts with a digit class, but its language contains letter-initial strings
-(the optional digit can be absent) — rejected. `#[0-9A-F]{6}`'s leftmost set is `{#}` — accepted.
-Rejected loudly at declaration; pinning and grammar work tracked in
+**No reserved-head patterns:** a pattern's **leftmost-matchable set — computed from its AST, not its
+source — must exclude `A-Za-z` AND the reserved literal heads `'`, `"`, and the `/*` pair**.
+Letter-initial matches are reserved for the grammar's other forms (identifiers, keywords, named
+variant construction); the quote and comment-delimiter spellings are reserved for the value and
+comment forms (§1.4: string values `"..."`, char values `'...'`, comments `/* ... */`). The check is
+computed, not syntactic: `[0-9]?[a-z]+` source-starts with a digit class, but its language contains
+letter-initial strings (the optional digit can be absent) — rejected. `#[0-9A-F]{6}`'s leftmost set
+is `{#}` — accepted. Rejected loudly at declaration; pinning and grammar work tracked in
 [#85](https://github.com/lapis-lang/lapis-lang/issues/85) (with `_docs/overview.md` §12.11).
 
 **Disambiguation:** longest match wins; declaration order breaks ties. Named constructors take
@@ -161,12 +161,36 @@ to this form when the carrier is a pattern type.
 
 ### 1.4 Comments
 
-Comments are `"..."` (double-quoted strings that are consumed and discarded). This is the Smalltalk
-convention. No nesting in v0.
+Comments are `/* ... */` — a C-family block form with **nesting**: the delimiters balance by
+counting, so a comment may contain further `/* ... */` pairs (the nested `*/` closes the inner
+comment). There are no escape sequences inside comments; the one rule a comment writer must know is
+that prose cannot contain an unbalanced `*/`.
+
+Comments are **metasyntax**: they are consumed at statement boundaries before any token phase (the
+precedence whitespace already has — §6.4), and they are present in no term of any semantic grammar.
+They cost nothing: no token, no budget, no rule participation.
+
+A comment's **position is its grade**:
+
+- **Trailing** (following an expression on the same line) — a _result annotation_: a record of what
+  that expression produces. Documentation-grade; the language never checks it. The checker for
+  annotations is the future doc-example harness (evaluate the fragment, compare the record), not the
+  compiler — see [`issue83-plan.md`](../issue83-plan.md) §5. In-source claims about results route to
+  contracts (`ensures:`/`invariant:`/`demands:`), which ARE checked.
+- **Own-line** (above a construct) — a _prose comment_: it describes the construct below it (the
+  next declaration or body line at greater-or-equal indent). The example's first line shows the
+  prose grade: it describes the expression below; the second line's trailing comment is the result
+  annotation grade.
 
 ```lapis
-Color Red toHex                     "=> '#FF0000'"
+/* the toHex fold, applied to the Red singleton */
+Color Red toHex            /* "#FF0000" */
 ```
+
+**String and character values** — the value spellings are disjoint from comments: strings are
+double-quoted (§1.3's built-ins, `"<Char>*"`; a `"` inside is `\"` — the same delimiter-escape
+convention the LC core's `match("p")` form uses), and characters are single-quoted (a Char value is
+`'a'`, exactly one character; `'\''` escapes a quote).
 
 ### 1.5 Keywords
 
@@ -275,9 +299,9 @@ Parses as: `((Color Red) toHex)` — left-to-right chain of unary sends.
 **Binary messages** (uniform precedence, left-to-right):
 
 ```lapis
-a + b * c          "parses as (a + b) * c — uniform precedence"
-a + (b * c)        "explicit grouping required for mathematical precedence"
-3+4j < 1+6j        "Complex pattern tokens, then binary < "
+a + b * c          /* parses as (a + b) * c — uniform precedence */
+a + (b * c)        /* explicit grouping required for mathematical precedence */
+3+4j < 1+6j        /* Complex pattern tokens, then binary <  */
 ```
 
 All binary operators (`+`, `-`, `*`, `/`, `<`, `<=`, `=`, `,`, etc.) have the same precedence. There
@@ -692,13 +716,13 @@ decorator. This means:
 | ------------------------------- | ------ | ------------------ |
 | Top-level declaration           | 0      | `data Color`       |
 | Body of a declaration           | 4      | `Red Green Blue`   |
-| Case arms / contracts in a fold | 8      | `Red -> '#FF0000'` |
+| Case arms / contracts in a fold | 8      | `Red -> "#FF0000"` |
 | Multi-line case arm body        | 12     | `expr`             |
 
 ### 6.4 Newline as Statement Separator
 
 Newlines separate statements and body lines. The grammar matches `\r\n` or `\n`. Blank lines and
-comments are consumed between body lines.
+block comments (`/* ... */` — §1.4) are consumed between body lines.
 
 ### 6.5 Inline vs Indented Bodies
 
@@ -707,7 +731,7 @@ Case arms support two body forms:
 **Inline** (single expression on same line):
 
 ```lapis
-Red -> '#FF0000'
+Red -> "#FF0000"
 ```
 
 **Indented** (expression on next line, deeper indent):
@@ -736,6 +760,7 @@ These are parsed in the `primary` production, before regular identifiers, so `ol
 ## 8. Complete Example
 
 ```lapis
+/* A stack — Empty or a value and the rest of the stack. */
 data Stack
     Empty
     Push value: Any rest: Family
@@ -756,11 +781,20 @@ data Stack
         Empty -> arr isEmpty
         Push -> arr notEmpty | (value: arr first, rest: arr tail)
 
-s = Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
-s size            "=> 2"
-s peek            "=> 3"
-s pop             "=> [3, Push(value:2, rest:Empty)]"
+stack = Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
+
+stack size                   /* 2 */
+stack peek                   /* 3 */
+stack pop                    /* [3, Push(value:2, rest:Empty)] */
 ```
+
+The three trailing annotations are §1.4's grade rule in action — each records its line expression's
+result: one push, two deep. (The `stack =` fragment line uses the top-level definition spelling the
+docs' examples share; §12.6 of [`overview.md`](../overview.md) records its unpinned status.) Result
+annotations are trailing comments; prose comments above a declaration describe what follows. `pop`'s
+`<para>` makes `old` available — the original sub-value _before_ folding. The complete reserved-word
+list is in the keyword table (§1.5): nothing here depends on a keyword this example does not
+declare.
 
 ## 9. Open Questions
 
