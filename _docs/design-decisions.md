@@ -289,10 +289,12 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   expression statements — trailing annotations are a doc-fragment device; the language's checked
   answer for result claims in real code is contracts (`ensures:`/`invariant:`/`demands:`).
 - **Reservation rules (generalizing the letter-leading pattern rule):** a user-declared pattern's
-  leftmost-matchable set (computed from its AST) must exclude `'`, `"`, and the `/*` pair — reserved
-  for the value/comment forms; built-ins exempt (they define the spellings). Declared symbolic
-  operation names may not contain `/*` or `*/` (the comment scanner runs at every boundary before
-  lexical phases).
+  leftmost-matchable set (computed from its AST) must exclude `'` and `"` — reserved for the char
+  and string value forms — AND its reserved two-character PREFIX language must exclude `/*`: a
+  pattern whose matchable strings can begin with the comment opener is rejected (the prefix check
+  walks the AST's per-position first-sets, so `/[0-9]` stays legal while `/*`-spelling shapes
+  reject). Built-ins exempt (they define the spellings). Declared symbolic operation names may not
+  contain `/*` or `*/` (the comment scanner runs at every boundary before lexical phases).
 - **Retired:** the `"..."` comment form (the original §1.4 assumption — died when strings stayed
   double-quoted: a shared delimiter reintroduces the comment-vs-value ambiguity); a `comment ...`
   keyword (freezes descriptions into source — wrong channel for the Language-System roadmap;

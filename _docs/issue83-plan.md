@@ -77,21 +77,32 @@ The settled division of labor:
    ([LtU 3295](http://lambda-the-ultimate.org/node/3295): prose must be checkable or must not
    participate). The metadata grade grows out of declarations: see §5's follow-up work.
 6. **The `=>` result-annotation prefix — dropped.** Position is the language-grade marker (trailing
-   comment = result record); a prefix duplicated what placement already says. The corpus's
-   annotation payloads simplify mechanically (payload text unchanged, delimiters swap).
+   comment = result record); a prefix duplicated what placement already says. The mechanical rewrite
+   over the doc corpus, per site: (a) a trailing/own-line DQ comment becomes a block comment —
+   `"payload"` → `/* payload */` (nested upgrades where the prose quoted quotes); (b) an annotation
+   payload drops the `=>` prefix — `"=> 3"` → `/* 3 */`; (c) string values convert single→double
+   quotes — `'foo'` → `"foo"` (delimiter escapes flip: a literal `'` inside a string needs no escape
+   under DQ; a literal `"` inside spells `\"`); (d) single-character sites stay single-quoted — they
+   are now Char values (`'a'`), not strings; (e) payload _text_ beyond the prefix is otherwise
+   unchanged — the migration is lexical, never re-wording claims.
 
 ## 4. The reservation rules
 
 Two rules keep the forms unambiguous, both extensions of implemented machinery:
 
 1. **Reserved pattern heads.** A user-declared pattern's **leftmost-matchable set — computed from
-   its AST, not its source** — must exclude `'`, `"`, and the `/*` pair: reserved for the grammar's
-   other forms (char values, string values, comments). This generalizes the pinned letter-leading
-   rule (`overview.md` §12.11): letter-initial matches are reserved for identifiers and named
-   construction; the literal spellings are reserved for the literal forms. The check reuses the same
-   walk `isResolvableAndAnchored` runs (`src/core/grammar.ts`), rejected loudly at declaration.
-   Built-ins are exempt — their patterns _define_ the reserved spellings (the same built-in/user
-   asymmetry as keywords).
+   its AST, not its source** — must exclude `'` and `"` (reserved for the char and string value
+   forms), AND its **reserved two-character prefix language** must exclude the comment pair: a
+   pattern whose matchable strings can begin with `/*` is rejected (reserved for the comment form).
+   The `/*` shape is a PREFIX check — the first character's matchable set alone cannot exclude a
+   two-character delimiter while leaving other slash-led patterns legal: the computation walks the
+   AST's per-position first-sets (position one: `/`; position two: `*`), so `/[0-9]` stays legal
+   while `/*` and `[^0][*]`-led shapes reject. This generalizes the pinned letter-leading rule
+   (`overview.md` §12.11): letter-initial matches are reserved for identifiers and named
+   construction; the reserved spellings and prefixes belong to the literal and comment forms. The
+   check reuses the same walk `isResolvableAndAnchored` runs (`src/core/grammar.ts`), rejected
+   loudly at declaration. Built-ins are exempt — their patterns _define_ the reserved spellings (the
+   same built-in/user asymmetry as keywords).
 2. **No comment-shaped operation names.** A declared symbolic operation name may not contain `/*` or
    `*/`. The comment scanner runs at every boundary position before lexical phases (the precedence
    whitespace already has), so a `/*`-containing name after a `/` is unreachable; the
@@ -119,7 +130,7 @@ While drafting, this survey surfaced a realization worth carrying into the overv
 **top-level source has no expression statements.** A program's top level is declarations (`data`,
 `behavior`, `protocol`, …); expressions exist inside bodies — where the language's checked answer to
 "what does this produce?" is already contracts. Every trailing-annotation site in the corpus
-(`xs sum "=> 3", s size "=> 2"`, …) is a **documentation-fragment** convention — REPL, print-it,
+(`xs sum /* 3 */`, `s size /* 2 */`, …) is a **documentation-fragment** convention — REPL, print-it,
 doctest lineage — not a source-level pairing. That is why the annotation grade belongs to position
 and to the future harness, and why in-source result claims route to contracts.
 

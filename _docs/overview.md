@@ -1170,7 +1170,7 @@ is a real finding for the spec:
     exhaustiveness premise, per #86's "subsumption never widens dispatch"), **`old`** (paramorphism
     — the arm sees the raw sub-value alongside the folded one), **`history: true` / `prev`**
     (histomorphism — course-of-values: the child's own folded fields chain arbitrarily deep),
-    **`aux: 'name'`** (zygomorphism — a companion fold's results at every recursive position, string
+    **`aux: "name"`** (zygomorphism — a companion fold's results at every recursive position, string
     or array form, combinable with history), **`scan`** (the fold's result at every subterm,
     root-first array; linear continuations only on behaviors), **property-vs-method** (Uniform
     Access Principle: parameterless folds read as properties, folds with input are methods — handler

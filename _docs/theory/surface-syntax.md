@@ -114,13 +114,20 @@ is standard lexer behavior — no special rule needed.
 position.
 
 **No reserved-head patterns:** a pattern's **leftmost-matchable set — computed from its AST, not its
-source — must exclude `A-Za-z` AND the reserved literal heads `'`, `"`, and the `/*` pair**.
-Letter-initial matches are reserved for the grammar's other forms (identifiers, keywords, named
-variant construction); the quote and comment-delimiter spellings are reserved for the value and
-comment forms (§1.4: string values `"..."`, char values `'...'`, comments `/* ... */`). The check is
-computed, not syntactic: `[0-9]?[a-z]+` source-starts with a digit class, but its language contains
-letter-initial strings (the optional digit can be absent) — rejected. `#[0-9A-F]{6}`'s leftmost set
-is `{#}` — accepted. Rejected loudly at declaration; pinning and grammar work tracked in
+source — must exclude `A-Za-z` and the reserved literal heads `'` and `"`**, and its **reserved
+two-character prefix language** must exclude the comment pair: a pattern whose matchable strings can
+begin with `/*` is rejected. The reserved set is computed exactly as the delimiters are lexed — the
+single-character heads (`'`, `"`) as the FIRST character's matchable set, the comment pair as the
+possible two-character PREFIX (`/` at position one whose next matchable character is `*`): a pattern
+like `/*` or `[^0][*]`-led shapes that could spell a comment opener are rejected, while a slash-led
+pattern that can never begin `/*` (e.g. `/[0-9]`) remains legal. Letter-initial matches are reserved
+for the grammar's other forms (identifiers, keywords, named variant construction); the quote
+spellings are reserved for the value forms and the `/*` prefix for the comment form (§1.4: string
+values `"..."`, char values `'...'`, comments `/* ... */`). The check is computed, not syntactic,
+from the pattern AST's per-position first-sets (the same walk `isResolvableAndAnchored` runs):
+`[0-9]?[a-z]+` source-starts with a digit class, but its language contains letter-initial strings
+(the optional digit can be absent) — rejected. `#[0-9A-F]{6}`'s leftmost set is `{#}` — accepted.
+Rejected loudly at declaration; pinning and grammar work tracked in
 [#85](https://github.com/lapis-lang/lapis-lang/issues/85) (with `_docs/overview.md` §12.11).
 
 **Disambiguation:** longest match wins; declaration order breaks ties. Named constructors take
@@ -132,14 +139,18 @@ precedence over patterns when both could match.
 
 | Type     | Pattern(s)                 | Example         | Notes                                            |
 | -------- | -------------------------- | --------------- | ------------------------------------------------ |
-| `Char`   | `.`                        | `a`, `7`, `!`   | Any single character; the first data type        |
+| `Char`   | `.`                        | `'a'`, `'7'`    | Any single character; the first data type        |
 | `String` | `"<Char>*"`                | `"hello"`       | Double-quoted sequence of Chars (type reference) |
 | `Nat`    | `[0-9]+`                   | `42`            | Natural numbers                                  |
 | `Int`    | `-[0-9]+` and `[0-9]+`     | `-3`, `42`      | Negative and non-negative                        |
 | `Bool`   | `True` and `False` (named) | `true`, `false` | Named constructors, not patterns                 |
 | `Symbol` | `#[a-zA-Z][a-zA-Z0-9]*`    | `#sum`          | Used in merge references                         |
 
-User-defined types (e.g., `Complex`, `Rational`) declare their own patterns.
+User-defined types (e.g., `Complex`, `Rational`) declare their own patterns. The built-ins are
+**examples-shaped here in their VALUE spellings** — a Char value is spelled `'a'` (§1.4's quoted
+forms), the PATTERN for Char remains the undelimited `.`; the quoting belongs to the value syntax,
+not the pattern language. Escape handling inside quoted values (`\n`/`\t` vs the delimiter escapes
+only) stays open — see §9.1.
 
 **Elimination (pattern-matched fold):** a fold over a pattern-matched data type eliminates the
 token, not a variant. The annotation names the pattern-matched carrier — a registered
@@ -190,7 +201,10 @@ Color Red toHex            /* "#FF0000" */
 **String and character values** — the value spellings are disjoint from comments: strings are
 double-quoted (§1.3's built-ins, `"<Char>*"`; a `"` inside is `\"` — the same delimiter-escape
 convention the LC core's `match("p")` form uses), and characters are single-quoted (a Char value is
-`'a'`, exactly one character; `'\''` escapes a quote).
+`'a'`, exactly one character; `'\''` escapes a quote). The delimiter escapes (`\"`, `\'`) are pinned
+here; whether the fuller escape vocabulary (`\n`, `\t`) lands at the `Char` level or in the fold
+handler that processes the matched token stays open — §9.1 decides that, and §1.3's value table
+spells the quoted forms the surface language recognizes.
 
 ### 1.5 Keywords
 
