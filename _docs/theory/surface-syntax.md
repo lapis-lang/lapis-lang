@@ -2,9 +2,13 @@
 
 > **Status:** Draft v0.1. This document specifies the surface syntax of Lapis: lexical structure,
 > expression precedence, declaration forms, and the indentation strategy. Railroad diagrams are
-> rendered as Mermaid flowcharts. The executable grammar lives in
-> [`src/grammar.ts`](../../src/grammar.ts); this document is the human-readable specification that
-> the grammar implements.
+> rendered as Mermaid flowcharts. The executable core grammar lives in
+> [`src/core/grammar.ts`](../../src/core/grammar.ts); this document is the human-readable
+> specification that the grammar implements.
+>
+> The **consolidated EBNF** for the surface language — every production in one place — is
+> [`surface-grammar.md`](./surface-grammar.md). This document is the narrative; that one is the
+> normative production set. Where they disagree on the _shape_ of the syntax, the EBNF wins.
 
 ## 1. Lexical Structure
 
@@ -333,7 +337,7 @@ stack append: 3
 A keyword send is `receiver key1: arg1 key2: arg2 ...`. The selector is the concatenation of the
 keyword parts: `take:`, `between:and:`, `append:`.
 
-**Message chain rule** (from `src/grammar.ts`):
+**Message chain rule** (from `src/core/grammar.ts`):
 
 ```
 messageChain = primary (unarySuffix* keywordSuffix?)?
@@ -704,7 +708,7 @@ delimiters (`{...}`, `begin...end`) for declaration bodies and case tables.
 
 ### 6.2 Column-Parameterised Productions
 
-The grammar (in `src/grammar.ts`) implements indentation via **P4P-style column-parameterised
+The grammar (in `src/core/grammar.ts`) implements indentation via **P4P-style column-parameterised
 productions** — no pre-pass, no token rewriting. Every block-introducing production is a `@rule`
 method accepting `col: number` (the child column):
 

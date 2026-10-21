@@ -2,15 +2,21 @@
 
 > **Status:** Draft v0.1. This is the consolidated overview of Lapis's surface design: one document,
 > sanity-checking the language end to end, and the seed for the marketing site. It is written
-> example-first — every claim ends in a runnable block. The authoritative specifications remain
+> example-first — every claim ends in a runnable block.
+>
+> This document is the **10,000ft view** — a gut-check on the syntax. The **normative production
+> set** is [`theory/surface-grammar.md`](./theory/surface-grammar.md): the consolidated EBNF for the
+> surface language, every production in one place. The authoritative specifications remain
 > [`theory/surface-syntax.md`](./theory/surface-syntax.md) (syntax) and
 > [`theory/semantics.md`](./theory/semantics.md) (meaning); each section links to its backing spec
 > rather than duplicating it. Formal vocabulary (initial algebra, coalgebra, and friends) lives in
-> those specs; this page keeps to plain language.
+> those specs; this page keeps to plain language. Where this document and the EBNF disagree on the
+> _shape_ of the syntax, the EBNF wins — and the findings in §12 record which questions the grammar
+> still leaves open.
 >
-> Sources consolidated here: `surface-syntax.md`, `syntax-design.md`, `semantics.md` §1,
-> `users/rationale.md`, `users/why-lapis.md`, and the prototype's tests and examples
-> ([lapis-js](https://github.com/lapis-lang/lapis-js)).
+> Sources consolidated here: `surface-syntax.md`, `surface-grammar.md`, `syntax-design.md`,
+> `semantics.md` §1, `users/rationale.md`, `users/why-lapis.md`, and the prototype's tests and
+> examples ([lapis-js](https://github.com/lapis-lang/lapis-js)).
 
 **Lapis is a programming language where you declare your data and its laws — and fold and unfold are
 the only recursion you'll write.**
@@ -115,70 +121,61 @@ data Complex
     Cartesian <re: Float>+<im: Float>i
 ```
 
+The declaration is the constructor — spell the shape, and the captures become fields:
+
+```lapis
+1/2                 /* a Rational — p is 1, q is 2 */
+3.0+5.0i            /* a Complex — re is 3.0, im is 5.0 */
+```
+
+The capture's type gates its slice: `3+5i` is not a Complex, because `3` is not a `Float` under the
+built-in patterns (§2.3) — the decimal point is required.
+
+```lapis
+(1/2) p             /* 1 */
+(3.0+5.0i) im       /* 5.0 */
+```
+
 Whether a value came from a named variant or a pattern match, a field is a field — same reads, same
 places.
 
 No `new`, no constructor-overload gymnastics.
+
+**No ambiguity with operations — position decides.** A pattern constructor is recognized only where
+the lexer expects a value, and patterns are tried first there, longest match winning: `1/2` is one
+token matching `Ratio`'s shape, while `1 / 2` — the spaces break the token — is `1`, then `/` in
+infix position, then `2`: the division operation. The same characters build data in prefix position
+and name operations between tokens. Two further rules keep the forms disjoint. A pattern's
+leftmost-matchable set must exclude letters — computed from the pattern, not its spelling
+(`[0-9]?[a-z]+` is rejected: the optional digit can be absent) — so no declared pattern can swallow
+an identifier, keyword, or named variant. And a match is contiguous: whitespace is consumed only
+where the pattern's structure includes it, which is why `"hello world"` is one String value (the
+delimiters are part of the pattern) while `1 / 2` can never be a Rational.
+([spec §1.3, §2.1](./theory/surface-syntax.md#13-pattern-matched-data-types))
 
 ### 2.3 The built-ins are data too
 
 Where did `Nat` come from, and why does `42` spell a number? §2.1 showed the trick without naming
 it: the "built-in" types are ordinary `data` declarations whose constructors are **patterns**:
 
-| Type     | Pattern(s)              | Example   |
-| -------- | ----------------------- | --------- |
-| `Char`   | `.`                     | `'a'`     |
-| `String` | `"<Char>*"`             | `"hello"` |
-| `Nat`    | `[0-9]+`                | `42`      |
-| `Float`  | `-?[0-9]*\.[0-9]+`      | `3.14`    |
-| `Symbol` | `#[a-zA-Z][a-zA-Z0-9]*` | `#sum`    |
+| Type     | Pattern(s)         | Example   |
+| -------- | ------------------ | --------- |
+| `Char`   | `'.'`              | `'a'`     |
+| `String` | `"<Char>*"`        | `"hello"` |
+| `Nat`    | `[0-9]+`           | `42`      |
+| `Float`  | `-?[0-9]*\.[0-9]+` | `3.14`    |
 
 When you write `42`, it's `Nat`'s pattern `[0-9]+` that matched it — the same move as `Color`'s
 `#[0-9A-F]{6}`, just declared for you. The literal shapes a program recognizes are chosen by the
 program, not the language. And the value spellings — `'a'` one character, `"hello"` a string — are
 the same spellings every user declaration's literals take (§1.4's reservation rules keep the forms
-disjoint from comments and from declared patterns).
+disjoint from comments and from declared patterns). For the two quoted built-ins the delimiters are
+part of the pattern — `'.'`, `"<Char>*"` — which is why the `'` and `"` heads are reserved: Char and
+String own them, and no user pattern may match a string beginning with either.
 
-### 2.4 Recursion
+### 2.4 Subtyping: extending a declared data
 
-A field's type is any type in scope — including the one being declared. Two spellings for the
-self-reference, same meaning:
-
-```lapis
-data NatList
-    Nil
-    Cons head: Nat rest: NatList    /* by name — if NatList is in scope */
-```
-
-And a field can reference "the rest of the type being declared" positionally with `Family`:
-
-```lapis
-data NatList
-    Nil
-    Cons head: Nat rest: Family      /* same meaning, no name needed */
-```
-
-`Family` is the spelling that works _before_ the type's own name could resolve — mutually recursive
-declarations, or just not wanting to repeat the name. It also makes the recursion **open**: a
-`Family`-typed field means "any future subtype's rest", so subtypes can extend the list with richer
-variants. The by-name spelling closes it — `rest: NatList` means exactly `NatList`, no more, no less
-(closed recursion — the whole value is always one fixed type). (What a subtype is, and how a data
-type gains one, is §2.5.)
-
-`Nil` is the empty list; `Cons` carries a head and the rest. Values are built by chaining:
-
-```lapis
-NatList Cons head: 1 rest: (NatList Cons head: 2 rest: NatList Nil)
-```
-
-That's an algebraic data type — the thing behind sealed-interface hierarchies and dataclass unions —
-— in seven lines, with recursion spelled either `rest: NatList` or `rest: Family`.
-([spec §4.1](./theory/surface-syntax.md#4-declaration-formats))
-
-### 2.5 Subtyping: extending a declared data
-
-§2.4 let slip the word _subtype_ — here is what it meant. A data type can be declared as an
-**extension** of another, with `<:` ("is a"):
+A data type can be declared as an **extension** of another, with `<:` ("is a"):
 
 ```lapis
 data Point2
@@ -232,10 +229,10 @@ data NatList <: IntList
 is an `Int`, so the substitution holds). Unmentioned fields — `rest` here — are inherited unchanged;
 introducing a field the parent doesn't have is rejected.
 
-And here §2.4's promise lands: `rest: Family` is what makes these extensions possible at all. A
-`Family`-typed field means "any future subtype's rest" — that's **open recursion**. The by-name
-spelling (`rest: IntList`) closes it — exactly `IntList`, no subtype welcome. Same text, two
-recursion disciplines, chosen per field:
+And `Family` — "the rest of the type being declared" (introduced properly in §2.5) — is what makes
+these extensions possible at all. A `Family`-typed field means "any future subtype's rest" — that's
+**open recursion**. The by-name spelling (`rest: IntList`) closes it — exactly `IntList`, no subtype
+welcome. Same text, two recursion disciplines, chosen per field:
 
 | Spelling        | Recursion | Subtypes                           |
 | --------------- | --------- | ---------------------------------- |
@@ -249,10 +246,52 @@ rest. ([spec §4.1](./theory/surface-syntax.md#4-declaration-formats))
 Everything a `Point2` can be asked, a `Point3` can answer — that's the promise `<:` makes, and §3
 shows how the language keeps it.
 
+### 2.5 Recursion
+
+A field's type is any type in scope — including the one being declared. Two spellings for the
+self-reference, same meaning:
+
+```lapis
+data NatList
+    Nil
+    Cons head: Nat rest: NatList    /* by name — if NatList is in scope */
+```
+
+And a field can reference "the rest of the type being declared" positionally with `Family`:
+
+```lapis
+data NatList
+    Nil
+    Cons head: Nat rest: Family      /* same meaning, no name needed */
+```
+
+`Family` is the spelling that works _before_ the type's own name could resolve — mutually recursive
+declarations, or just not wanting to repeat the name. §2.4 already met `Family`'s second job: a
+`Family`-typed field keeps the recursion **open** — any future subtype's rest may fill it — while
+the by-name spelling closes it: `rest: NatList` means exactly `NatList`, no more, no less (the whole
+value is always one fixed type).
+
+`Nil` is the empty list; `Cons` carries a head and the rest. Values are built by chaining:
+
+```lapis
+NatList Cons head: 1 rest: (NatList Cons head: 2 rest: NatList Nil)
+```
+
+```lapis
+Cons head: 1 rest: (Cons head: 2 rest: Nil)
+```
+
+The `NatList` qualifiers are optional — both spellings are legal, bare by default; the qualifier
+earns its keep only when `Cons` or `Nil` would be ambiguous in scope (another in-scope type
+declaring the same variant name).
+
+That's an algebraic data type — the thing behind sealed-interface hierarchies and dataclass unions —
+— in seven lines, with recursion spelled either `rest: NatList` or `rest: Family`.
+([spec §4.1](./theory/surface-syntax.md#4-declaration-formats))
+
 ### 2.6 The lattice's bounds: `Any` and `Nothing`
 
-Every type so far has been a `data` you declared. Two more are always in scope — the bounds of the
-whole type universe:
+Every type so far has been a `data` you declared. Two more complete the type universe — its bounds:
 
 - **`Any`** — the top. Every value is an `Any`, with no declaration needed. A field typed `Any`
   accepts anything:
@@ -269,8 +308,14 @@ whole type universe:
 
 The pair does for the whole language what it does in any lattice: `Nothing <: X <: Any` for every
 type `X` — implicitly, with no `[<: Any]` ceremony (every type is already a subtype; writing it
-would be redundant and is rejected). Subtyping's rules from §2.5 stay put: extension adds variants,
+would be redundant and is rejected). Subtyping's rules from §2.4 stay put: extension adds variants,
 narrowing sharpens fields — the bounds just anchor the ends.
+
+That the spellings are available in every module is a separate claim, and it depends on the module
+design (§5.3): under the ban on imports there is no global namespace, so the primordials — these
+bounds, and §2.3's built-ins — are placed by decision, not assumed ambient. The bounds argue for a
+small language-fixed set (a namespace without `Any`/`Nothing` breaks the lattice every type
+participates in); the spec must pin it (§12.24).
 
 ### 2.7 Many types at once
 
@@ -285,7 +330,7 @@ data Expr
     Block stmt: Stmt body: Family      /* references Stmt — not yet declared */
 
 data Stmt
-    Assign name: Symbol value: Nat
+    Assign name: String value: Nat
     Seq first: Family second: Family   /* Family = this type's rest — no name needed */
 ```
 
@@ -345,13 +390,16 @@ total:
 | `scan`         | the fold's result at _every_ subterm, root-first                   | scan lemma    |
 | `_` (wildcard) | one arm that catches whatever the others don't — open variant sets | —             |
 
-A **parameterized fold** carries one input — here, an element to append. Recursive positions arrive
-as partially-applied continuations: give the input and the traversal continues:
+A **parameterized fold** carries one input — here, an element to append. The spec carries only the
+type (`in: Nat`): a fold takes at most one input, so there is nothing for a name to disambiguate —
+the arm binds it, like every field, as an extra trailing binding in the arm's binding list. The type
+gates the call site (`xs append: 3`). Recursive positions arrive as partially-applied continuations:
+give the input and the traversal continues:
 
 ```lapis
-fold append <in: v Nat, out: Family>
-    Nil -> NatList Cons head: v rest: NatList Nil
-    Cons head rest -> NatList Cons head: head rest: (rest append: v)
+fold append <in: Nat, out: Family>
+    Nil v -> Cons head: v rest: Nil
+    Cons head rest v -> Cons head: head rest: (rest append: v)
 
 xs append: 3      /* with input — called as a method; without input, read as a property */
 ```
@@ -373,24 +421,63 @@ fold balanced <aux: #depth, out: Bool>
 level below the immediate child; `scan` turns one fold into _all_ the partial results
 (`[6, 5, 3,
 0]` for `[1, 2, 3]` under `sum`). And the wildcard `_` arm keeps the fold total over
-open variant sets — the piece that lets §2.5's subtypes extend a parent's operation with arms for
+open variant sets — the piece that lets §2.4's subtypes extend a parent's operation with arms for
 only their new variants: inherited variants keep the parent's arms, new variants supply theirs, and
-the fold stays exhaustive over the combined member set. That is how the language keeps §2.5's
+the fold stays exhaustive over the combined member set. That is how the language keeps §2.4's
 promise — everything a `Point2` can be asked, a `Point3` can answer.
 
 ### 3.2 Unfold: generating data
 
-The dual. Where `fold` consumes a finished value, `unfold` builds one up from a seed — declared with
-a `behavior`, the type you observe rather than construct:
+The dual. Where `fold` consumes a finished value, `unfold` builds one up from a seed. Like every
+operation, it is declared **inside** the data declaration — one arm per variant, each arm deciding
+whether the seed produces that variant, and what the next seed is:
+
+```lapis
+data NatList
+    Nil
+    Cons head: Nat rest: Family
+
+    unfold Range <in: Nat>
+        Nil n -> n = 0
+        Cons n -> n > 0 | head: n rest: n - 1
+
+NatList Range: 3      /* Cons 3 (Cons 2 (Cons 1 Nil)) — a list, built from a number */
+```
+
+A generator arm is a **guard | payload**: the guard decides whether the arm applies; when it holds,
+the arm produces the variant named in the arm head, with the fields the payload supplies. Otherwise
+it declines and the next arm is tried — the first arm whose guard holds wins (the prototype's shape:
+a handler returns either a fields object or `null`, and the first non-null one decides).
+
+The payload is a **target-typed construction**: the variant is not repeated, because the arm head
+already names it. (C#'s target-typed `new` is the same move — the target comes from context, so the
+name is omitted.) The payload spells only the fields, as a keyword message — `head: n rest: n - 1` —
+the Smalltalk shape; the field names are _labels_ there, not bindings, so `n` is still the seed. The
+payload is required exactly when the arm's variant has fields: the base arm carries none, because
+`Nil` has no fields and there is nothing to say.
+
+One wrinkle: in a recursive field, the value is not a built value but the **next seed** —
+`rest: n - 1` says "the rest of this list is whatever unfolding the seed `n - 1` produces", not "the
+rest is the number `n - 1`". (The prototype draws the same line: for a recursive field, the returned
+value becomes the seed for the recursive unfolding.)
+
+So the arms read as a decision table over the seed: `n = 0` produces `Nil` (the base — generation
+stops); `n > 0` produces a `Cons` carrying `n`, with the rest seeded by `n - 1`. The recursion is
+the seed shrinking — the same totality argument §2.5's fold runs, in reverse. This is the DSL's
+`List.Range` — the workhorse that turns a number into a list — and it is an ordinary member of the
+`data` declaration, exactly where `sum` sat in §3.1.
+
+The same declaration shape serves the other extreme: a `behavior`, the type you observe rather than
+construct, generates potentially endless structure:
 
 ```lapis
 behavior Stream
     head: <out: Number>
     tail: <out: Self>
 
-    unfold From <in: n Number>
-        head -> n
-        next -> n + 1
+    unfold From <in: Number>
+        head n -> n
+        next n -> n + 1
 
 Stream From: 0
         /* observe: head 0, tail head 1 */
@@ -405,18 +492,18 @@ Observers can take input too, and one behavior can offer several generators:
 behavior Stream
     head: <out: Number>
     tail: <out: Self>
-    nth:  <in: i Number, out: Number>       /* the i-th observation */
+    nth:  <in: Number, out: Number>       /* the i-th observation */
 
-    unfold From <in: n Number>
-        head -> n
-        next -> n + 1
-        nth  -> (n + i)
+    unfold From <in: Number>
+        head n -> n
+        next n -> n + 1
+        nth n i -> (n + i)
 
-    unfold Fibonacci <in: pair (a: Number, b: Number)>
-        head -> pair a
-        next -> (a: pair b, b: (pair a + pair b))
+    unfold Fibonacci <in: (a: Number, b: Number)>
+        head pair -> pair a
+        next pair -> (a: pair b, b: (pair a + pair b))
 
-Stream Fibonacci pair: (a: 0, b: 1)      /* 0, 1, 1, 2, 3, 5, ... */
+Stream Fibonacci: (a: 0, b: 1)      /* 0, 1, 1, 2, 3, 5, ... */
 ```
 
 Lazy by construction: each observation is computed on demand — `head` when you read it, the next
@@ -439,9 +526,9 @@ data NatList
         Nil -> 0
         Cons head rest -> head + rest
 
-    unfold From <in: n Nat>
-        Nil -> n = 0
-        Cons -> n > 0 | (head: n, rest: (n - 1))
+    unfold From <in: Nat>
+        Nil n -> n = 0
+        Cons n -> n > 0 | head: n rest: n - 1
 
     merge Total <#From, #sum>
 
@@ -458,7 +545,7 @@ factorial, with no list ever allocated.
 Map transforms each field position; all other structure is preserved by construction:
 
 ```lapis
-map scaleEach <in: x Number, out: Family> [v rest | Family Cons head: v * x rest: (rest x)]
+map scaleEach <in: Number, out: Family> [v rest x | Family Cons head: v * x rest: (rest x)]
 ```
 
 A map can also be declared as the **inverse** of another — one side states the relationship, the
@@ -639,7 +726,7 @@ module Lists (T: Type)
     NumList: data Nil / Cons head: Nat rest: Family
 
 Lists Num:    /* an instance — its own fresh types */
-Lists Symbol: /* another instance — independent */
+Lists String: /* another instance — independent */
 ```
 
 A module can **extend** another: the child's exports layer on top of the parent's (child keys
@@ -670,11 +757,11 @@ time (fusion) and at **call time** (short-circuit guards):
 data Num
     N value: Number
 
-    fold add <in: other Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
-        N value -> Num N: value + other value
+    fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
+        N value other -> Num N: value + other value
 
-    fold multiply <in: other Self, out: Self, properties: (distributiveOver: #add)>
-        N value -> Num N: value * other value
+    fold multiply <in: Self, out: Self, properties: (distributiveOver: #add)>
+        N value other -> Num N: value * other value
 ```
 
 Declare `distributive`, and fusion — Horner's rule — is the compiler's job, not yours. Declare
@@ -705,14 +792,14 @@ verified structurally. Abstract methods may carry default bodies:
 
 ```lapis
 protocol Ordered
-    fold compare <in: other Self, out: Number>
+    fold compare <in: Self, out: Number>
 
 data Num
     N value: Number
 
     satisfies: Ordered
-    fold compare <in: other Self, out: Number>
-        N value -> value - other value
+    fold compare <in: Self, out: Number>
+        N value other -> value - other value
 ```
 
 ([spec §4.3](./theory/surface-syntax.md#43-protocol---qualified-type))
@@ -826,11 +913,11 @@ data Stack
         Empty -> nil
         Push value rest -> value , old rest
 
-    unfold FromArray <in: arr Array>
-        Empty -> arr isEmpty
-        Push -> arr notEmpty | (value: arr first, rest: arr tail)
+    unfold FromArray <in: Array>
+        Empty arr -> arr isEmpty
+        Push arr -> arr notEmpty | value: arr first rest: arr tail
 
-Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
+Push value: 3 rest: (Push value: 2 rest: Empty)
         /* then: size 2, peek 3, pop [3, Push(value: 2, rest: Empty)] */
 ```
 
@@ -846,7 +933,7 @@ two other common shapes (previous results, auxiliary results) as keywords, not l
 | Keyword     | Purpose                                             |
 | ----------- | --------------------------------------------------- |
 | `data`      | Declare a type by how its values are built          |
-| `<:`        | Declare a type as an extension of another (§2.5)    |
+| `<:`        | Declare a type as an extension of another (§2.4)    |
 | `behavior`  | Declare a type by how its values are observed       |
 | `protocol`  | Declare operations a type must provide              |
 | `relation`  | Declare linked data with two endpoints              |
@@ -907,10 +994,37 @@ is a real finding for the spec:
    declared but never called. This draft assumes constructor-position application
    (`NatList From: 5`, `Stream From: 0`), mirroring named-variant application. The spec should state
    it.
-2. **Generator-arm alternation `cond | value` is underdocumented.** The `FromArray` arms use
-   `Push -> arr notEmpty | (value: ..., rest: ...)`; the reading (condition-fallback producing
-   variant-or-nil) is inferred from the prototype's `n <= 0 ? {} : null` shape. Worth one paragraph
-   in §5.2.
+2. **The generator arm's shape — decided in this pass, to be pinned in §5.2.** The arm is
+   `guard | payload`: when the guard holds, the arm produces the variant named in the arm head, with
+   the fields the payload supplies; otherwise it declines and the next arm is tried (the prototype's
+   shape — a handler returns either a fields object or `null`, and the first non-null handler
+   decides). Three sub-decisions came out of the review. **(a) The payload is a target-typed
+   construction.** The arm head already names the variant, so the payload must not repeat it — the
+   move C#'s target-typed `new` makes (the target comes from context, so the name is omitted). The
+   payload spells only the fields, as a keyword message — `head: n rest: n - 1` — the Smalltalk
+   shape; the field names are _labels_ there, not bindings, so `n` is still the seed. Two earlier
+   drafts were rejected: a record literal (`(head: n, rest: (n - 1))`) gives the language a _second_
+   way to spell fields (record literals are for named-argument construction and specs, §3.3), and
+   repeating the variant name (`Cons head: n rest: n - 1`) is redundant against the arm head. The
+   payload is required exactly when the arm's variant has fields; the base arm carries none
+   (`Nil n -> n = 0`), because `Nil` has no fields and there is nothing to say. **(b) A recursive
+   field's value is the next seed, not a value.** `rest: n - 1` does not build a list; it says "the
+   rest is whatever unfolding the seed `n - 1` produces" — the prototype draws the same line (for a
+   recursive field, the returned value becomes the seed for the recursive unfolding). The spec must
+   pin this reading of the recursive slot and say how it is checked (the seed is a `Nat`, not a
+   `NatList`). **(c) The separator.** `|` follows the block-literal convention (`[params | expr]`,
+   §3.1) rather than inventing a token, and the arm body is its own restricted production — so `|`
+   there is the separator, not the binary operator `|` (§2.1 lists `|` among the symbolic operator
+   names; the spec must either reserve it for this role or pick another separator — `=>` is the
+   obvious alternative). A guard may not contain a top-level `|` under the restricted production. A
+   fourth question the review raised and left open: **the payload's keyword-message form collides
+   with the keyword-call production** — `head: n rest: n - 1` reads as a keyword _send_ (`head:`
+   with argument `n`), and §2.3's keyword messages are collected greedily, so the arm body needs its
+   own restricted production to keep `head:`/`rest:` as labels rather than a send. Spec impact:
+   `surface-syntax.md` §5.2 (the generator-arm production — guard, separator, target-typed payload —
+   and the seed reading of recursive fields), §2.1 (`|` reserved as a separator rather than an
+   operator name), §2.3 (the keyword-message form vs the payload's labels), and §4.1 (the `data`
+   declaration's unfold body).
 3. **`map`'s relation to law-carrying folds is unsettled.** §5.3 specifies `map` as a single-line
    block transform; but `users/why-lapis.md`'s Horner example models `scaleEach` as a _fold_ with
    per-variant arms carrying `properties: (distributive: sum)`. Which is canonical for "transform
@@ -958,6 +1072,18 @@ is a real finding for the spec:
    needs to state the uniqueness rule and pin the ambiguity diagnostic ("ambiguous: `42` matches
    both `Nat` and `Float` — qualify").
 
+   One gap the uniqueness rule does not cover: **bare construction of an inherited variant.** §2.4's
+   `Point3 Cartesian2 x: 1 y: 2` is not disambiguation — the variant name is unique (declared in
+   `Point2`, inherited into `Point3`'s member set); the qualifier selects the constructing type,
+   which decides membership (a Point3 AND a Point2, vs a plain Point2). What bare `Cartesian2 …`
+   means there is unpinned, and the candidates disagree: the declaring type (bare is a plain Point2,
+   line 1's qualifier optional) vs the most specific in-scope type whose member set includes the
+   variant (bare is a Point3 AND a Point2 — line 1's qualifier load-bearing, the only spelling of a
+   plain Point2). §2.5's chained example, §3.1's append arms, and §8's construction are now spelled
+   bare — safe there, since no extension is in scope and bare is unambiguous under every candidate.
+   Spec impact adds: the bare constructing-type default for inherited variants, and the qualifier's
+   reach (any type whose member set includes the variant).
+
 8. **Pattern captures are load-bearing but un-owned in the backlog.** §2.2 teaches
    pattern-with-fields (`Ratio <p: Int>/<q: Int>`, `Cartesian <re: Float>+<im: Float>i`) with fold
    arms binding captures by name. The decision chain is established — `design-decisions.md` blesses
@@ -969,7 +1095,12 @@ is a real finding for the spec:
    inside the brackets; §1.3 needs the disambiguation rule; (b) **captures inside delimited/counted
    regions** — a `String`-typed capture's greedy/bounded reading and §9.7's
    `<name: T>`-inside-counted-range hole need closure; (c) **`|` inside patterns** — still excluded
-   without saying whether `|`-as-literal is legal or needs escape; a silent constraint on users.
+   without saying whether `|`-as-literal is legal or needs escape; a silent constraint on users; (d)
+   **capture slice gating** — §2.2's usage examples now teach that the capture's type gates its
+   slice (`3.0+5.0i` is a Complex; `3+5i` is not — `3` is no `Float` under the built-in patterns);
+   the spec must pin whether gating is part of the match (lexical: the slice must match the capture
+   type's pattern for the constructor to match at all) or a construction-time sort check, and what
+   the failure diagnostic names.
 
 9. **Pattern-constructor naming: anonymous by default, named when load-bearing — rule unpinned,
    half-taught by this document.** §2.1's `#[0-9A-F]{6}` is anonymous (spelling = identity, the
@@ -1041,9 +1172,9 @@ is a real finding for the spec:
     wrinkle: the core's type-name resolution chain is bound-Δ → built-ins (`Any`/`Nothing`/`Token`)
     → registry → `TypeVar` fallback — and the `FamilyType` singleton is **not** in the built-in
     list, so in any program with a user type named `Family`, the spelling `rest: Family` resolves to
-    that user type, never to the open-recursion reference. The overview's §2.4 open/closed teaching
-    needs a footnote: either the surface layer gates `Family` as a reserved type-position keyword
-    (winning over registry names), or user types may shadow it (and open recursion is simply
+    that user type, never to the open-recursion reference. The overview's §2.4/§2.5 open/closed
+    teaching needs a footnote: either the surface layer gates `Family` as a reserved type-position
+    keyword (winning over registry names), or user types may shadow it (and open recursion is simply
     unavailable in such programs). This overview takes the latter (no reserved words beyond the
     keyword table) and flags the trade: a program with `data Family` spells open recursion some
     other way or forgoes it. Spec impact: `surface-syntax.md` §4.1 (naming rules) and the `Family`
@@ -1095,7 +1226,7 @@ is a real finding for the spec:
 17. **Variant-level subtyping — a child data type extending a parent's _variant_
     (`Cartesian3 <:
     Cartesian2` with extra fields) — is not a pinned form, and the reference DSL
-    closes it.** The §2.5 teaching example gestures at it (a `Point3`'s 3D variants extending their
+    closes it.** The §2.4 teaching example gestures at it (a `Point3`'s 3D variants extending their
     2D counterparts), but `surface-syntax.md` §4.1 pins only **type-level** extension
     (`data T <: Parent`) plus **same-name covariant narrowing** (the child re-declares the inherited
     variant with narrower fields — no new fields). Whether a variant itself may be declared as an
@@ -1119,7 +1250,7 @@ is a real finding for the spec:
     answer is the _close_ branch: variants relate only by same-name narrowing; `Cartesian3` relates
     to `Cartesian2` only by the type-level story (`Point3 <: Point2` carries all the subtyping).
     Lapis's surface can match: new fields live in _new_ variants; narrowing sharpens existing ones —
-    the §2.5 example reads correctly under that discipline without a new form. **Statability check
+    the §2.4 example reads correctly under that discipline without a new form. **Statability check
     (the core):** the pin branch may be unavailable without new theory — the type lattice
     (`types.ts`) has no variant-level type; variants are summand _tags_ of a `DataType`, and a
     variant name spelled in type position falls through `atomType`'s chain (bound-Δ → built-ins →
@@ -1153,7 +1284,7 @@ is a real finding for the spec:
     was a JS-DSL habit (`Number` is lapis-js's primitive guard), not a Lapis type. The consistency
     rule the overview now follows: **a type named `XList` carries `X`, and example types are drawn
     only from §2.3's declared set.** Applied: `NatList` carries `Nat` (head, `sum`'s `out`, `From`'s
-    seed), §2.5's narrowing example is now `NatList <: IntList` (every `Nat` is an `Int` — the
+    seed), §2.4's narrowing example is now `NatList <: IntList` (every `Nat` is an `Int` — the
     covariance demo uses declared types only), and §2.3's lead-in references `Nat`. Remaining
     `Number` sites are deliberately generic (Point coordinates, Stream observers, `scaleEach`,
     `Num`, `compare`, `size`) — the standard library will decide whether a general numeric carrier
@@ -1178,9 +1309,30 @@ is a real finding for the spec:
     one operation). **Spec impact:** `surface-syntax.md` §5.1 (fold declaration) currently pins only
     the plain form + contract clauses; the option vocabulary (`in:` parameterization,
     `old`/`prev`/`aux` in specs and bindings, `scan`, wildcard arms, aliasing) needs its own
-    subsections with surface spellings decided — the overview's table is the candidate shape. Spec
-    gap shared with #86 work item 3 (dispatch) and #25 (elaboration pipeline); lapis-js README "Fold
-    Operations" carries the semantics-of-record for each option until pinned.
+    subsections with surface spellings decided — the overview's table is the candidate shape. One
+    wrinkle this pass surfaced — and the review's ruling now resolves it: **`in:` carries only the
+    type.** §3.4's table pinned `in`'s value as `paramName Type` or `Type` (its own example
+    `<in: target Object, out: Boolean>`), but the two-part form is unspellable under the
+    spec-record's own grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable
+    as an expr: a unary send's message must be a camelCase ident, `Nat` is PascalCase) — and the
+    reference DSL never used it: every `in:` site in lapis-js is type-only (`in: Number`,
+    `in: family`, `in: { monoid: Object, f: Function }` — the structured form's names are the input
+    record's fields, not a binding name). The ruling: a fold takes at most one input, so the spec
+    has nothing for a name to disambiguate — the type suffices, and `in: Nat` parses under the
+    existing production exactly as `out: Number` does. The consequence the spec must pin: **where
+    the arms bind the input.** The overview's rule: the arm binds it like a field — folds bind it as
+    an extra trailing binding in the arm's binding list (`Cons head rest v -> ...`; bindings beyond
+    the variant's field count bind the input, optional per arm), and unfold arms — which §5.2 pins
+    without bindings — gain binding lists binding the seed first, then the observer's input
+    (`head n -> n`, `nth n i -> ...`); a structured input binds as one record value, its fields read
+    off it (`pair a`). Alternatives considered and set aside: the record's fields bound directly by
+    name (a second binding mechanism), and a fixed seed binding in arm scope (the `match` precedent
+    — costs a reserved-ish name). Spec impact: §3.4's `in` row (`Type` only; its own example
+    respelled `<in: Object, out: Boolean>`), §5.1's arm shape (the trailing input binding), §5.2's
+    arm shape (binding lists), and the record-input call site (`Stream Fibonacci: (a: 0, b: 1)` —
+    finding 1's use-site territory). Spec gap shared with #86 work item 3 (dispatch) and #25
+    (elaboration pipeline); lapis-js README "Fold Operations" carries the semantics-of-record for
+    each option until pinned.
 
 20. **Features taught by this document's new sections are spec-unpinned (surface-syntax.md) — each
     new section traces to reference-implementation semantics (lapis-js README).** The additions this
@@ -1189,20 +1341,22 @@ is a real finding for the spec:
     `types.ts` — the _surface_ spellings are unpinned), §2.7 (mutual recursion — spec's §4.1 pins
     single declarations only, and `Family`'s "before the name resolves" story needs a
     two-declaration resolution rule; multi-sort — cross-type field guards are ordinary field types,
-    construction-checked, unpinned), §3.2 deepening (multiple unfold constructors — unpinned, §4.2
-    shows one; parametric observers `<in: i, out: …>` — unpinned; laziness/ memoization — unpinned),
-    §3.4's `inverse:` map form (allegories; 1:1 enforced; feeds merge's inverse-pair elimination —
-    unpinned), §3.5 (`scan` — unpinned in surface syntax; README chapter is the semantics-of-record;
-    aliases (`and` for `meet`) — unpinned), §5.1's join invariant auto-generation + cycle dedup + LP
-    interpretation — unpinned, §5.3 modules (dependencies-as-values, `extends`, contracts, `system`
-    — the module grammar has no surface production at all; `language-design.md`'s staging should own
-    it), §6.1's short-circuit guards (identity/absorbing/idempotent installed post-verification —
-    `design-decisions.md` mentions exploitation; the guard mechanics are README-only), §6.4
-    variant-level invariants (spec §5.1 pins invariants only as fold contract clauses, not variant
-    declarations), §7.2's UAP statement and §7.4's naming conventions (README-enforced; spec
-    silent). None of these contradict the spec — they are simply absent. Owners: the spec (§5.1 fold
-    options per finding 19; new subsections for lattice bounds, modules, variant invariants, naming)
-    and the staging plan.
+    construction-checked, unpinned), §3.2 deepening (unfold-in-data lead example — the DSL's
+    `List.Range` respelled; the generator-arm shape — guard | payload, the target-typed
+    construction, and the seed reading of recursive fields — per finding 2; multiple unfold
+    constructors — unpinned, §4.2 shows one; parametric observers `<in: i, out: …>` — unpinned;
+    laziness/ memoization — unpinned), §3.4's `inverse:` map form (allegories; 1:1 enforced; feeds
+    merge's inverse-pair elimination — unpinned), §3.5 (`scan` — unpinned in surface syntax; README
+    chapter is the semantics-of-record; aliases (`and` for `meet`) — unpinned), §5.1's join
+    invariant auto-generation + cycle dedup + LP interpretation — unpinned, §5.3 modules
+    (dependencies-as-values, `extends`, contracts, `system` — the module grammar has no surface
+    production at all; `language-design.md`'s staging should own it), §6.1's short-circuit guards
+    (identity/absorbing/idempotent installed post-verification — `design-decisions.md` mentions
+    exploitation; the guard mechanics are README-only), §6.4 variant-level invariants (spec §5.1
+    pins invariants only as fold contract clauses, not variant declarations), §7.2's UAP statement
+    and §7.4's naming conventions (README-enforced; spec silent). None of these contradict the spec
+    — they are simply absent. Owners: the spec (§5.1 fold options per finding 19; new subsections
+    for lattice bounds, modules, variant invariants, naming) and the staging plan.
 
 21. **Comments & result annotations — pinned by
     [#83](https://github.com/lapis-lang/lapis-lang/issues/83)'s survey; the annotation position is a
@@ -1217,3 +1371,79 @@ is a real finding for the spec:
     "what does this produce" in real code is contracts (`ensures:`/`invariant:`/`demands:`). The
     annotation checker is therefore a future doc-example harness (evaluate the fragment, compare the
     record) — a `docs/`-CI job, never a surface-grammar feature.
+
+22. **`Char`'s pattern is `'.'` — the quoted spelling is the pattern, not value syntax around it.**
+    The §2.3 table (and spec §1.3's) listed Char's pattern as the undelimited `.` with example `'a'`
+    — but the example does not match the pattern (`.` matches one raw character; `'a'` is three),
+    the undelimited `.` would lex every bare letter as a Char before the identifier phase could see
+    it (patterns > identifiers — the same collision finding 11 rejects for user patterns; `.`'s
+    leftmost set is all of ASCII), and bare `.` fails §1.3's own anchoring rule as written (a
+    `.`-led pattern needs a literal delimiter before it). The spec's gloss ("the quoting belongs to
+    the value syntax, not the pattern language") is the strain: for every other built-in the example
+    IS a match of the pattern (`42` ~ `[0-9]+`, `"hello"` ~ `"<Char>*"`), String already carries its
+    delimiters as pattern literals, and this document's own §6.4 depends on the quoted spelling
+    being the rule — `CharRange start: 'z' end: 'a'` must lex `'z'` as one Char token, which the
+    undelimited `.` cannot do (it would match the lone `'`). The resolution this overview takes:
+    **Char's pattern is `'.'`** — literal `'`, any character, literal `'` — value spelling and
+    pattern match coincide, symmetric with String. The `'`/`"` heads stay reserved (§1.3): the
+    built-ins own them; user patterns whose leftmost set includes them are rejected. Two
+    consequences the spec must pin: (a) **token spelling vs character payload** — the counting
+    algebra already treats Char's language as the 128 raw characters (§1.3's universe note), so the
+    quoted built-ins have two levels: the payload (`.` — what `<Char>` contributes inside other
+    patterns and what the algebra counts) and the token spelling (`'.'` — the lexical rule);
+    String's `"<Char>*"` only spells string values under the payload reading, so the spec must state
+    the two levels or respell String at the character level (`"[^"]*"`-shaped, with the escape
+    wrinkle); (b) **the escape form** — the pinned quote-Char spelling `'\''` (§1.4) is four
+    characters and `'.'` matches three, and the flat fragment (no alternation, no groups) cannot
+    spell quote-or-escaped-quote, so §9.1's escape decision must pick: a fragment escape element, or
+    the direct spelling `'''` (the middle quote is the character) retiring `'\''`. Spec impact:
+    `surface-syntax.md` §1.3's Char row and the "examples-shaped" note.
+
+23. **`Symbol` was never decided — a spec-table invention whose claimed value needs no data type.**
+    The §2.3 table (and spec §1.3's, noted "Used in merge references"; `elaboration.md` §2.1
+    elaborates `#sum` to `match("#sum") : Symbol`) carried a built-in `Symbol` with pattern
+    `#[a-zA-Z][a-zA-Z0-9]*` — but no design decision blesses it (`design-decisions.md` is silent),
+    the core registers no such type (every `Symbol` in `src/` is a JS brand symbol — `TYPE_BRAND`
+    and friends, plumbing, not a language type), and the reference DSL's `Symbol` is the JS
+    primitive used as a field guard (`Item: { id: Symbol, ... }`), not a declared pattern type — so
+    it was not carried over from lapis-js either. The claimed value dissolves on inspection: every
+    `#`-spelled site in this document (`merge Total <#From, #sum>`, `aux: #depth`,
+    `inverse: #toCelsius`, `properties: (distributiveOver: #add)`) is a **keyword-part reference**
+    (§7.4) — resolved at declaration/elaboration time against declared names, never a data value
+    flowing through a fold — so the reference form needs no carrier type. The only data-field uses
+    were this document's own invented examples (§2.7's `Assign name: Symbol`, §5.3's
+    `Lists Symbol:`), which `String` serves. Keeping it would also cost: `#sum` would be spelled two
+    ways — a Symbol _value_ and an operation _reference_ — with no rule saying which applies;
+    equality is unspecified (structural folds vs interned singleton identity — the classic
+    Lisp-symbol question); and `#foo` for an undeclared name would be a valid Symbol but a broken
+    reference, with the gating site unclear. **The resolution this overview takes: `Symbol` is
+    retired** — dropped from §2.3's table; `#name` stays as the reference form (§7.4), and
+    name-carrying fields use `String` (§2.7, §5.3 updated). `#` itself stays a free pattern head
+    (`Color`'s `#[0-9A-F]{6}` proves it) — no reserved-head change. Spec impact: `surface-syntax.md`
+    §1.3's Symbol row and `elaboration.md` §2.1's `#sum` row. If interned names are ever needed
+    (cheap-equality keys, enum-like atoms), that is a new decision — and it must answer
+    interning/equality and the reference-vs-value spelling collision it would create.
+
+24. **Primordials under the ban on imports — "always in scope" is a module-design decision, not a
+    fact.** §2.6 taught `Any`/`Nothing` as "always in scope", and §2.3's built-ins table implies the
+    same availability — but scope is exactly what the module design (§5.3, Bracha's ban on imports)
+    restructures: modules are dependency→export functions, nothing resolves through a global
+    namespace, and the one place names live globally is the configuration side (the
+    IDE/runtime-provided namespace object). Newspeak takes the model to its end — even `Object` is
+    namespace-resolved (top-level classes inherit from no specific superclass; all names are late
+    bound) — so under the full model even Lapis's top type would be a namespace lookup, not an
+    ambient name. The primordials (`Nat`/`Int`/`Float`/`Char`/`String`/`Bool`, `Any`/`Nothing`,
+    `Token`) must therefore be placed by decision: (a) **language-ambient** — a small fixed set
+    every module sees, an explicit exception to the ban; defensible because they are
+    language-defined rather than user linkage, and the bounds are load-bearing (a namespace without
+    `Any`/`Nothing` breaks `Nothing <: X <: Any` for every type in it — the lattice needs them to
+    exist wherever their names resolve); (b) **namespace-carried** — every module is instantiated
+    against a namespace object carrying the primordials (the Newspeak shape; permits primordial-free
+    namespaces at the cost of the lattice story and per-module boilerplate); (c) **explicit
+    dependencies** — purest under the ban, maximal ceremony. The core already chose (a) for its own
+    resolution chain (bound-Δ → built-ins `Any`/`Nothing`/`Token` → registry → fallback) — but that
+    is the closed calculus; the surface scope is the open question. §2.6 now teaches the bounds as
+    lattice facts (semantic — they hold regardless of spelling scope) and flags the spellings'
+    availability as the spec's decision. Spec impact: `surface-syntax.md` §1.3 (built-ins' scope
+    status), the bounds' scope status, and the module section — §5.3's mechanism (finding 20's
+    unpinned grammar) is where the choice lands.

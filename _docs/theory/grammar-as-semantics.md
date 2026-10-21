@@ -34,16 +34,14 @@ layer's complete output, threads its own context as method arguments (inherited 
 returns a richer result (synthesized attributes):
 
 ```
-LapisGrammar              (characters → AST)           — src/grammar.ts
-  → LapisNameResolver     (AST → resolved AST)         — src/nameresolver.ts
-    → LapisTypeChecker    (resolved AST → typed AST)   — src/typechecker.ts
-      → LapisLawChecker    (typed AST → verified AST)  — src/lawchecker.ts (planned)
-        → LapisEvaluator   (verified AST → Values)      — src/evaluator.ts (planned)
+AbstractLC               (characters → AST)           — src/core/grammar.ts
+  → LCTypeCheck          (AST → typed AST)            — src/core/typing_grammar.ts
+    → LCEval             (typed AST → Values)         — src/core/eval_grammar.ts
 ```
 
-The base grammar (`LapisGrammar` in `src/grammar.ts`) is abstract: it declares all productions as
-`@rule` getters/methods but performs no semantic action. The concrete parser (`LapisParser`)
-subclasses it and implements factory methods to build class-based AST nodes (`src/ast.ts`).
+The base grammar (`AbstractLC` in `src/core/grammar.ts`) is abstract: it declares all productions as
+`@rule` getters/methods but performs no semantic action. The concrete passes (`LCTypeCheck`,
+`LCEval`) subclass it and override the factory methods that build the typed and evaluated nodes.
 
 Each subsequent pass subclasses the previous one. A pass overrides only the productions that bind or
 reference names, check types, verify laws, or evaluate. For all other productions, the base
@@ -84,17 +82,18 @@ threads through the grammar.
 
 ### 2.4 Current Implementation Status
 
-The current `nameresolver.ts` and `typechecker.ts` are **tree-walking** implementations, not grammar
-subclasses. This is a deliberate simplification for the first implementation (documented in
-`nameresolver.ts`):
+**The pattern is implemented.** The core grammar (`AbstractLC`, `src/core/grammar.ts`) is the
+abstract base; the semantic passes are its subclasses — `LCTypeCheck` (`src/core/typing_grammar.ts`)
+and `LCEval` (`src/core/eval_grammar.ts`) — each overriding the productions that carry a typing or
+evaluation rule and inheriting the rest unchanged via `super`.
 
-> The `super` pattern allows single-pass (parse + resolve simultaneously), but for the first
-> implementation we use a two-pass approach: parse to AST, then walk the AST and resolve names. This
-> is simpler to implement and test. The single-pass version can be achieved later by overriding
-> productions in a subclass.
+The **name-resolution** stage, however, is _not_ a separate grammar subclass: it runs as a
+registry-driven pre-pass, with the registered types consulted during type resolution (the bound-Δ →
+built-ins → registry → `TypeVar` chain). The two-pass structure within it — collect declarations,
+then resolve references — handles forward references and mutual recursion.
 
-The refactor to the grammar-subclass pattern is the next implementation step (see §6 below). The
-`stlc.ts` example in lang-forma demonstrates the target architecture for a simpler calculus.
+The surface declaration productions are still to be written (§9 below); the surface grammar's
+normative production set is [`surface-grammar.md`](./surface-grammar.md).
 
 ## 3. One-Pass Context Threading via `bind`
 
@@ -516,27 +515,31 @@ inherited-attribute threading and contracts for inference-rule encoding.
 
 ## 9. Refactoring the Current Implementation
 
-The current `nameresolver.ts` and `typechecker.ts` are tree-walking implementations. The refactor to
-the grammar-subclass pattern follows the `stlc.ts` example:
+The **type-check** and **evaluate** passes already follow the grammar-subclass pattern
+(`LCTypeCheck` and `LCEval` extend `AbstractLC`). Two pieces remain: a **name resolver** as its own
+subclass, and the **surface declaration productions** themselves — the surface grammar's normative
+production set is [`surface-grammar.md`](./surface-grammar.md).
+
+The name resolver follows the `stlc.ts` example in lang-forma:
 
 ### 9.1 Name Resolver
 
-1. Subclass `LapisGrammar` (or `LapisParser`) as `LapisNameResolver`.
+1. Subclass `AbstractLC` as a name-resolving grammar.
 2. Override productions that bind or reference names (`dataDecl`, `behaviorDecl`, `foldDecl`,
    `variantRef`, etc.).
 3. Thread `NameEnv` as the `ctx` parameter via `bind`.
 4. Override `extendCtx` to add declarations to `NameEnv`.
 5. For productions that don't touch names, inherit via `super` (no override).
 
-The two-pass structure within name resolution (collect declarations, then resolve references — see
-`nameresolver.ts` `resolveModule`) handles forward references and mutual recursion. In the
+The two-pass structure within name resolution (collect declarations, then resolve references — the
+registry's own collect-then-resolve order) handles forward references and mutual recursion. In the
 single-pass version, this becomes a `@requires` contract: a reference to a not-yet-collected name
 fails the premise and is rejected. Forward references are handled by collecting all declarations in
 a pre-pass (the `@invariant` or a class-level initialization) before parsing references.
 
 ### 9.2 Type Checker
 
-1. Subclass `LapisNameResolver` as `LapisTypeChecker`.
+1. Subclass the name-resolving grammar as the type checker.
 2. Override productions that have typing rules (`foldDecl`, `unfoldDecl`, `variantRef`, `blockLit`,
    `keywordSend`, etc.).
 3. Thread `TypeEnv` (Γ) as the `ctx` parameter via `bind`.

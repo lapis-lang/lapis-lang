@@ -139,6 +139,7 @@ This is the master document. The formal details live in companion documents:
 | `evaluation-model.md`                            | Eager data / lazy codata; Church–Rosser; graph reduction / super-combinators; GC                                                                               | Planned |
 | `contracts-and-laws.md`                          | Contract assessment flow; LSP subcontracting; law checking (static + runtime); effects position                                                                | Planned |
 | `surface-syntax.md`                              | Railroad diagrams; precedence ladder; indentation strategy; lexical structure; declaration forms                                                               | Draft   |
+| `surface-grammar.md`                             | The consolidated EBNF for the surface language — every production in one place (the normative production set behind `surface-syntax.md`'s narrative)           | Draft   |
 
 ## 4. Core Calculus Summary
 
