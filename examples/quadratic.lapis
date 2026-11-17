@@ -1,0 +1,76 @@
+/*
+ * The quadratic formula, for ax² + bx + c = 0:
+ *
+ *     x = (−b ± √(b² − 4ac)) / 2a
+ *
+ * The canonical illustration of why an arm body needs no local binding form.
+ * Both roots share two sub-computations — the discriminant `b² − 4ac` and the
+ * denominator `2a`. Neither is bound in an arm: the discriminant is a declared
+ * sibling fold, fused into `roots` by `<aux: #discriminant>`, and the denominator
+ * appears once per root and is not worth naming.
+ *
+ * A local would have been strictly weaker than the declared fold: `discriminant`
+ * carries a declared result type, a place in the operation environment (so it
+ * can hold `properties:` laws and a cost summary), and it is callable elsewhere.
+ * See `_docs/theory/surface-grammar.md` §8.1 and `_docs/design-decisions.md`
+ * §"Program shape and name introduction".
+ *
+ * Status: not yet runnable. The surface grammar has no `data`/`fold` productions
+ * yet (#97), and `Number`, `sqrt`, `-`, `*`, `/` have no declarations yet (#93).
+ * This file is the spelling the implementation is aimed at.
+ */
+
+/* Both roots together, so one traversal of the coefficients yields both. */
+data QuadraticRoots
+    Roots plus: Number minus: Number
+
+data Quadratic
+    Coeffs a: Number b: Number c: Number
+
+    /* b² − 4ac — the root discriminant. Also the sign test for real roots. */
+    fold discriminant <out: Number>
+        Coeffs a b c -> (b * b) - (4 * a * c)
+
+    /*
+     * Whether the equation has real roots. Uses `<aux: #discriminant>` so the
+     * discriminant rides the same traversal instead of being recomputed.
+     */
+    fold hasRealRoots <aux: #discriminant, out: Bool>
+        Coeffs a b c -> (aux discriminant) >= 0
+
+    /*
+     * The two real roots.
+     *
+     * `sqrt` is partial over the reals — undefined for a negative radicand — so
+     * the fold declares the domain as a demand rather than letting a negative
+     * discriminant reach `sqrt` silently. `rescue:` (not shown) is how a caller
+     * recovers; the contract is the checked answer to "what does this produce
+     * when it cannot produce a root?".
+     *
+     * Not modelled here: the degenerate a = 0 case, where the equation is linear
+     * and the division by `2a` is undefined. That is a demand on a field rather
+     * than on a fold result, and belongs with the prelude's numeric story (#93).
+     */
+    fold roots <aux: #discriminant, out: QuadraticRoots>
+        demands: [self | self hasRealRoots]
+        Coeffs a b c -> Roots
+            plus: ((- b + ((aux discriminant) sqrt)) / (2 * a))
+            minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))
+
+/*
+ * Note the spaces in `- b`. Contiguity is position-meaningful: `-b` at the start
+ * of a token is a pattern-matched `Int` constructor (the `-[0-9]+` member), while
+ * `- expr` in prefix position is the `negate` operation. `- b` is the latter.
+ */
+
+/*
+ * Usage — documentation fragments, not source. A program's top level is
+ * declarations only; there is no definition form (#91 / overview §12.6), so the
+ * values below are named at the call site rather than bound.
+ */
+
+Quadratic Coeffs a: 1 b: -3 c: 2
+        /* then: discriminant 1, hasRealRoots true, roots (plus: 2, minus: 1) */
+
+Quadratic Coeffs a: 1 b: 0 c: 1
+        /* then: discriminant -4, hasRealRoots false, roots <contract violation> */

@@ -798,21 +798,22 @@ data Stack
     unfold FromArray <in: arr Array>
         Empty -> arr isEmpty
         Push -> arr notEmpty | (value: arr first, rest: arr tail)
-
-stack = Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
-
-stack size                   /* 2 */
-stack peek                   /* 3 */
-stack pop                    /* [3, Push(value:2, rest:Empty)] */
 ```
 
-The three trailing annotations are §1.4's grade rule in action — each records its line expression's
-result: one push, two deep. (The `stack =` fragment line uses the top-level definition spelling the
-docs' examples share; §12.6 of [`overview.md`](../overview.md) records its unpinned status.) Result
-annotations are trailing comments; prose comments above a declaration describe what follows. `pop`'s
-`<para>` makes `old` available — the original sub-value _before_ folding. The complete reserved-word
-list is in the keyword table (§1.5): nothing here depends on a keyword this example does not
-declare.
+The three trailing annotations below are §1.4's grade rule in action — each records its expression's
+result: one push, two deep. They are **documentation fragments**, not source: a program's top level
+is declarations only, so the values they describe are named at the call site rather than bound by a
+definition form (§12.6, §12.21 of [`overview.md`](../overview.md)).
+
+```lapis
+Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
+        /* then: size 2, peek 3, pop [3, Push(value: 2, rest: Empty)] */
+```
+
+Result annotations are trailing comments; prose comments above a declaration describe what follows.
+`pop`'s `<para>` makes `old` available — the original sub-value _before_ folding. The complete
+reserved-word list is in the keyword table (§1.5): nothing here depends on a keyword this example
+does not declare.
 
 ## 9. Open Questions
 
@@ -838,8 +839,12 @@ declare.
    a different spec syntax would be cleaner.
 
 5. **Multi-line expressions.** The current grammar requires expressions to be on a single line (or
-   an indented continuation for case-arm bodies). No explicit line-continuation syntax. Long
-   expressions must be broken into `let` bindings or blocks. Is this sufficient, or do we need a
+   an indented continuation for case-arm bodies). No explicit line-continuation syntax. A long
+   expression is broken up by **declaring** its pieces as sibling operations — a fold can be
+   consumed by another fold, and `<aux: …>` fuses a companion computation into the same traversal
+   (see the `quadratic`/`discriminant` example in
+   [`surface-grammar.md`](./surface-grammar.md#81-why-a-case-arm-has-no-bound-intermediate)). There
+   is no arm-level binding form (`overview.md` §12.6). Is that sufficient, or do we need a
    continuation operator?
 
 6. **Nested blocks and indentation.** A block `[params | expr]` contains an expression, which could
