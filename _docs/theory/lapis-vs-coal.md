@@ -49,7 +49,7 @@ declarations the compiler can trust and use.
   testing at declaration time. A false claim throws `LawError` with a counterexample.
 - Declared `identity:E` installs a runtime guard that short-circuits the fold when the identity is
   encountered — no traversal.
-- Declared `distributive:sum` unlocks Horner fusion in a `merge` pipeline.
+- Declared `distributive: #sum` unlocks Horner fusion in a `merge` pipeline.
 - Declared `involutory` causes consecutive pairs to cancel in a merge pipeline.
 
 This is the contribution Lapis makes that Coal does not: **the enforced structure is not just a
@@ -161,9 +161,9 @@ audience.
 `trait`, `instance`. Curried functions. Reverse-application pipelining (`|.`). Familiar to FP
 programmers.
 
-**Lapis:** Self/Smalltalk-family syntax. Message sends, keyword arguments, blocks `[params | expr]`,
-indentation-significant, `->` case arms. `self` always in scope. Uniform access principle. Familiar
-to Smalltalk/Self programmers, less so to FP programmers.
+**Lapis:** Self/Smalltalk-family syntax. Message sends, keyword arguments, declared operations
+referenced by name for higher-order use, indentation-significant, `->` case arms. `self` always in
+scope. Uniform access principle. Familiar to Smalltalk/Self programmers, less so to FP programmers.
 
 **Honest assessment:** Per Atanassow's advice, syntax should not be the contribution. Both languages
 have made a syntax choice and should get it out of the way. Coal's choice is safer (ML syntax is

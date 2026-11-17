@@ -84,13 +84,31 @@ carried as the implicit `match` field, accessible in fold handlers.
 | `x` (camelCase ident) | `x`     | Variable reference; resolved by name resolution pass  |
 | `Color` (PascalCase)  | `Color` | Type or variant reference; resolved to a type binding |
 
-### 2.3 Blocks
+### 2.3 Function Values
 
-| Surface         | Core                  | Notes                                        |
-| --------------- | --------------------- | -------------------------------------------- |
-| `[expr]`        | `λ_:Unit. ℰ(expr)`    | Zero-parameter block = thunk                 |
-| `[x \| expr]`   | `λx:σ. ℰ(expr)`       | One-parameter block; σ inferred from context |
-| `[x y \| expr]` | `λx:σ. λy:τ. ℰ(expr)` | Multi-parameter block = curried lambdas      |
+There is no block literal. A function value is an operation reference, and its type is the
+operation's curried signature (`FunType` chain, `ops.ts`'s `OpSig.signature`). Since nothing in the
+surface binds a name at top level or in a body (`overview.md` §12.6), an unbound camelCase `ident`
+in `primary` position can only denote an operation, so no new resolution rule is needed.
+
+| Surface                 | Core                            | Notes                                                  |
+| ----------------------- | ------------------------------- | ------------------------------------------------------ |
+| `double`                | the operation's definition term | Function value; resolved through `Ω` when unbound in ρ |
+| `Int double`            | the same                        | Qualified: disambiguates a colliding name (§2.5)       |
+| `transform value: head` | `(g(seed)) head`                | Observe the `Block`, then apply — see §2.5             |
+
+`Block` is a prelude codata type, `Block<σ,τ> = ν α. Π value: (σ → τ)` (`overview.md` §12.27). Its
+constructors are `unfold`s; an operation reference is not a `Block` — it is the operation's
+definition, which has type `σ → τ` directly. Both are function values, and both apply through the
+keyword send (§2.5).
+
+**Contract clauses are not blocks.** `demands:`, `ensures:`, `invariant:`, and `rescue:` take an
+indented body (`surface-grammar.md` §5.1) whose expression the fold machinery forces at its own
+chosen moment. No thunk value is created, so no `Block` appears.
+
+**Partial application** (a section: `(NatList append 3)`) has no surface spelling yet — see
+`overview.md` §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
+Under-application at a normal expression site is an arity error, not a silently produced function.
 
 ### 2.4 Binary Operators
 
@@ -135,6 +153,24 @@ is _not_ a function call — it is a property access (the fold is applied with n
 a value). A keyword call `recv key: arg` is a method call (the fold takes an argument). The
 distinction is made by the fold's spec: if it has no `in` parameter, it's a getter; if it has `in`,
 it's a method.
+
+**The elimination form is fixed by the receiver's kind.** `fold_T` is data's elimination; the codata
+dual is **observation** (`E-Obs`). So a send to a `Block` observes its `value` and applies:
+
+| Surface                 | Core                   | Notes                                                |
+| ----------------------- | ---------------------- | ---------------------------------------------------- |
+| `b value`               | `b.value`              | Observe (a `Block` is total, so this never diverges) |
+| `b value: x`            | `b.value x`            | Observe, then apply — the surface's only application |
+| `transform value: head` | `transform.value head` | Applies a function-typed _parameter_; no production  |
+
+**This is the whole of surface application.** There is no `expr expr` production and no dedicated
+`value:` form: the keyword send already means "eliminate the receiver, then apply the arguments" —
+`fold` for data, observation for codata — so application is derived rather than added.
+
+**Parentheses re-open the chain.** A parenthesised expression is a `primary`, so
+`(b value: x)
+value: y` is two sends. `Block` is single-parameter, so a multi-argument block is
+curried and spelled by nesting — the same shape `Observer`'s single type slot supports.
 
 ### 2.6 Arrays and Records
 
@@ -217,9 +253,9 @@ A surface `behavior` declaration elaborates to:
 behavior Stream
     head: <out: Number>
     tail: <out: Self>
-    unfold From <in: n Number>
-        head -> n
-        tail -> n + 1
+    unfold From <in: Number>
+        head n -> n
+        tail n -> n + 1
 ```
 
 Elaborates to:
@@ -243,7 +279,7 @@ signatures that a type must satisfy. Conformance is checked structurally.
 
 ```lapis
 protocol Eq
-    equals: <in: other Self, out: Boolean>
+    equals: <in: Self, out: Boolean>
 ```
 
 Elaborates to a constraint `Eq` requiring a fold `equals : Self → Boolean` on the conforming type.
@@ -276,7 +312,7 @@ Elaborates to:
 1. A **data type** `Ancestor = μ α. (Direct(String, String) | Transitive(α, α))`.
 2. Two **fold operations** `origin` and `destination` (the span projections).
 3. An **auto-generated join invariant** on `Transitive`:
-   `invariant: [self | self hop destination = self rest origin]`.
+   `invariant: self | self hop destination = self rest origin`.
 4. **Auto-generated operations**: `closure()` (semi-naive fixpoint), `reachableFrom()`,
    `reachingTo()` — these are library operations provided for all relations, parameterized by the
    span projections.
@@ -357,8 +393,8 @@ A `satisfies: ProtocolName` clause on a data/behavior declaration adds a conform
 data Num
     N value: Number
     satisfies: Ordered
-    fold compare <in: other Self, out: Number>
-        N value -> value - other value
+    fold compare <in: Self, out: Number>
+        N value other -> value - other value
 ```
 
 Elaborates to:
@@ -478,7 +514,8 @@ single traversal.
 **Data map (eager, O(n)):**
 
 ```lapis
-map double <typeParam: Number> [v | v * 2]
+map double <typeParam: Number>
+    Box contents -> Family Box contents: (contents * 2)
 ```
 
 Elaborates to a fold whose result type is the data type itself (`σ = T`):
@@ -495,7 +532,7 @@ For recursive fields, the fold recurses automatically (the field is already fold
 **Codata map (lazy, O(1)):**
 
 ```lapis
-map map <in: transform Block, typeParam: Object>
+map map <in: (Object -> Object), typeParam: Object>
     head -> transform value: head
 ```
 
@@ -590,7 +627,7 @@ array has n+1 elements (the last is the fold of the base case).
 
 ```lapis
 fold pop <out: Array>
-    demands: [self | self size > 0]
+    demands: self | self size > 0
     Empty -> Error signal: 'Cannot pop empty stack'
     Push value rest -> value , old rest
 ```
@@ -607,9 +644,9 @@ pop = fold_Stack e {
 }
 ```
 
-Where `demands_check(self)` is the elaborated block `[self | self size > 0]` applied to the current
-instance. The `if` is a fold over `Bool` (see [`elaboration.md`](./elaboration.md) §7). `raise`
-elaborates to a `Result` typed term: `VError(DemandsError)`.
+Where `demands_check(self)` is the elaborated clause body `self size > 0` applied to the current
+instance with `self` bound. The `if` is a fold over `Bool` (see [`elaboration.md`](./elaboration.md)
+§7). `raise` elaborates to a `Result` typed term: `VError(DemandsError)`.
 
 **DemandsError is never caught by rescue** — it propagates directly to the caller. This is enforced
 by the elaboration: the `rescue` handler wraps the body, but the demands check is _outside_ the
@@ -620,8 +657,8 @@ rescue wrapper.
 **Surface:**
 
 ```lapis
-fold append <in: val Object, out: Family>
-    ensures: [self old result | result size = old size + 1]
+fold append <in: Object, out: Family>
+    ensures: self old result | result size = old size + 1
     ...
 ```
 
@@ -639,8 +676,8 @@ append = fold_Stack e {
 }
 ```
 
-`snapshot(self)` captures the pre-call state. `ensures_check` is the elaborated block applied to
-`(self, old, result, val)`. EnsuresError _is_ caught by rescue.
+`snapshot(self)` captures the pre-call state. `ensures_check` is the elaborated clause body applied
+to `(old, result)` with `self` bound. EnsuresError _is_ caught by rescue.
 
 ### 5.3 Rescue (Structured Recovery)
 
@@ -648,7 +685,7 @@ append = fold_Stack e {
 
 ```lapis
 fold pop <out: Array>
-    rescue: [self err args retry | retry value: 0]
+    rescue: self err args retry | retry value: 0
     ...
 ```
 
@@ -679,7 +716,7 @@ or `Error(err)` on failure. The core remains effect-free.
 data Stack
     Empty
     Push
-        invariant: [self | self size >= 0]
+        invariant: self | self size >= 0
         value: Object
         rest: Family
 ```
@@ -871,16 +908,17 @@ data NumList <: List
 | `<para>`             | fold with pair result type `(Result, Raw)`                        | §4.1           |
 | `<histo>`            | fold with stream result type `Stream<Result>`                     | §4.2           |
 | `<aux: name>`        | fold with pair result type `(Primary, Aux)`                       | §4.3           |
-| `demands: [block]`   | Guard before body; DemandsError bypasses rescue                   | §5.1           |
-| `ensures: [block]`   | Guard after body; EnsuresError caught by rescue                   | §5.2           |
-| `rescue: [block]`    | try/catch elaborated to Result; retry counter                     | §5.3           |
-| `invariant: [block]` | Check at construction + around operations                         | §5.4           |
+| `demands: <body>`    | Guard before body; DemandsError bypasses rescue                   | §5.1           |
+| `ensures: <body>`    | Guard after body; EnsuresError caught by rescue                   | §5.2           |
+| `rescue: <body>`     | try/catch elaborated to Result; retry counter                     | §5.3           |
+| `invariant: <body>`  | Check at construction + around operations                         | §5.4           |
 | `properties: (...)`  | Law constraints; verified + exploited                             | §6.1           |
 | `extend` (`<:`)      | μ-width subtyping + fold inheritance                              | §7.1           |
 | Field narrowing      | μ-depth subtyping                                                 | §7.2           |
 | `ifTrue:ifFalse:`    | `fold [Bool] b {True → t, False → f}`                             | elaboration §7 |
 | Binary operators     | Message sends → folds on the operand type                         | §2.4           |
-| `[params \| expr]`   | Curried lambdas                                                   | §2.3           |
+| `double` (op ref)    | The operation's definition term (a `FunType`)                     | §2.3           |
+| `b value: x`         | `b.value x` — observe the `Block`, then apply                     | §2.5           |
 | `{a, b, c}`          | Nested cons on built-in List                                      | §2.6           |
 
 ## 9. Open Questions
@@ -930,15 +968,33 @@ There is **no primitive `if`** in LC. `Boolean` is a data type:
 Bool = μ α. (True | False)
 ```
 
-`ifTrue:ifFalse:` is a fold over `Bool`:
+`ifTrue:ifFalse:` is a fold over `Bool`, whose branch arguments are function values (a `Block`, or
+an operation reference — §2.3):
 
 ```
-ifTrue:ifFalse: b = fold [Bool] b { True → t, False → f }
+ifTrue:ifFalse: b = fold [Bool] b { True → t value, False → f value }
 ```
 
-The surface syntax `n = 0 ifTrue: [{}] ifFalse: [...]` is a keyword application on the result of
-`n = 0` (a `Bool`), which desugars to this fold. The "no conditional" claim is literally true:
-branching is fold-based dispatch.
+The arm bodies **observe and apply** the chosen branch — they return `t value`, not `t`. Returning
+the branch itself would type the fold's result as a function, defeating the point.
+
+The surface syntax `(n = 0) ifTrue: then ifFalse: else` is a keyword send to the `Bool` receiver,
+which desugars to this fold. The "no conditional" claim is literally true: branching is fold-based
+dispatch.
+
+Two consequences the spec must carry:
+
+- **A branch is forced, not evaluated eagerly.** The fold's arms apply the branch, so only the
+  chosen branch runs — the untaken branch is never observed. This is why a `Block` argument (rather
+  than a value) is the useful spelling: totality means an untaken branch cannot _diverge_, but
+  evaluating it would still cost, and cost is a declared, observable property of this language
+  (`cost.ts`). Laziness here is an economic choice, not a divergence workaround.
+- **Two arguments exceed the fold's one-input rule.** A fold takes at most one `in:` value
+  (`surface-grammar.md` §3.7), so `ifTrue:ifFalse:` cannot carry both branches as `in:` parameters.
+  It is spelled as a _pair_ of branches — a product the core has no first-class record type for (§9
+  open question 5) — or as a two-part selector on a `Bool`-declared operation whose arms close over
+  one branch. This is unfinished: see `overview.md` §12.28 and
+  [#111](https://github.com/lapis-lang/lapis-lang/issues/111).
 
 ## 8. Contracts and Blame
 

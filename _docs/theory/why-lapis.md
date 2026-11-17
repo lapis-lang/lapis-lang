@@ -83,9 +83,10 @@ every claim:
   triggers automatic sample-based testing at declaration time. A false claim throws `LawError` with
   a counterexample before the declaration enters the module graph.
 - **Law exploitation works.** Declared `identity:E` installs a runtime guard that short-circuits the
-  fold when the identity element is encountered — no traversal. Declared `distributive:sum` unlocks
-  Horner fusion in a `merge` pipeline. Declared `involutory` causes consecutive pairs to cancel in a
-  merge. These are not manual optimizations — the compiler applies them from the declarations.
+  fold when the identity element is encountered — no traversal. Declared `distributive: #sum`
+  unlocks Horner fusion in a `merge` pipeline. Declared `involutory` causes consecutive pairs to
+  cancel in a merge. These are not manual optimizations — the compiler applies them from the
+  declarations.
 - **Subtyping works.** Comb inheritance (NewtonScript-style dual delegation) gives
   `ExtendedColor <: Color` with inherited and overridable fold handlers. Field narrowing gives
   `NumList <: List` without generics.
@@ -190,7 +191,7 @@ The two halves are inseparable:
   but the compiler can't trust them universally because nothing prevents you from writing
   unstructured recursion that violates them. The laws are optional and therefore unreliable.
 - **Enforcement + exploitation together** is Lapis. The compiler _can_ trust every law declaration
-  because the structure _guarantees_ the law is applicable. `distributive:sum` is safe to exploit
+  because the structure _guarantees_ the law is applicable. `distributive: #sum` is safe to exploit
   because every operation on this type is a fold, and every fold respects the algebra. The cage and
   the key are one thing.
 
@@ -272,7 +273,7 @@ In a conventional language, _algebraic correctness is global_. If you want to kn
 of `sum`, the definition of `map`, the definition of `double`, and their interaction. The proof is
 $O(\text{program size})$ in complexity, and it is _global_ — it spans multiple definitions.
 
-In Lapis, the law `distributive:sum` on `double` _localizes_ this fact. The compiler knows, from a
+In Lapis, the law `distributive: #sum` on `double` _localizes_ this fact. The compiler knows, from a
 single declaration on a single operation, that `double` distributes over `sum`. The fusion is
 automatic. The correctness is $O(1)$ in complexity — one declaration — and it is _local_ — it lives
 on the operation it describes.

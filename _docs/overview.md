@@ -545,15 +545,20 @@ factorial, with no list ever allocated.
 Map transforms each field position; all other structure is preserved by construction:
 
 ```lapis
-map scaleEach <in: Number, out: Family> [v rest x | Family Cons head: v * x rest: (rest x)]
+map scaleEach <in: Number, out: Family>
+    Nil x -> Family Nil
+    Cons head rest x -> Family Cons head: head * x rest: (rest scaleEach: x)
 ```
 
 A map can also be declared as the **inverse** of another — one side states the relationship, the
 other is derived, and the compiler enforces the pair is one-to-one:
 
 ```lapis
-map toCelsius    <out: Family> [v rest | Family Cons head: (v - 32) * 5 / 9 rest: rest]
-map toFahrenheit <out: Family, inverse: #toCelsius> [v rest | Family Cons head: v * 9 / 5 + 32 rest: rest]
+map toCelsius <out: Family>
+    Cons head rest -> Family Cons head: (head - 32) * 5 / 9 rest: rest
+
+map toFahrenheit <out: Family, inverse: #toCelsius>
+    Cons head rest -> Family Cons head: head * 9 / 5 + 32 rest: rest
 
 readings toFahrenheit toCelsius      /* back where you started — round-trip is identity */
 ```
@@ -581,7 +586,7 @@ already there; scan just keeps the intermediate results instead of discarding th
 domain says so:
 
 ```lapis
-fold meet <in: other Self, out: Self>
+fold meet <in: Self, out: Self>
     ... aliases (and)
 ```
 
@@ -760,7 +765,7 @@ data Num
     fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
         N value other -> Num N: value + other value
 
-    fold multiply <in: Self, out: Self, properties: (distributiveOver: #add)>
+    fold multiply <in: Self, out: Self, properties: (distributive: #add)>
         N value other -> Num N: value * other value
 ```
 
@@ -777,8 +782,8 @@ postconditions with `old` snapshots, structured recovery:
 
 ```lapis
 fold pop <out: Array>
-    demands: [self | self size > 0]
-    ensures: [self old result | result size = old size - 1]
+    demands: self | self size > 0
+    ensures: self old result | result size = old size - 1
     Empty -> Error signal: "Cannot pop empty stack"
     Push value rest -> value , old rest
 ```
@@ -916,9 +921,6 @@ data Stack
     unfold FromArray <in: Array>
         Empty arr -> arr isEmpty
         Push arr -> arr notEmpty | value: arr first rest: arr tail
-
-Push value: 3 rest: (Push value: 2 rest: Empty)
-        /* then: size 2, peek 3, pop [3, Push(value: 2, rest: Empty)] */
 ```
 
 Note `pop`'s `<para>`: it makes `old` available — the original sub-value _before_ folding, for
@@ -1018,22 +1020,22 @@ is a real finding for the spec:
    rest is whatever unfolding the seed `n - 1` produces" — the prototype draws the same line (for a
    recursive field, the returned value becomes the seed for the recursive unfolding). The spec must
    pin this reading of the recursive slot and say how it is checked (the seed is a `Nat`, not a
-   `NatList`). **(c) The separator.** `|` follows the block-literal convention (`[params | expr]`,
-   §3.1) rather than inventing a token, and the arm body is its own restricted production — so `|`
-   there is the separator, not the binary operator `|` (§2.1 lists `|` among the symbolic operator
-   names; the spec must either reserve it for this role or pick another separator — `=>` is the
-   obvious alternative). A guard may not contain a top-level `|` under the restricted production. A
-   fourth question the review raised and left open: **the payload's keyword-message form collides
-   with the keyword-call production** — `head: n rest: n - 1` reads as a keyword _send_ (`head:`
-   with argument `n`), and §2.3's keyword messages are collected greedily, so the arm body needs its
-   own restricted production to keep `head:`/`rest:` as labels rather than a send. Spec impact:
-   `surface-syntax.md` §5.2 (the generator-arm production — guard, separator, target-typed payload —
-   and the seed reading of recursive fields), §2.1 (`|` reserved as a separator rather than an
-   operator name), §2.3 (the keyword-message form vs the payload's labels), and §4.1 (the `data`
-   declaration's unfold body).
+   `NatList`). **(c) The separator.** `|` follows the binding-head convention (a block literal's
+   `params | expr` head, since retired, §12.27) rather than inventing a token, and the arm body is
+   its own restricted production — so `|` there is the separator, not the binary operator `|` (§2.1
+   lists `|` among the symbolic operator names; the spec must either reserve it for this role or
+   pick another separator — `=>` is the obvious alternative). A guard may not contain a top-level
+   `|` under the restricted production. A fourth question the review raised and left open: **the
+   payload's keyword-message form collides with the keyword-call production** —
+   `head: n rest: n - 1` reads as a keyword _send_ (`head:` with argument `n`), and §2.3's keyword
+   messages are collected greedily, so the arm body needs its own restricted production to keep
+   `head:`/`rest:` as labels rather than a send. Spec impact: `surface-syntax.md` §5.2 (the
+   generator-arm production — guard, separator, target-typed payload — and the seed reading of
+   recursive fields), §2.1 (`|` reserved as a separator rather than an operator name), §2.3 (the
+   keyword-message form vs the payload's labels), and §4.1 (the `data` declaration's unfold body).
 3. **`map`'s relation to law-carrying folds is unsettled.** §5.3 specifies `map` as a single-line
    block transform; but `users/why-lapis.md`'s Horner example models `scaleEach` as a _fold_ with
-   per-variant arms carrying `properties: (distributive: sum)`. Which is canonical for "transform
+   per-variant arms carrying `properties: (distributive: #sum)`. Which is canonical for "transform
    each element" — and can a `map` carry laws? The overview uses the §5.3 form; the spec should
    reconcile.
 4. **User-defined pattern types lack a declaration form.** §1.3 says user types declare their own
@@ -1423,7 +1425,7 @@ is a real finding for the spec:
     primitive used as a field guard (`Item: { id: Symbol, ... }`), not a declared pattern type — so
     it was not carried over from lapis-js either. The claimed value dissolves on inspection: every
     `#`-spelled site in this document (`merge Total <#From, #sum>`, `aux: #depth`,
-    `inverse: #toCelsius`, `properties: (distributiveOver: #add)`) is a **keyword-part reference**
+    `inverse: #toCelsius`, `properties: (distributive: #add)`) is a **keyword-part reference**
     (§7.4) — resolved at declaration/elaboration time against declared names, never a data value
     flowing through a fold — so the reference form needs no carrier type. The only data-field uses
     were this document's own invented examples (§2.7's `Assign name: Symbol`, §5.3's
@@ -1463,23 +1465,28 @@ is a real finding for the spec:
     status), the bounds' scope status, and the module section — §5.3's mechanism (finding 20's
     unpinned grammar) is where the choice lands.
 
-25. **Surface application is missing — nothing can apply a function value.** The core has `appProd`
-    (`atomProd`-level juxtaposition, `grammar.ts`) and `E-App`, and `surface-grammar.md` §9 lists it
-    as implemented — but the surface expression grammar (§3.2) goes
-    `expr → keywordExpr → binaryExpr → unaryExpr → primary` with no `expr expr` production. The
-    corpus nonetheless spells application two ways: `(tail x)` (§3.2's `scaleEach`,
-    `users/
-    why-lapis.md`) and `(rest append: v)` (§3.1's `append`). Both parse differently than
-    intended under the published grammar — `tail x` is a _unary send_ whose selector is `x` (an
-    operation name, not an argument), and `rest append: v` is a keyword call whose selector is
-    `append`. Neither can name a function value. The same gap blocks the documented conditional:
-    both `language-design.md` §2.6 and `elaboration.md` §7 write
-    `n = 0 ifTrue: [{}] ifFalse: [...]`, which needs the `Bool` receiver to _apply_ the chosen
-    block. Consequences: parameterized-fold continuations (`rest append: v`) and every block-valued
-    idiom are unstatable; `map`'s transform (`[v rest x | …]`) works only because `map` applies it
-    internally, inside the operation's own definition (`OpSig.definition` is core source text,
-    `ops.ts`) rather than through surface syntax. Spec impact: `surface-grammar.md` §3.2 (the
-    missing production), `surface-syntax.md` §2.1.
+25. **Surface application is missing — nothing can apply a function value. CLOSED: there is no
+    application production, and none is needed.** The core has `appProd` (juxtaposition,
+    `grammar.ts`) and `E-App`, but the surface expression grammar (§3.2) has no `expr expr`
+    production — and it never will. **Application is derived from the message chain**: a keyword
+    send already means "eliminate the receiver, then apply the arguments," and the elimination form
+    is fixed by the receiver's kind — `fold` for data, **observation for codata**. Since a function
+    value is a `Block` (a codata type, §12.27), `transform value: head` is an ordinary keyword send
+    that observes the block's `value` and applies it (`elaboration.md` §2.5). Nothing is added.
+
+    The two corpus spellings resolve differently: `(rest append: v)` was always correct — it is a
+    keyword self-send on a continuation, the same shape as `xs append: 3` — and `(tail x)` is
+    respelled `(tail scaleEach: x)` for the same reason. Only `(tail x)` was wrong.
+
+    The documented conditional needed no apply form either: `ifTrue:ifFalse:` is a fold over `Bool`
+    whose arm bodies force the chosen branch (`elaboration.md` §7). Its remaining problem is arity,
+    not application — a fold takes one `in:` value, and it has two branches (§12.28).
+
+    Consequence: **the surface has no anonymous binder and no higher-order literal.** A function
+    value is an operation reference, which carries a declared type, laws, and a cost summary — the
+    same argument that made arm intermediates declared sibling operations (§12.6). Spec impact:
+    `surface-grammar.md` §3.2/§3.3/§3.6, `surface-syntax.md` §2.1/§3.1, `elaboration.md` §2.3/§2.5,
+    `design-decisions.md` §"Function values".
 
 26. **`aux`'s read spelling disagrees with itself: `aux d` vs. `aux #d`.** The declaration site
     quotes the companion operation (`aux: #depth`, `overview.md` §3.1; `surface-grammar.md` §3.5's
@@ -1491,3 +1498,67 @@ is a real finding for the spec:
     consistency (`aux #depth` — but then `aux` takes a reference where every other `reference`
     production takes an `ident`). Decide in one place and respell both sides. Spec impact:
     `surface-grammar.md` §3.5 (the `AuxRef` production) and the `aux` rows in `overview.md` §3.1.
+
+27. **A function value is a `Block`; there is no block literal and no apply production.** Three
+    linked decisions, settled together because each was the other's premise.
+
+    **(a) `Block` is codata.** `Block<σ,τ> = ν α. Π value: (σ → τ)` — an ordinary `behavior`
+    declared in the prelude, so a block is observed like any other codata value. This makes the
+    `Block` name used in `elaboration.md` §4.4 (`transform Block`) a declared type rather than an
+    undeclared one — the same leak class as `Number` (§12.18).
+
+    **(b) The block literal is retired.** `[params | expr]` was the surface's last anonymous binder.
+    Removing it completes the "names are declared, never bound" rule (§12.6) instead of departing
+    from it: an operation reference carries a declared type, a `properties:` law set, membership in
+    `Ω`, and a cost summary, and a lambda carries none. The literal's four jobs are taken over by
+    forms that already existed: contract clauses take an indented body, `map`'s transform takes the
+    fold arm form, a function-typed parameter is an operation reference, and the conditional's
+    branches are function values forced by the fold's arm bodies.
+
+    **(c) Application is derived, not added.** A keyword send means "eliminate the receiver, then
+    apply the arguments" (`elaboration.md` §2.5). Data eliminates by `fold`; codata eliminates by
+    **observation**. So `b value: x` ⟶ `(b.value) x`, and `transform value: head` — already written
+    in `elaboration.md` and `syntax-design.md` — elaborates correctly with no new production. The
+    surface has no `expr expr` production and no dedicated `value:` form. Parentheses re-open the
+    chain, so multi-argument blocks are curried (`(b value: x) value: y`), matching the core's
+    single-slot `Observer` and adding no product type. Under-application is an arity error, not a
+    silently produced function — uniform access is unchanged.
+
+    **Still open (a separate item):** partial application — supplying some of an operation's
+    arguments and holding the rest (`(NatList append 3)`) — has no production
+    ([#109](https://github.com/lapis-lang/lapis-lang/issues/109)). The candidate is the _section_
+    form, juxtaposition confined to parentheses, for the same reason uniform precedence confines
+    grouping to parentheses. Until then an operation is referenced whole or not at all. Note the
+    core already does most of the work: `evalOp` applies a definition "to the argument values
+    leftmost", and `OpSig.signature` is already a curried `FunType` chain; only the exact arity
+    check stands in the way.
+
+    The retired-literal work and `Block`'s placement in the prelude are tracked in
+    [#110](https://github.com/lapis-lang/lapis-lang/issues/110).
+
+    **Ratified: application is call-by-value.** Totality removes call-by-name's classical motive —
+    no well-typed argument can diverge — and both surviving pressures point to CBV: the cost algebra
+    is intensional over evaluated arguments (`cost.ts`'s
+    `cost(app t u) = cost(t) + cost(u) +
+    body(u)`), and contract firing order must be statable
+    (`demands:` on an unused argument fires at the call site). Eager data / lazy codata is a
+    field-and-generator strategy fixed by declaration kind; it is not a change to the application
+    rule. Spec impact: `surface-grammar.md` §3.2/§3.3/§3.6/§5.1/§5.3/§9/§10, `surface-syntax.md`
+    §2.1/§3.1/§4.1/§4.2/ §5.3, `elaboration.md` §2.3/§2.5/§7/§8, `design-decisions.md` §"Function
+    values".
+
+28. **The conditional's branch arity — a fold takes one input, `ifTrue:ifFalse:` has two.** §12.25
+    closes the _application_ half of the conditional: the fold's arm bodies observe and apply the
+    chosen branch (`t value`, not `t`), so only the chosen branch runs. The remaining defect is
+    structural. A fold takes at most one `in:` value (`surface-grammar.md` §3.7), so two branches
+    cannot both ride the traversal; and there is no first-class product/record type in the core to
+    pack them (`elaboration.md` §9 open question 5). Candidates: (a) a record type in the core, so
+    the branches arrive as one `in:` value; (b) a two-part selector on an operation declared by the
+    `Bool`'s type, whose arms close over one branch each — which makes the conditional a _method_
+    rather than a fold with two arguments; (c) nest two single-branch folds, which is total and free
+    but reads badly. Decide the arity **before** `Bool` and its operations enter the prelude (#93) —
+    the conditional is the prelude's most visible operation, and `overview.md` §3.1's rule that a
+    fold carries at most one input is the constraint it has to satisfy
+    ([#111](https://github.com/lapis-lang/lapis-lang/issues/111)). Spec impact: `elaboration.md` §7
+    (the `ifTrue:ifFalse:` definition), `language-design.md` §2.6, `syntax-design.md` §"Behavior",
+    and #93's operator table.

@@ -87,6 +87,11 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   terminating reductions).
 - Strictness of data fields is part of the type. Lazy field = explicit `Lazy τ` (trivial codata
   wrapper) or behavior-typed field.
+- **Application is call-by-value.** The eager/lazy split above is a _field and generator_ strategy;
+  it does not change the application rule. Totality removes call-by-name's classical motive (a
+  well-typed argument cannot diverge), and the two surviving pressures both favour CBV: the cost
+  algebra is stated over evaluated arguments (`cost.ts`), and contract firing order must be statable
+  — `demands:` on an unused argument fires at the call site. See §"Function values".
 - Codata contracts (demands/rescue) are observation-gated — fire at observation time, not
   construction. State as feature.
 
@@ -336,6 +341,55 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   metaprogramming question, not a surface-syntax one. Any such proposal must first answer name
   interning and equality, and the `#name` reference-vs-value spelling collision — exactly the clause
   `overview.md` §12.23 leaves open for `Symbol`.
+
+## Function values: blocks are codata, not a literal
+
+- **There is no block literal.** `[params | expr]` is removed from the grammar. It was the surface
+  language's last anonymous binder: no top-level definition form, no `let … in`, and no arm-level
+  binding remain (see the section above), so retiring it completes that rule rather than departing
+  from it.
+- **Why remove it at all.** The literal bought nothing the declared form does not: an operation
+  reference carries a declared type, a `properties:` law set, membership in `Ω`, and a memoized cost
+  summary (`lc.md` §2.2, `E-Op`); an anonymous lambda carries none of them. A block literal was also
+  a thunk-by-hand in the one place (contracts) where the elaborator was already going to delay the
+  body.
+- **A function value is a `Block`, an ordinary codata type.** `Block<σ,τ> = ν α. Π value: (σ → τ)`
+  lives in the prelude (`overview.md` §12.27), declared like any other `behavior`. Block values are
+  produced by `unfold`; an operation reference is the other function value and has type `σ → τ`
+  directly.
+- **Applying a function value needs no production.** A keyword send already means "eliminate the
+  receiver, then apply the arguments" (`elaboration.md` §2.5): `fold` eliminates data, **observation
+  eliminates codata** (`E-Obs`). So `b value: x` elaborates to `(b.value) x` — observe, then apply.
+  There is no `expr expr` production and no dedicated `value:` suffix; application falls out of the
+  send rule that already exists. This is why blocks-as-codata is not cosmetic: it makes application
+  _derived_ instead of _added_.
+- **Parentheses re-open the message chain.** `(b value: x) value: y` is two sends, not one two-part
+  selector — the same mechanism that keeps uniform binary precedence unambiguous. `Block` is
+  single-parameter; multi-parameter blocks are curried and spelled by nesting, matching the core's
+  `Observer` (one type slot). No tuple/product type is introduced.
+- **Under-application is an error.** `xs append` where `append` has an `<in: …>` parameter is an
+  arity error, never a silently produced function value. The uniform-access getter/method split is
+  unchanged. Partial application (a section) is a separate open item — `overview.md` §12.27,
+  [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
+- **Operation references are the function-value spelling.** An unbound camelCase `ident` in
+  `primary` position resolves through `ρ` (an arm binding), then through `Ω`. Since nothing binds a
+  name otherwise, an operation is the only thing such a name can denote — no new resolution rule.
+  Qualification follows constructor qualification exactly: `Int double`, bare when unique in scope.
+  One rule for variants, patterns, and operations.
+- **Contract clauses take an indented body, not a block.** `demands:`, `ensures:`, `invariant:`,
+  `rescue:` each take an expression at the arm-body column. The clause's body is always forced by
+  the fold machinery at its own chosen moment and never held as a value, so a literal added a thunk
+  for no reason and a second spelling for "a body at a given column."
+- **`map` is declared with a fold body.** Its transform is the operation's own arm form, not a
+  literal — which is what it elaborates to (`overview.md` finding 3 records the same collision).
+- **Ratified: application is call-by-value.** Totality removes the classical motive for call-by-name
+  (no well-typed argument can diverge), and the two surviving pressures both point to CBV: the cost
+  algebra is intensional over evaluated arguments (`cost.ts` —
+  `cost(app t u) = cost(t) + cost(u) +
+  body(u)`; an unforced argument has no cost), and contract
+  firing order must be statable (`demands:` on an unused argument fires at the call site under CBV,
+  not "whenever"). Eager data / lazy codata is a _field and generator_ strategy fixed by declaration
+  kind — it is not a change to the application rule.
 
 ## Symbolic operation names and uniform binary precedence
 

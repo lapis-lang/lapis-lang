@@ -320,7 +320,7 @@ equivalence judgment `Ω; E ⊢ t ≡ u`, never by an evaluation rule:
   argument, the operation application is rewritten away (`⊕(e, a) ↝ a`) and the fold is not entered.
   The axiom is undirected; the direction is an optimizer strategy.
 
-- **Horner fusion:** `distributive:sum` on a fold contributes the distributivity axiom to `E` (a
+- **Horner fusion:** `distributive: ⊕` on a fold contributes the distributivity axiom to `E` (a
   relational law between two operations). The optimizer derives
   `fold(⊕) ∘ fold(⊗) ≡
   fold(⊗-then-⊕)` from it and fuses two folds into one traversal.

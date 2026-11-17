@@ -130,9 +130,9 @@ data Nat
     Zero
     Succ pred: Family
 
-    fold add <in: other Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
-        Zero -> other
-        Succ pred -> Succ (pred other)
+    fold add <in: Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
+        Zero other -> other
+        Succ pred other -> Succ (pred other)
 ```
 
 The `properties: (associative, commutative, identity: Zero)` is not a comment. It is a
@@ -146,7 +146,7 @@ is a fold — the compiler can:
    that the result is `three` — without traversing the structure. The fold is short-circuited.
 
 3. **Fuse** based on the law. When it sees `merge(#scaleEach, #sum)` and `scaleEach` declares
-   `distributive: sum`, it knows the two folds can be sequenced as a single Horner-rule operation.
+   `distributive: #sum`, it knows the two folds can be sequenced as a single Horner-rule operation.
 
 This is the key: **enforcement makes exploitation reliable.** The compiler can trust every law
 declaration because every operation is a fold, and every fold respects the algebra. In Haskell, laws
@@ -208,7 +208,7 @@ merge scaledSum <#scaleEach, #sum>
 ```
 
 This says: "compose `scaleEach` and `sum` into a single operation." The compiler checks that
-`scaleEach` declares `distributive: sum` (the law that makes the fusion valid), verifies the law,
+`scaleEach` declares `distributive: #sum` (the law that makes the fusion valid), verifies the law,
 and performs the fusion. You wrote the specification (two separate operations); the compiler
 _calculated_ the efficient program (one fused operation). The calculation is not on paper — it's in
 the language.
@@ -274,23 +274,23 @@ behavior Stream
     head: <out: Number>
     tail: <out: Self>
 
-    unfold From <in: n Number>
-        head -> n
-        tail -> n + 1
+    unfold From <in: Number>
+        head n -> n
+        tail n -> n + 1
 
-nats = Stream From: 0
-nats head                     /* 0 */
-nats tail head                /* 1 */
-nats tail tail head           /* 2 */
+(Stream From: 0) head                      /* 0 */
+(Stream From: 0) tail head                /* 1 */
+(Stream From: 0) tail tail head           /* 2 */
 ```
 
 `Stream` is a behavior type — a final coalgebra. `Self` marks `tail` as a continuation: observing
 `tail` produces the _next_ stream value, lazily. The `unfold From` is an anamorphism: from a seed
 `n`, it generates `head = n` and `tail` from seed `n + 1`.
 
-The stream is potentially infinite. But each observation is finite — `nats head` produces `0` and
-stops. `nats tail` produces a new stream (memoized — observing it twice returns the same value). The
-laziness is not a flag you set; it's built into `behavior`, just as eagerness is built into `data`.
+The stream is potentially infinite. But each observation is finite — `(Stream From: 0) head`
+produces `0` and stops. `(Stream From: 0) tail` produces a new stream (memoized — observing it twice
+returns the same value). The laziness is not a flag you set; it's built into `behavior`, just as
+eagerness is built into `data`.
 
 ### 5.3 Laws in Action
 
@@ -299,14 +299,14 @@ data Nat
     Zero
     Succ pred: Family
 
-    fold add <in: other Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
-        Zero -> other
-        Succ pred -> Succ (pred other)
+    fold add <in: Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
+        Zero other -> other
+        Succ pred other -> Succ (pred other)
 
-three = Nat Succ pred: (Nat Succ pred: (Nat Succ pred: Nat Zero))
-
-three add Nat Zero           /* three — the identity guard fires, no traversal */
-Nat Zero add three           /* three — same guard, other side */
+(Nat Succ pred: (Nat Succ pred: (Nat Succ pred: Nat Zero))) add (Nat Zero)
+    /* three — the identity guard fires, no traversal */
+(Nat Zero) add (Nat Succ pred: (Nat Succ pred: (Nat Succ pred: Nat Zero)))
+    /* three — same guard, other side */
 ```
 
 When the compiler sees `three add Zero`, it checks: does `add` have an `identity:` property? Yes —
@@ -328,9 +328,9 @@ data NumList
         Nil -> 0
         Cons head tail -> head + tail
 
-    fold scaleEach <in: x Number, out: Family, properties: (distributive: sum)>
-        Nil -> Family Nil
-        Cons head tail -> Family Cons head: head * x tail: (tail x)
+    fold scaleEach <in: Number, out: Family, properties: (distributive: #sum)>
+        Nil x -> Family Nil
+        Cons head tail x -> Family Cons head: head * x tail: (tail scaleEach: x)
 
     merge scaledSum <#scaleEach, #sum>
 ```
@@ -339,7 +339,7 @@ data NumList
 `merge scaledSum <#scaleEach, #sum>` composes them.
 
 Normally, this would build an intermediate scaled list, then sum it — two traversals, one
-intermediate allocation. But `scaleEach` declares `distributive: sum`, which means: scaling each
+intermediate allocation. But `scaleEach` declares `distributive: #sum`, which means: scaling each
 element and then summing is the same as summing and then scaling the total. The compiler recognizes
 this as a Horner-rule pair and sequences them as a single named operation.
 
@@ -406,14 +406,13 @@ don't write it.
 And from this structure, a familiar operation falls out: **transitive closure**.
 
 ```lapis
-base = {
+Ancestor closure: {
     Ancestor Direct from: "alice" to: "bob"
     Ancestor Direct from: "bob"   to: "carol"
     Ancestor Direct from: "carol" to: "dave"
 }
 
-closed = Ancestor closure: base
-Ancestor reachableFrom: closed from: {"alice"}    /* {"bob", "carol", "dave"} */
+Ancestor reachableFrom: (Ancestor closure: { … }) from: {"alice"}    /* {"bob", "carol", "dave"} */
 ```
 
 `closure` computes the transitive closure: all pairs reachable by composing base facts through
@@ -495,14 +494,14 @@ function does_, declare _what it requires and guarantees_.
 data Stack
     Empty
     Push
-        invariant: [self | self size >= 0]
+        invariant: self | self size >= 0
         value: Object
         rest: Family
 
     fold pop <out: Array>
-        demands: [self | self size > 0]
-        ensures: [self old result | result size = 2]
-        rescue:  [self err args retry | retry value: 0]
+        demands: self | self size > 0
+        ensures: self old result | result size = 2
+        rescue:  self err args retry | retry value: 0
         Empty -> Error signal: "Cannot pop empty stack"
         Push value rest -> value , old rest
 ```
