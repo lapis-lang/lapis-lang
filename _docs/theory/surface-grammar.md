@@ -13,7 +13,7 @@
 > (`src/core/grammar.ts`); the surface declaration productions are **not** (the implemented keywords
 > are `<:`, `cofold`, `fold`, `in`, `let`, `match`, `unfold` — no `data`, `behavior`, `protocol`,
 > `relation`, `query`, or `io`). This document is the target that Stage 1 of
-> [`language-design.md`](./language-design.md) is written against. See §10 for the per-production
+> [`language-design.md`](./language-design.md) is written against. See §9 for the per-production
 > implementation status.
 
 ---
@@ -29,8 +29,8 @@
 | `{ X }`          | zero or more occurrences of `X`                       |
 | `[ X ]`          | a bracketed group (not a token)                       |
 | `⟨ X ⟩`          | a non-terminal written inline (for readability)       |
-| `␣`              | one space (or the layout's required indentation — §8) |
-| `⏎`              | a newline (the statement separator — §8)              |
+| `␣`              | one space (or the layout's required indentation — §7) |
+| `⏎`              | a newline (the statement separator — §7)              |
 | `ε`              | the empty sequence                                    |
 
 **Terminals** are written as quoted strings; **non-terminals** as `camelCase` or `PascalCase`
@@ -43,7 +43,7 @@ identifiers. Keywords (`data`, `fold`, …) are terminals.
 - **L2 — Newline.** A newline separates body lines. Blank lines and comments are consumed between
   them.
 
-Both are formalized in §8.
+Both are formalized in §7.
 
 ---
 
@@ -303,8 +303,14 @@ atomType       ::= "(" typeExpr ")"
 
 ## 4. Declaration Forms
 
-There are six declaration forms. All are top-level; a program's top level is declarations and
-expression statements (spec §8, overview §12.21).
+There are six declaration forms. All are top-level; a program's top level is **declarations only** —
+there are no expression statements and no binding/definition form (overview §12.6, §12.21).
+
+Named values are _declared_, never bound: a zero-field variant introduces a value (`variantRef`,
+§3.4), and an operation declaration introduces a named computation with a declared type and an entry
+in `Ω` (so it can carry laws and a cost summary). A `camelCase` name in expression position resolves
+to the enclosing declaration's bindings and the declared operations in scope; it is never introduced
+by assignment.
 
 ```
 program        ::= declaration*
@@ -576,19 +582,7 @@ moduleInstantiation ::= pascalIdent ( ":" ␣ expr )*
 
 ---
 
-## 7. Top-Level Expressions
-
-```
-topExpr        ::= expr
-```
-
-> **Open (overview §12.6).** Whether a _definition_ form (`name = expr`) exists is unpinned; the
-> grammar has no such production, and `=` is an equality _operator_ (a fold name) in predicates. The
-> examples in the docs lean on it; the grammar above does not provide it.
-
----
-
-## 8. Layout
+## 7. Layout
 
 Layout is a grammar-level concern in Lapis, not a post-pass. Two rules:
 
@@ -624,9 +618,15 @@ A newline separates body lines. Blank lines and comments are consumed between th
 A case arm's body may be inline (same line, after `->`) or indented (next line, deeper). The parser
 tries the indented form first (longer match), then falls back to inline.
 
+> **Decided (overview §12.6).** An arm body is a single expression. There is no arm-level binding
+> form — no `let … in`, no `name ::= expr` header, no initialised-slot block. An intermediate needed
+> by one arm is a declared operation (a sibling `fold`, possibly companion via `<aux: …>`), which
+> carries a declared type, a law set, and a cost summary that an anonymous local could not. See §9's
+> `quadratic` example for the worked case.
+
 ---
 
-## 9. Abstract Syntax
+## 8. Abstract Syntax
 
 The AST node types, matching spec §2.1 and the implementation's shapes:
 
@@ -657,9 +657,56 @@ The AST node types, matching spec §2.1 and the implementation's shapes:
 | `caseArm`       | `CaseArm(head, bindings, body)`                                              |
 | `unfoldArm`     | `UnfoldArm(head, bindings, guard, payload)`                                  |
 
+### 8.1 Why a case arm has no bound intermediate
+
+An arm body's bindings are exactly the arm head's: the variant's fields, plus the fold's `in:`
+argument as a trailing binding (§5.1). Nothing else can be introduced — there is no `let … in`, no
+`name ::= expr` header, and no initialised-slot block.
+
+The motivating case is the quadratic formula, whose two roots share the discriminant and the `2a`
+denominator. The discriminant is spelled as a **declared sibling operation** and fused into `roots`
+via `<aux: …>` (§5.1), rather than bound in the arm. The full worked file — with the result type,
+the `sqrt` domain as a `demands:` contract, and the `Int`-pattern trap on `-b` — is
+[`examples/quadratic.lapis`](../../examples/quadratic.lapis); the shape is:
+
+```lapis
+data Quadratic
+    Coeffs a: Number b: Number c: Number
+
+    fold discriminant <out: Number>
+        Coeffs a b c -> (b * b) - (4 * a * c)
+
+    fold roots <aux: #discriminant, out: QuadraticRoots>
+        demands: [self | self hasRealRoots]
+        Coeffs a b c -> Roots
+            plus: ((- b + ((aux discriminant) sqrt)) / (2 * a))
+            minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))
+```
+
+Two details in that snippet are load-bearing rather than stylistic. `- b` **must not** be written
+`-b`: contiguity is position-meaningful, so `-b` at the start of a token is a pattern-matched `Int`
+constructor (`-[0-9]+`) while `- expr` in prefix position is `negate`. And the `demands:` clause is
+how `sqrt`'s partiality is handled — the principal square root is undefined over the reals for a
+negative radicand, so `roots` is callable only on a value with a non-negative discriminant, which
+makes the precondition checkable instead of a silent domain error.
+
+This is strictly better than a local would be, on four counts that an anonymous binder cannot match:
+
+- **Type.** `discriminant` is declared `out: Number`; a local would carry only the type of its
+  expression, and through a block parameter (the only binder the surface offers) it would be `Any`
+  (`elaboration.md` §2.3 — the block parameter's type is inferred from context).
+- **Reuse.** It is callable elsewhere (`q discriminant`) instead of being scoped to one body.
+- **Laws and cost.** As an operation it holds a place in `Ω`, so it can carry `properties:` and a
+  memoized cost summary (`cost.ts`); a local has neither.
+- **Identity under substitution.** `E-Op` keeps the named form through elaboration so operation
+  identity survives inlining (`lc.md` §3) — the property the optimizer's law-aware passes need.
+
+The corpus bears this out: across every worked example in `_docs/`, no arm body computes an
+intermediate it needs twice, except the two-root case above, which `<aux: …>` already serves.
+
 ---
 
-## 10. Implementation Status
+## 9. Implementation Status
 
 Per-production, against the core in `src/core/`. The core grammar is the abstract base `AbstractLC`
 (`grammar.ts`); the semantic passes are its subclasses `LCTypeCheck` (`typing_grammar.ts`) and
@@ -674,14 +721,16 @@ Per-production, against the core in `src/core/`. The core grammar is the abstrac
 | Modules (§6)                  | **Not implemented** — Stage 7                                                                                                                                                                                            |
 
 The implemented keyword set is exactly `<:`, `cofold`, `fold`, `in`, `let`, `match`, `unfold` — the
-core's own vocabulary. Every surface declaration keyword above is still a production to write.
+core's own vocabulary. `in` and `let` are the core's `let x:σ = t in u` terminator and former; they
+are **not** surface keywords, and the surface grammar has no `let` production (§4, §7). Every
+surface declaration keyword above is still a production to write.
 
 The surface declaration productions are the target of Stage 1 in
 [`language-design.md`](./language-design.md) ("surface `data`/`fold` → core μ/fold").
 
 ---
 
-## 11. Open Questions
+## 10. Open Questions
 
 The questions this grammar does _not_ settle, with their owning finding in
 [`overview.md`](../overview.md) §12:
@@ -691,18 +740,23 @@ The questions this grammar does _not_ settle, with their owning finding in
 | 1  | The generator-arm payload's collision with the greedy keyword-send collection — the arm body needs its own restricted production | §12.2   |
 | 2  | `\|` as the generator separator — reserve it, or pick `=>`?                                                                      | §12.2   |
 | 3  | Variant qualification at construction, and the bare default for an _inherited_ variant                                           | §12.7   |
-| 4  | Whether a top-level _definition_ form (`name = expr`) exists                                                                     | §12.6   |
-| 5  | `scan`'s surface spelling                                                                                                        | §12.20  |
-| 6  | The module system's surface grammar                                                                                              | §12.20  |
-| 7  | The symbolic operator character set                                                                                              | §2.1    |
-| 8  | `Family`'s reservation in type position (decided, but unenforced in the core)                                                    | §12.16  |
-| 9  | The string-escape vocabulary (`\n`, `\t`)                                                                                        | §1.4    |
-| 10 | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                | §12.8   |
-| 11 | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                       | §12.4   |
+| 4  | `scan`'s surface spelling                                                                                                        | §12.20  |
+| 5  | The module system's surface grammar                                                                                              | §12.20  |
+| 6  | The symbolic operator character set (whether `:` is an operator character)                                                       | §2.1    |
+| 7  | `Family`'s reservation in type position (decided, but unenforced in the core)                                                    | §12.16  |
+| 8  | The string-escape vocabulary (`\n`, `\t`)                                                                                        | §1.4    |
+| 9  | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                | §12.8   |
+| 10 | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                       | §12.4   |
+| 11 | Surface application: how a block or function value is applied (`expr expr` vs. a `value:` send)                                  | §12.25  |
+| 12 | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                       | §12.26  |
+
+**Closed (recorded here so the numbering stays stable):** the top-level definition form
+(`name = expr`) — there is none; see §4 and overview §12.6. Arm-level bindings — there is no
+`let`/definition/initialised-slot form in any body; see §7.
 
 ---
 
-## 12. See Also
+## 11. See Also
 
 - [`surface-syntax.md`](./surface-syntax.md) — the narrative specification: lexical structure, the
   pattern language, precedence rationale, railroad diagrams, indentation strategy, worked examples.

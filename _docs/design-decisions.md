@@ -300,6 +300,43 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   keyword (freezes descriptions into source — wrong channel for the Language-System roadmap;
   image-time association is the metaprogramming lane's mechanism, `language-design.md` §5 Stage 7).
 
+## Program shape and name introduction
+
+- **A program's top level is declarations only.** `program ::= declaration*` — no expression
+  statements, and no definition/binding form. `name = expr` is **not** a production, at any level:
+  `=` is an equality _operator_ (a declared fold name, §"Symbolic operation names"), so a definition
+  spelling would also reintroduce the uniform-precedence footgun (`x = y + 1` grouping as
+  `(x = y) + 1`). Trailing comments in the docs are documentation fragments — a doc-example harness
+  device, never source (`surface-syntax.md` §1.4).
+- **Names are declared, never bound.** A value name is introduced by a zero-field variant
+  (`variantRef`, `surface-grammar.md` §3.4). A computation name is introduced by an operation
+  declaration — which is what makes it carry a declared type, membership in `Ω`, a law set
+  (`properties:`), and a memoized cost summary. Nothing introduces a name by assignment: the core
+  has `let` and no store (`lc.md` §3, `E-Let` and no `E-Assign`).
+- **There is no arm-level binding form.** No `let … in`, no `name ::= expr` header, no
+  initialised-slot block, and no default-valued block parameter used as a binder. Each candidate was
+  rejected on its own terms:
+
+  | Candidate                                | Rejected because                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+  | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | `let … in`                               | Two keywords for zero new semantics — `T-Let`/`E-Let` is `λ`-application (`E-App`), so the form buys only spelling. `let` is not a declaration former and `in` is not an operation name; exposing both makes `in` a surface keyword for the first time (it is currently reserved only for the core's terminator) and adds a non-declaration grammar former to a language whose pitch is "your declarations are your lexer".                                                                            |
+  | `name = expr` at arm level               | Steals `=`, a declared operator (same defect as the top-level form).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+  | `name ::= expr` / `name := expr`         | Would be the only reserved _operator spelling_. `opIdent` is deliberately keyword- and shape-permissive (`grammar.ts`), and `LC_RESERVED_WORDS` is `["in"]` alone because every keyword position is positionally disjoint from operation application. An infix `::=` is not disjoint: `lo ::= x` is simultaneously a declaration line and a well-formed binary expression. It also silently settles the open operator-charset question (whether `:` is an operator character) by carving a hole in it. |
+  | Initialised block head, `[x: 40 \| …]`   | Defaults are observable only at a call site, so the block must be _called_ — the surface has no application production (§10 open question 11). Auto-invoking a block in arm position would give one syntax two meanings by position. Worse, a block standing alone in an arm body has no expected type, so its parameter is typed `Any` (`elaboration.md` §2.3) — a regression from the checked type a declared operation carries.                                                                     |
+  | `Let` constructor + infix `in` operation | The only candidate that reserves no vocabulary, but a runtime constructor cannot bind a name: binder names resolve at parse/elaboration time (`extendCtx`), so this requires names-as-values and an environment interpreter — contradicting "static where possible" and the ban on ambient scope, and requiring `Symbol` back (retired, `overview.md` §12.23) with its interning/equality and reference-vs-value collision unresolved.                                                                 |
+
+- **An intermediate needed by an arm is a declared sibling operation.** Either a fold consumed by
+  another fold, or a companion fused into the same traversal via `<aux: …>`. This is not a
+  workaround: the declared form is strictly stronger (declared type, reuse, laws, cost summary,
+  identity preserved through elaboration by `E-Op`). The quadratic formula is the canonical case —
+  the discriminant is a `fold discriminant <out: Number>` and `roots` is `<aux: #discriminant>`
+  (`surface-grammar.md` §8.1). The corpus supports the rule: no worked example in `_docs/` needs a
+  local except the two-root case, which `aux` already serves.
+- **Revisit trigger.** Reifiable binding (a `Let` _value_, programs-as-data) is a Stage-7
+  metaprogramming question, not a surface-syntax one. Any such proposal must first answer name
+  interning and equality, and the `#name` reference-vs-value spelling collision — exactly the clause
+  `overview.md` §12.23 leaves open for `Symbol`.
+
 ## Symbolic operation names and uniform binary precedence
 
 - Operation names (fold names) can be **symbolic**: `+`, `-`, `*`, `<`, `<=`, `==`, etc. Following

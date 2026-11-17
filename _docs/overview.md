@@ -410,11 +410,11 @@ node's depth, but that's a second pass unless `aux` rides along:
 ```lapis
 fold depth <out: Nat>
     Leaf -> 0
-    Node left right -> 1 + max left right
+    Node left right -> 1 + (left max right)
 
 fold balanced <aux: #depth, out: Bool>
     Leaf -> true
-    Node left right -> (left and right) and (1 = abs (depth left - depth right))
+    Node left right -> (left and right) and (1 = (abs (depth left - depth right)))
 ```
 
 `old` shows up with contracts in §6.2; `prev` is how `fib` reaches two levels back — the result one
@@ -954,6 +954,12 @@ two other common shapes (previous results, auxiliary results) as keywords, not l
 
 Plus `nil`, `true`, `false`. That is the entire reserved-word list.
 
+There is no binding former — no `let`, no `in`, no definition keyword. `let x:σ = t in u` exists in
+the core calculus as a term, but it is not surface syntax; the surface introduces names only by
+declaration (§12.6). One subtlety: `#` is not a keyword and `#name` is not a value — it is a
+keyword-part _reference_ (§7.4), resolved against declared names at declaration time (`aux: #depth`,
+`merge Total <#From, #sum>`).
+
 ---
 
 ## 10. What We Left Out, On Purpose
@@ -1039,12 +1045,21 @@ is a real finding for the spec:
 5. **`io` steps have no dual shown.** §4.6 gives the state-machine form; the overview's IO section
    is the first user-facing example. Whether `io` deserves a paired construct (its observe-side
    dual) is an open design question.
-6. **Top-level value definitions are unpinned — and this document initially invented them.** The
-   grammar has no `name = expr` binding form; yet `surface-syntax.md` §8's own complete example
-   writes `s = Stack Push ...`, and this overview did the same on first draft. `=` is an equality
-   _operator_ (fold name) in predicates — not a definition keyword. The spec needs a decision: how
-   are named values introduced at top level (bare expressions only? a definition form?), and the
-   examples everywhere should stop leaning on `=`.
+6. **Top-level value definitions — CLOSED: there is no definition form, at the top level or in any
+   body.** The grammar has no `name = expr`, and `=` is an equality _operator_ (a declared fold
+   name), so a definition spelling would also reintroduce the uniform-precedence footgun
+   (`x = y + 1` grouping as `(x = y) + 1`). A program's top level is `declaration*` — no expression
+   statements. Names are **declared, never bound**: a zero-field variant introduces a value; an
+   operation declaration introduces a named computation, which is what lets it carry a declared
+   type, a law set, and a cost summary. The `s = Stack Push ...` fragments this document and
+   `surface-syntax.md` §8 used to show are documentation-fragment devices, now respelled as bare
+   expressions with trailing result comments. The arm-level question was settled in the same
+   decision: no `let … in`, no `::=`/`:=` header, no initialised-slot block, no default-valued block
+   parameter — an intermediate an arm needs is a declared sibling operation (or `<aux: …>`), which
+   is strictly stronger. Design record: `design-decisions.md` §"Program shape and name
+   introduction"; worked case: `surface-grammar.md` §8.1 (the quadratic formula's discriminant).
+   Spec impact: `surface-grammar.md` §4 + §7 (the `topExpr` production deleted), `surface-syntax.md`
+   §8.
 
 7. **Variant qualification at construction — reframed while drafting: qualification is
    disambiguation, for both constructor kinds.** The first draft flagged the asymmetry
@@ -1447,3 +1462,32 @@ is a real finding for the spec:
     availability as the spec's decision. Spec impact: `surface-syntax.md` §1.3 (built-ins' scope
     status), the bounds' scope status, and the module section — §5.3's mechanism (finding 20's
     unpinned grammar) is where the choice lands.
+
+25. **Surface application is missing — nothing can apply a function value.** The core has `appProd`
+    (`atomProd`-level juxtaposition, `grammar.ts`) and `E-App`, and `surface-grammar.md` §9 lists it
+    as implemented — but the surface expression grammar (§3.2) goes
+    `expr → keywordExpr → binaryExpr → unaryExpr → primary` with no `expr expr` production. The
+    corpus nonetheless spells application two ways: `(tail x)` (§3.2's `scaleEach`,
+    `users/
+    why-lapis.md`) and `(rest append: v)` (§3.1's `append`). Both parse differently than
+    intended under the published grammar — `tail x` is a _unary send_ whose selector is `x` (an
+    operation name, not an argument), and `rest append: v` is a keyword call whose selector is
+    `append`. Neither can name a function value. The same gap blocks the documented conditional:
+    both `language-design.md` §2.6 and `elaboration.md` §7 write
+    `n = 0 ifTrue: [{}] ifFalse: [...]`, which needs the `Bool` receiver to _apply_ the chosen
+    block. Consequences: parameterized-fold continuations (`rest append: v`) and every block-valued
+    idiom are unstatable; `map`'s transform (`[v rest x | …]`) works only because `map` applies it
+    internally, inside the operation's own definition (`OpSig.definition` is core source text,
+    `ops.ts`) rather than through surface syntax. Spec impact: `surface-grammar.md` §3.2 (the
+    missing production), `surface-syntax.md` §2.1.
+
+26. **`aux`'s read spelling disagrees with itself: `aux d` vs. `aux #d`.** The declaration site
+    quotes the companion operation (`aux: #depth`, `overview.md` §3.1; `surface-grammar.md` §3.5's
+    `reference ::= … | "aux" ident`), while the corpus's read sites drop the `#` (`aux length` —
+    `elaboration.md` §4.3's `average`; `aux discriminant` — the quadratic example in
+    `surface-grammar.md` §8.1). Two spellings for one reference form, neither marked. Under §7.4
+    `#name` is the _keyword-part reference_ spelling, which argues the declaration form is the odd
+    one out (a `#`-quoted name in a spec record) OR that the read form should carry `#` for
+    consistency (`aux #depth` — but then `aux` takes a reference where every other `reference`
+    production takes an `ident`). Decide in one place and respell both sides. Spec impact:
+    `surface-grammar.md` §3.5 (the `AuxRef` production) and the `aux` rows in `overview.md` §3.1.
