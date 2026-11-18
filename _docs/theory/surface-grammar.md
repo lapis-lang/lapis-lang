@@ -196,8 +196,14 @@ messageChain   ::= primary ( ␣ ident )* ( ␣ ident ":" ␣ expr )?
 ```
 
 **Greedy collection:** when keyword suffixes are present, _all_ `key: arg` pairs are collected into
-a single `KeywordCall` — they are not nested sends. This is the Smalltalk rule and it is what makes
-`a between:and: lo hi` a two-argument call rather than a call whose argument is a call.
+a single `KeywordCall` — they are not nested sends. This is the Smalltalk rule: a two-part spelling
+is one call with two arguments, never a call whose argument is a call.
+
+**A selector has at most one keyword part, because an operation has at most one `in:`** (§3.7). The
+receiver supplies one argument and `in:` supplies at most one more, so no surface-declared operation
+can have arity 3+. A two-part selector therefore parses but cannot resolve to any declaration — it
+is an arity error at elaboration, not a different grouping. The greedy rule still decides the parse;
+it just has no satisfiable case.
 
 **A keyword send eliminates its receiver, then applies the arguments** (`elaboration.md` §2.5). The
 elimination form is fixed by the receiver's kind: data eliminates by `fold`, codata by observation,
@@ -336,7 +342,20 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 > PascalCase). **The arm binds the input**, and the same `armHead` binding list carries it: a fold
 > arm's bindings beyond the variant's field count bind the input (`Cons head rest v -> …`, optional
 > per arm); an unfold arm's bindings bind the **seed** (`Empty arr -> …`, `Push arr -> …` — the arm
-> produces a variant rather than destructuring one, so there are no fields to bind).
+> produces a variant rather than destructuring one, so there are no fields to bind). An unfold that
+> declares no `in:` has no seed, so its arms carry no bindings at all (§5.2).
+
+**A protocol member's default body binds `other` (§4.3).** A default body has no arm head and no
+binding list, so the arm rule above does not reach it: a protocol cannot know its conformers'
+variant names, so it cannot destructure anything. Its scope is exactly three things —
+
+- `self`, the receiver, in scope in every body;
+- `other`, the member's `in:` value, bound **exactly when the member declares `in:`**; and
+- the recursive references `Family` and `Self` (§3.5).
+
+So a getter member (no `in:`) binds no `other`, and a default body that mentions it is an
+unbound-name error. There is no other binding mechanism in a default body — no local, no arm
+binding, no field name.
 
 ### 3.8 Types
 
@@ -454,16 +473,46 @@ per observer, each producing the next seed.
 ### 4.3 `protocol` — qualified type
 
 ```
-protocolDecl   ::= "protocol" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ protocolBody
+protocolDecl    ::= "protocol" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ protocolBody
 
-protocolBody   ::= ␣(4) protocolItem+
+protocolBody    ::= ␣(4) protocolItem+
 
-protocolItem   ::= foldDecl
-                | unfoldDecl
-                | mapDecl
-                | mergeDecl
-                | scanDecl
+protocolItem    ::= foldSignature
+                 | unfoldSignature
+                 | mapSignature
+                 | mergeDecl
+                 | scanDecl
+
+foldSignature   ::= "fold" ident ␣ specRecord ( ⏎ memberBody )?
+mapSignature    ::= "map" ident ␣ specRecord ( ⏎ memberBody )?
+unfoldSignature ::= "unfold" pascalIdent ( ␣ specRecord )?
+
+memberBody      ::= ␣(8) ( contractClause ⏎ )* ␣(8) expr
 ```
+
+**A protocol member is a signature with an optional default.** The `fold`/`unfold`/`map` keyword is
+required, because the member's kind is load-bearing: fold and map members admit a default body,
+unfold members do not, and `merge`/`scan` are themselves kind-named. A `fold`/`map` member must
+state its type with a spec record, and a `merge`/`scan` member with the `#name` form — without one a
+conforming type has nothing to satisfy. An **unfold** member needs neither: an unfold's result type
+is the declaration site (§5.2), which here is the conforming type itself, so `unfold Identity`
+states all there is to state. Its seed, when it has one, is `<in: …>` and is the conformer's to
+choose; a seedless unfold requires a constant constructor, which is the shape a protocol needs for
+an identity element.
+
+| Item     | Type stated by | Default body | Why                                                        |
+| -------- | -------------- | ------------ | ---------------------------------------------------------- |
+| `fold`   | `specRecord`   | allowed      | A default composes the type's own operations over `self`   |
+| `map`    | `specRecord`   | allowed      | Same; a map is an operation like any other                 |
+| `unfold` | — (site)       | **rejected** | Its result type is the declaring type; the seed is `<in:>` |
+| `merge`  | `<#name, …>`   | **rejected** | It names a fusion of existing folds, not a computation     |
+| `scan`   | `<#name>`      | **rejected** | Same — a fusion directive, not a computation               |
+
+**A default body is an expression, not a `foldBody`.** `foldBody` (§5.1) and `mapBody` (§5.3) both
+begin with `caseArm`s, which dispatch on the _declaring_ type's variants — and a protocol cannot see
+its conformers' variants. So a default body has no arms and only composes operations:
+`(self equals: other) not`. It may be preceded by contract clauses, which the default honours
+exactly as a declared operation does; see [`elaboration.md`](./elaboration.md) §3.3.
 
 ### 4.4 `relation` — span-structured data
 
@@ -615,6 +664,20 @@ unfold Range <in: Nat>
     Cons n -> n > 0 | head: n rest: n - 1
 ```
 
+**An unfold may have no seed.** When the spec record omits `in:`, the unfold takes no input and its
+arms carry no bindings — the arm head is the variant it produces and the guard alone decides:
+
+```lapis
+unfold Identity
+    Zero -> true
+```
+
+That is a constant constructor: one arm, always applicable, producing a fieldless variant. No spec
+record appears because an unfold's result type is the declaration site, never a parameter — so there
+is no `out:` to write, and with no seed there is no `in:` either. A seedless unfold is therefore how
+a protocol requires a constructor each conformer must supply — the identity element of a monoid is
+the worked case — without a `fold`'s arms and without a default body (§4.3).
+
 > **Open (overview §12.2).** Two sub-questions remain: (a) the payload's keyword-message shape
 > collides with §3.3's greedy keyword-send collection — the arm body needs its own restricted
 > production keeping `head:`/`rest:` as labels rather than a send; (b) `|` is listed among the
@@ -740,31 +803,32 @@ tries the indented form first (longer match), then falls back to inline.
 
 The AST node types, matching spec §2.1 and the implementation's shapes:
 
-| Production      | AST node                                                                     |
-| --------------- | ---------------------------------------------------------------------------- |
-| `expr`          | `Expr` — a discriminated union of the forms below                            |
-| `keywordExpr`   | `KeywordCall(receiver, parts: {key, value}[])`                               |
-| `binaryExpr`    | `BinaryCall(receiver, op, arg)`                                              |
-| `unaryExpr`     | `UnaryCall(receiver, selector)`                                              |
-| `primary`       | `primary` — one of the composite/reference/literal forms below               |
-| `arrayLiteral`  | `ArrayLit(items: Node[])`                                                    |
-| `recordLiteral` | `Record(entries: RecordEntry[])` where `RecordEntry(key, value)`             |
-| `specRecord`    | `Spec(entries: SpecEntry[])` where `SpecEntry(key, value: Node \| null)`     |
-| `variantRef`    | `VariantRef(name)`                                                           |
-| `construction`  | `VariantConstruct(name, args: {field, value}[])`                             |
-| `reference`     | `SelfRef` \| `FamilyRef` \| `CoSelfRef` \| `OldRef` \| `PrevRef` \| `AuxRef` |
-| `dataDecl`      | `DataDecl(name, parent, body: DataBodyItem[])`                               |
-| `behaviorDecl`  | `BehaviorDecl(name, parent, observers: Field[], body: BehaviorBodyItem[])`   |
-| `protocolDecl`  | `ProtocolDecl(name, parent, methods: FoldDecl[])`                            |
-| `relationDecl`  | `RelationDecl(name, variants: Variant[], folds: FoldDecl[])`                 |
-| `queryDecl`     | `QueryDecl(name, observers: Field[], unfolds: UnfoldDecl[])`                 |
-| `ioDecl`        | `IoDecl(name, stateFields: Field[], arms: CaseArm[])`                        |
-| `foldDecl`      | `FoldDecl(name, spec, contractClauses, arms: CaseArm[])`                     |
-| `unfoldDecl`    | `UnfoldDecl(name, spec, arms: CaseArm[])`                                    |
-| `mapDecl`       | `MapDecl(name, spec, arms: CaseArm[])`                                       |
-| `mergeDecl`     | `MergeDecl(name, foldNames: string[])`                                       |
-| `caseArm`       | `CaseArm(head, bindings, body)`                                              |
-| `unfoldArm`     | `UnfoldArm(head, bindings, guard, payload)`                                  |
+| Production       | AST node                                                                      |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `expr`           | `Expr` — a discriminated union of the forms below                             |
+| `keywordExpr`    | `KeywordCall(receiver, parts: {key, value}[])`                                |
+| `binaryExpr`     | `BinaryCall(receiver, op, arg)`                                               |
+| `unaryExpr`      | `UnaryCall(receiver, selector)`                                               |
+| `primary`        | `primary` — one of the composite/reference/literal forms below                |
+| `arrayLiteral`   | `ArrayLit(items: Node[])`                                                     |
+| `recordLiteral`  | `Record(entries: RecordEntry[])` where `RecordEntry(key, value)`              |
+| `specRecord`     | `Spec(entries: SpecEntry[])` where `SpecEntry(key, value: Node \| null)`      |
+| `variantRef`     | `VariantRef(name)`                                                            |
+| `construction`   | `VariantConstruct(name, args: {field, value}[])`                              |
+| `reference`      | `SelfRef` \| `FamilyRef` \| `CoSelfRef` \| `OldRef` \| `PrevRef` \| `AuxRef`  |
+| `dataDecl`       | `DataDecl(name, parent, body: DataBodyItem[])`                                |
+| `behaviorDecl`   | `BehaviorDecl(name, parent, observers: Field[], body: BehaviorBodyItem[])`    |
+| `protocolDecl`   | `ProtocolDecl(name, parent, members: ProtocolMember[])`                       |
+| `relationDecl`   | `RelationDecl(name, variants: Variant[], folds: FoldDecl[])`                  |
+| `queryDecl`      | `QueryDecl(name, observers: Field[], unfolds: UnfoldDecl[])`                  |
+| `ioDecl`         | `IoDecl(name, stateFields: Field[], arms: CaseArm[])`                         |
+| `foldDecl`       | `FoldDecl(name, spec, contractClauses, arms: CaseArm[])`                      |
+| `protocolMember` | `FoldDecl \| UnfoldDecl \| MapDecl \| MergeDecl \| ScanDecl`, `arms` optional |
+| `unfoldDecl`     | `UnfoldDecl(name, spec, arms: CaseArm[])`                                     |
+| `mapDecl`        | `MapDecl(name, spec, arms: CaseArm[])`                                        |
+| `mergeDecl`      | `MergeDecl(name, foldNames: string[])`                                        |
+| `caseArm`        | `CaseArm(head, bindings, body)`                                               |
+| `unfoldArm`      | `UnfoldArm(head, bindings, guard, payload)`                                   |
 
 ### 8.1 Why a case arm has no bound intermediate
 
@@ -844,22 +908,23 @@ The surface declaration productions are the target of Stage 1 in
 The questions this grammar does _not_ settle, with their owning finding in
 [`overview.md`](../overview.md) §12:
 
-| #  | Question                                                                                                                           | Finding |
-| -- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 1  | The generator-arm payload's collision with the greedy keyword-send collection — the arm body needs its own restricted production   | §12.2   |
-| 2  | `\|` as the generator separator — reserve it, or pick `=>`?                                                                        | §12.2   |
-| 3  | Variant qualification at construction, and the bare default for an _inherited_ variant                                             | §12.7   |
-| 4  | `scan`'s surface spelling                                                                                                          | §12.20  |
-| 5  | The module system's surface grammar                                                                                                | §12.20  |
-| 6  | The symbolic operator character set (whether `:` is an operator character)                                                         | §2.1    |
-| 7  | `Family`'s reservation in type position (decided, but unenforced in the core)                                                      | §12.16  |
-| 8  | The string-escape vocabulary (`\n`, `\t`)                                                                                          | §1.4    |
-| 9  | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                  | §12.8   |
-| 10 | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                         | §12.4   |
-| 11 | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                         | §12.26  |
-| 12 | Partial application (sections): supplying some of an operation's arguments — spelling, elaboration, and effect on the cost algebra | §12.27  |
-
-**Closed (recorded here so the numbering stays stable):**
+| #                                                         | Question                                                                                                                           | Finding |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| 1                                                         | The generator-arm payload's collision with the greedy keyword-send collection — the arm body needs its own restricted production   | §12.2   |
+| 2                                                         | `\|` as the generator separator — reserve it, or pick `=>`?                                                                        | §12.2   |
+| 3                                                         | Variant qualification at construction, and the bare default for an _inherited_ variant                                             | §12.7   |
+| 4                                                         | `scan`'s surface spelling                                                                                                          | §12.20  |
+| 5                                                         | The module system's surface grammar                                                                                                | §12.20  |
+| 6                                                         | The symbolic operator character set (whether `:` is an operator character)                                                         | §2.1    |
+| 7                                                         | `Family`'s reservation in type position (decided, but unenforced in the core)                                                      | §12.16  |
+| 8                                                         | The string-escape vocabulary (`\n`, `\t`)                                                                                          | §1.4    |
+| 9                                                         | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                  | §12.8   |
+| 10                                                        | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                         | §12.4   |
+| 11                                                        | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                         | §12.26  |
+| 12                                                        | Partial application (sections): supplying some of an operation's arguments — spelling, elaboration, and effect on the cost algebra | §12.27  |
+| 13                                                        | The law argument's spelling: `identity:` wants a value, `#name` is a reference, and a protocol's identity is an operation          | §12.32  |
+| 14                                                        | Operation aliasing (`.as(...)`): no surface spelling, and a protocol is where two naming conventions must coexist                  | §12.33  |
+| **Closed (recorded here so the numbering stays stable):** |                                                                                                                                    |         |
 
 - **The conditional's branch arity** — there is no conditional. `ifTrue:ifFalse:` is retired: no
   declaration, no sugar. `Bool` appears in result position only, and branching is structural
@@ -875,6 +940,11 @@ The questions this grammar does _not_ settle, with their owning finding in
 - **The block literal** (`[params | expr]`) — retired; see §3.6.1.
 - **Type variables and type parameters** — there are none, by design and permanently; see §3.8 and
   §4.1, and overview §12.29.
+- **Protocol members** — the kind keyword is required and so is the member's type (a spec record, or
+  the `#name` form for `merge`/`scan`); `fold` and `map` members admit a default body,
+  `unfold`/`merge`/`scan` do not; a default body binds `self` and (when `in:` is declared) `other`,
+  and is an expression rather than an arm list. See §4.3, §3.7, and overview §12.30. `between:and:`
+  is retired: a selector has at most one keyword part.
 
 ---
 

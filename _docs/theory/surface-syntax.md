@@ -148,7 +148,6 @@ precedence over patterns when both could match.
 | `Nat`    | `[0-9]+`                   | `42`            | Natural numbers                                  |
 | `Int`    | `-[0-9]+` and `[0-9]+`     | `-3`, `42`      | Negative and non-negative                        |
 | `Bool`   | `True` and `False` (named) | `true`, `false` | Named constructors, not patterns                 |
-| `Symbol` | `#[a-zA-Z][a-zA-Z0-9]*`    | `#sum`          | Used in merge references                         |
 
 User-defined types (e.g., `Complex`, `Rational`) declare their own patterns. The built-ins are
 **examples-shaped here in their VALUE spellings** — a Char value is spelled `'a'` (§1.4's quoted
@@ -225,7 +224,7 @@ spells the quoted forms the surface language recognizes.
 | `map`       | Map operation (field transformation)   |
 | `merge`     | Merge operation (deforestation)        |
 | `satisfies` | Protocol conformance clause            |
-| `not`       | Boolean negation (prefix)              |
+| `not`       | Negation on `Bool` (prefix)            |
 | `self`      | Current instance (always in scope)     |
 | `Family`    | Recursive self-reference in data       |
 | `Self`      | Corecursive self-reference in behavior |
@@ -235,11 +234,11 @@ spells the quoted forms the surface language recognizes.
 
 ### 1.6 Special Values
 
-| Token   | Meaning               |
-| ------- | --------------------- |
-| `nil`   | Null reference        |
-| `true`  | Boolean True variant  |
-| `false` | Boolean False variant |
+| Token   | Meaning                   |
+| ------- | ------------------------- |
+| `nil`   | Null reference            |
+| `true`  | `True` variant of `Bool`  |
+| `false` | `False` variant of `Bool` |
 
 ## 2. Expression Precedence
 
@@ -334,12 +333,14 @@ is no operator hierarchy. Binary operators are fold names — symbolic (`+`, `*`
 **Keyword messages** (lowest precedence, multi-argument, collected greedily):
 
 ```lapis
-a between:and: lo hi
 stack append: 3
+nats take: 5
 ```
 
 A keyword send is `receiver key1: arg1 key2: arg2 ...`. The selector is the concatenation of the
-keyword parts: `take:`, `between:and:`, `append:`.
+keyword parts: `take:`, `append:`. **A selector has one keyword part at most**, because an operation
+takes the receiver and at most one `in:` value. The grammar still collects keyword parts greedily,
+so a two-part spelling parses as one call — it simply names no operation and fails on arity.
 
 **Message chain rule** (from `src/core/grammar.ts`):
 
@@ -446,7 +447,7 @@ The spec record appears after a fold/unfold/map name. Entries are either `key: v
 
 ```lapis
 <out: Number>
-<in: Any, out: Boolean>
+<in: Any, out: Bool>
 <para>
 <histo, out: Number>
 <aux: #length, out: Number>
@@ -580,13 +581,23 @@ keyword in an observer's spec declares a continuation (lazy self-reference).
 protocol ProtocolName [<: Parent]
     fold opName <spec>
     fold opName <spec>
-        _ default body
+        default expression
+    unfold ConstructorName <spec>
+    map opName <spec>
 ```
 
-Protocol methods are fold declarations. A method with an indented body below provides a default
+Protocol members are operation **signatures**: the kind keyword (`fold`, `unfold`, `map`, `merge`,
+`scan`) is required, and so is the member's type — a spec record for `fold`/`unfold`/`map`, the
+`#name` form for `merge`/`scan`. A member with an indented body below it supplies a default
 implementation; one without is abstract (required).
 
-**AST:** `ProtocolDecl(name, parent, methods: FoldDecl[])`
+A default body is an expression rather than an arm list — a protocol cannot see its conformers'
+variants, so a default composes operations over `self`. It may read `self` and, when `in:` is
+declared, `other`, and may be preceded by contract clauses. Only `fold` and `map` members may be
+defaulted; `unfold` members declare a constructor the protocol cannot supply, and `merge`/`scan` are
+fusion directives.
+
+**AST:** `ProtocolDecl(name, parent, members: ProtocolMember[])`
 
 ### 4.4 `relation` — Span-Structured Data
 

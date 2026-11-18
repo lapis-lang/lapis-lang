@@ -48,14 +48,13 @@ data Color
         Green -> "#00FF00"
         Blue -> "#0000FF"
 
-    fold isWarm <out: Boolean>
+    fold isWarm <out: Bool>
         Red -> true
         Green -> false
         Blue -> false
 
 Color Red toHex                       /* "#FF0000" */
 Color Red isWarm                      /* true */
-Color Red instanceof: Color           /* true */
 ```
 
 Each case arm uses `->` to separate the pattern from the body. Single-expression bodies appear on
@@ -111,7 +110,7 @@ data Stack
         Empty -> {}
         Push value rest -> {value} , rest
 
-    fold contains <in: Any, out: Boolean>
+    fold contains <in: Any, out: Bool>
         Empty target -> false
         Push value rest target -> value = target | (rest contains: target)
 
@@ -198,9 +197,8 @@ data ExtendedColor <: Color
         Orange -> true
         Purple -> false
 
-ExtendedColor Yellow instanceof: Color          /* true */
-ExtendedColor Yellow instanceof: ExtendedColor  /* true */
-Color Red instanceof: ExtendedColor             /* false */
+ExtendedColor Yellow toHex            /* "#FFFF00" */
+Color Red toHex                       /* "#FF0000" — inherited */
 ```
 
 Inherited variants and their handlers are resolved automatically. New variants require only the new
@@ -311,33 +309,85 @@ is a decision on a seed, and belongs here.
 
 ```lapis
 protocol Eq
-    equals: <in: Self, out: Boolean>
-    notEquals: <in: Self, out: Boolean>
+    fold equals <in: Self, out: Bool>
+    fold notEquals <in: Self, out: Bool>
         (self equals: other) not
 
 protocol Ordered <: Eq
-    compare: <in: Self, out: Number>
-    lessThan: <in: Self, out: Boolean>
+    fold compare <in: Self, out: Number>
+    fold lessThan <in: Self, out: Bool>
         (self compare: other) < 0
-    greaterThan: <in: Self, out: Boolean>
+    fold greaterThan <in: Self, out: Bool>
         (self compare: other) > 0
-    between:and: <in: Self, out: Boolean>
-        (self lessThan: hi) & (self greaterThan: lo)
 
 /* Declare conformance */
 data Num
     N value: Number
 
     satisfies: Ordered
+    fold equals <in: Self, out: Bool>
+        N value other -> value = other value
     fold compare <in: Self, out: Number>
         N value other -> value - other value
 
 (Num N: 3) lessThan: (Num N: 5)    /* true */
-(Num N: 3) instanceof: Ordered     /* true */
 ```
 
-Abstract methods declare a signature with `<spec>`; an indented body below provides the default
-implementation. Conformance is declared with `satisfies:` and verified structurally.
+A member is a signature — `fold`, `unfold`, `map`, `merge`, or `scan`, with its type stated (a spec
+record, or the `#name` form for `merge`/`scan`) — and an indented body below it supplies a
+**default** implementation. Conformance is declared with `satisfies:` and verified structurally; a
+member neither declared by the type nor carrying a default is a conformance error.
+
+The default body is an expression, not an arm list: a protocol cannot see its conformers' variants,
+so a default can only compose operations over `self`. Those bodies may read `self` and, when the
+member declares `in:`, `other` — the two names the machinery supplies. `notEquals` above derives
+from `equals`, and `lessThan`/`greaterThan` derive from `compare`, which is the whole point of a
+default: an operation a conformer gets for free from one it declared.
+
+`Unfold` members declare a constructor each conformer must supply, so they take no default;
+`merge`/`scan` are fusion directives and take none either.
+
+Conformance is a typing fact (`Num <: Ordered`), not a value-level query, so there is no
+`instanceof`-style operation in the surface. A program that wants to ask declares its own fold.
+
+### Algebraic protocols: a monoid
+
+A protocol can require a constructor as well as folds, which is what makes the algebraic hierarchy
+expressible. `Monoid` extends `Semigroup` and adds an identity _value_ — an `unfold`, because it
+produces its type rather than eliminating it:
+
+```lapis
+protocol Semigroup
+    fold combine <in: Self, out: Self, properties: (associative)>
+
+protocol Monoid <: Semigroup
+    unfold Identity
+    fold combine <in: Self, out: Self, properties: (associative, identity: Identity)>
+
+data Nat
+    Zero
+    Succ pred: Family
+
+    satisfies: Monoid
+    unfold Identity
+        Zero -> true
+    fold combine <in: Self, out: Self>
+        Zero other -> other
+        Succ pred other -> Succ pred combine: other
+```
+
+Two things are load-bearing here.
+
+**`Monoid` re-declares `combine`.** It inherits `Semigroup`'s member wholesale, so re-declaring
+looks redundant — but a law is attached to an operation, and the child needs `identity` added.
+Properties union through inheritance (`elaboration.md` §6.2), so the effective set is
+`(associative, identity: Identity)` and the repeated `associative` is only for readability. A child
+can add a property but never remove one.
+
+**`Identity` is a seedless unfold.** It takes no `in:`, so its arms carry no bindings: the arm head
+is the variant the conformer produces and the guard alone decides. That is a constant constructor,
+which is exactly what an identity element is — one value, no recursion input, no default body
+possible, because a protocol cannot name a constructor it cannot see.
 
 ---
 
@@ -437,8 +487,8 @@ declared `origin` and `destination` projections.
 ```lapis
 query PathFinder
     path:    Array
-    solved:  Boolean
-    done:    Boolean
+    solved:  Bool
+    done:    Bool
     next:    Self
     output:  #path
     accept:  #solved

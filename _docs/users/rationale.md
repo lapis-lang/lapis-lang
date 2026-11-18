@@ -441,8 +441,8 @@ state.
 ```lapis
 query PathFinder
     path:    Array
-    solved:  Boolean
-    done:    Boolean
+    solved:  Bool
+    done:    Bool
     next:    Self
     output:  #path
     accept:  #solved
