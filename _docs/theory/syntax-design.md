@@ -66,10 +66,10 @@ the same line; multi-line bodies indent below.
 
 ```lapis
 data Point
-    Point2D x: Number y: Number
-    Point3D x: Number y: Number z: Number
+    Point2D x: Int y: Int
+    Point3D x: Int y: Int z: Int
 
-    fold distanceFromOrigin <out: Number>
+    fold distanceFromOrigin <out: Float>
         Point2D x y -> (x squared + y squared) sqrt
         Point3D x y z -> (x squared + y squared + z squared) sqrt
 
@@ -98,7 +98,7 @@ data Stack
     Empty
     Push value: Any rest: Family
 
-    fold size <out: Number>
+    fold size <out: Int>
         Empty -> 0
         Push _ rest -> 1 + rest
 
@@ -106,7 +106,7 @@ data Stack
         Empty -> nil
         Push value -> value
 
-    fold toArray <out: Array>
+    fold toArray <out: List>
         Empty -> {}
         Push value rest -> {value} , rest
 
@@ -114,7 +114,7 @@ data Stack
         Empty target -> false
         Push value rest target -> value = target | (rest contains: target)
 
-    unfold FromArray <in: Array>
+    unfold FromArray <in: List>
         Empty arr -> arr isEmpty | {}
         Push arr -> arr notEmpty | value: arr first rest: arr tail
 
@@ -153,7 +153,7 @@ s pop    /* [3, Push(value:2, rest:Empty)] */
 data Fib
     Zero One  Succ pred: Family
 
-    fold fib <histo, out: Number>
+    fold fib <histo, out: Int>
         Zero -> 0
         One -> 1
         Succ pred -> pred + prev pred
@@ -170,11 +170,11 @@ the course of values.
 data List
     Nil  Cons head: Any tail: Family
 
-    fold length <out: Number>
+    fold length <out: Int>
         Nil -> 0
         Cons _ tail -> 1 + tail
 
-    fold average <aux: #length, out: Number>
+    fold average <aux: #length, out: Int>
         Nil -> 0
         Cons head tail -> head + tail / aux length
 ```
@@ -212,7 +212,7 @@ cases.
 data Box
     Box contents: Any
 
-    map double <in: Number>
+    map double <in: Int>
         Box contents -> Family Box contents: (contents * 2)
 
 (Box Box contents: 5) double   /* Box(contents: 10) */
@@ -226,7 +226,7 @@ data Box
 data List
     Nil  Cons head: Any tail: Family
 
-    fold sum <out: Number>
+    fold sum <out: Int>
         Nil -> 0
         Cons head tail -> head + tail
 
@@ -247,11 +247,11 @@ behavior Stream
     head: <out: Any>
     tail: <out: Self>
 
-    unfold From <in: Number>
+    unfold From <in: Int>
         head -> self
         tail -> self + 1
 
-    unfold Constant <in: Number>
+    unfold Constant <in: Int>
         head -> self
         tail -> self
 
@@ -279,10 +279,10 @@ both of the values the decision needs, so no product type and no conditional is 
 
 ```lapis
 data Slice
-    Slice remaining: Nat source: Stream
+    Slice remaining: Int source: Stream
 
-/* `Array` is the prelude's list; its variants are `Nil` and `Cons`. */
-data Array
+/* `List` is the prelude's list; its variants are `Nil` and `Cons`. */
+data List
     Nil
     Cons head: Any rest: Family
         Cons slice ->
@@ -290,14 +290,14 @@ data Array
                 | head: slice source head
                   rest: Slice remaining: slice remaining - 1 source: slice source tail
 
-Array Take: (Slice remaining: 5 source: (Stream From: 0))    /* [0, 1, 2, 3, 4] */
+List Take: (Slice remaining: 5 source: (Stream From: 0))    /* [0, 1, 2, 3, 4] */
 ```
 
-The unfold is declared inside `Array` because an unfold produces the type that encloses it — the
+The unfold is declared inside `List` because an unfold produces the type that encloses it — the
 result type is the declaration site, never a parameter. Reading the arms as a decision table: the
 base arm produces `Nil` when the seed's budget is spent, and the step arm produces a `Cons` whose
 rest is the next seed (the budget one smaller, the source one observation further along). That is
-the `NatList Range` shape from `overview.md` §3.2, with a two-field seed.
+the `IntList Range` shape from `overview.md` §3.2, with a two-field seed.
 
 This is why branching needs no conditional: **fold arms dispatch on a variant, unfold arms decide on
 a seed.** A decision that is neither — one computed over a value with no discriminating variants —
@@ -314,7 +314,7 @@ protocol Eq
         (self equals: other) not
 
 protocol Ordered <: Eq
-    fold compare <in: Self, out: Number>
+    fold compare <in: Self, out: Int>
     fold lessThan <in: Self, out: Bool>
         (self compare: other) < 0
     fold greaterThan <in: Self, out: Bool>
@@ -322,12 +322,12 @@ protocol Ordered <: Eq
 
 /* Declare conformance */
 data Num
-    N value: Number
+    N value: Int
 
     satisfies: Ordered
     fold equals <in: Self, out: Bool>
         N value other -> value = other value
-    fold compare <in: Self, out: Number>
+    fold compare <in: Self, out: Int>
         N value other -> value - other value
 
 (Num N: 3) lessThan: (Num N: 5)    /* true */
@@ -398,7 +398,7 @@ algebraic laws automatically.
 
 ```lapis
 data Num
-    N value: Number
+    N value: Int
 
     fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
         N value other -> Num N: value + other value
@@ -424,7 +424,7 @@ data Stack
         value: Any
         rest:  Family
 
-    fold pop <out: Array>
+    fold pop <out: List>
         demands: self | self size > 0
         ensures: self old result | result size = 2
         rescue:  self err args retry | retry value: 0
@@ -462,7 +462,7 @@ relation Ancestor
         Direct _ to -> to
         Transitive _ rest -> rest
 
-    fold depth <out: Number>
+    fold depth <out: Int>
         Direct -> 1
         Transitive hop rest -> hop + rest
 
@@ -486,7 +486,7 @@ declared `origin` and `destination` projections.
 
 ```lapis
 query PathFinder
-    path:    Array
+    path:    List
     solved:  Bool
     done:    Bool
     next:    Self
@@ -522,7 +522,7 @@ coinductive loop.
 
 ```lapis
 io Counter
-    state: Number
+    state: Int
 
     Increment state -> (state: state + 1, output: state + 1)
     Reset _ -> (state: 0, output: 0)

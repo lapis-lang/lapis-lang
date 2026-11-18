@@ -121,7 +121,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   language. Every law in `E` is an axiom carrying a **provenance tag**:
 
   - **`primitive`** — the language definition pins builtin operations with fixed law sets (e.g.
-    `Nat.+ : associative, commutative, identity:Zero`). Authority: language fiat; the TCB is the
+    `Int.+ : associative, commutative, identity: 0`). Authority: language fiat; the TCB is the
     language implementation, the same trust already granted for totality/evaluation. The primitive
     tier is also the **axiom base** for derivations: composite laws over folds built from primitives
     are derivable via BMF calculational rules (fold-fusion etc.).
@@ -264,8 +264,14 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 - Base types (`ι` in the calculus: `Int`, `String`, `Bool`, ...) are **eliminated**. All types are
   `μ` (data) or `ν` (codata).
 - `Bool` = `data Bool (True | False)` — named constructors, zero fields.
-- `Nat`, `Int`, `String`, `Complex`, `Rational`, etc. = `data` types with **pattern-matched
-  constructors** (a compact specification of an infinite constructor set).
+- `Int`, `String`, `Complex`, `Rational`, etc. = `data` types with **pattern-matched constructors**
+  (a compact specification of an infinite constructor set). `Int`'s one pattern is `-?[0-9]+`,
+  covering both signs.
+- `Nat` = `data Nat (Zero | Succ pred: Family)` — a **named** Peano carrier, not a pattern type. It
+  carries the integer story where a definition is required of the _language_ rather than of the
+  lexer, and it is what the law suite's `add` is declared over. There is no `Nat <: Int`: pattern
+  subtyping requires the subtype to declare every pattern source its super declares, and `Int`'s
+  language is not `Nat`'s. See [`theory/prelude.md`](./theory/prelude.md) §2.4–§2.5.
 - **Pattern language**: restricted regular fragment with type references — character literals,
   character classes `[...]`, negated classes `[^...]`, any character `.`, quantifiers `+ * ?`,
   escape `\`, type reference `<TypeName>` (pattern interpolation — match the pattern of another data
@@ -283,9 +289,11 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   single character. `<TypeName>` = type reference (non-terminal). `\<` and `\>` = literal angle
   brackets.
 - **Bootstrapping order**: alphabet (primitive — input domain, not a type) → `Token` (primitive: raw
-  matched text, the one non-μ type) → `Char` (`.` — any single character) → `String` (`"<Char>*"` —
-  quoted sequence of Chars) → `Nat` (`[0-9]+`) → `Int` (`-[0-9]+` and `[0-9]+`) → `Bool` (named) →
-  operators on `Nat`/`Int` → everything else.
+  matched text, the one non-μ type, core-only and not user-spellable) → `Char` (`'.'` — any quoted
+  single character) → `String` (`"<Char>*"` — quoted sequence of Chars) → `Int` (`-?[0-9]+`) →
+  `Bool` (named) → operators on `Int` → everything else. `Token` is deliberately absent from the
+  _prelude_, which is the user-visible layer: the core needs it to type the `match` binding, and a
+  program never names it (`theory/prelude.md` §2.1).
 - **Pattern-matched folds are flat**: no `Family` fields, no recursion. The fold is a single-step
   extraction: the handler receives the matched token (implicit `match` field) and transforms it.
   Recursion depth 1.
@@ -352,7 +360,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   another fold, or a companion fused into the same traversal via `<aux: …>`. This is not a
   workaround: the declared form is strictly stronger (declared type, reuse, laws, cost summary,
   identity preserved through elaboration by `E-Op`). The quadratic formula is the canonical case —
-  the discriminant is a `fold discriminant <out: Number>` and `roots` is `<aux: #discriminant>`
+  the discriminant is a `fold discriminant <out: Float>` and `roots` is `<aux: #discriminant>`
   (`surface-grammar.md` §8.1). The corpus supports the rule: no worked example in `_docs/` needs a
   local except the two-root case, which `aux` already serves.
 - **Revisit trigger.** Reifiable binding (a `Let` _value_, programs-as-data) is a Stage-7
@@ -497,7 +505,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 6. **Pattern constructors with captures — DECIDED conceptually, pinning in
    [#85](https://github.com/lapis-lang/lapis-lang/issues/85).** Pattern constructors carry named
    captures (`<name: TypeName>`) that extract sub-matches as typed fields, paralleling named
-   constructor fields. E.g., `Rect <real: Nat>\+<imag: Nat>j` for `Complex`. The captures are the
+   constructor fields. E.g., `Rect <real: Int>\+<imag: Int>j` for `Complex`. The captures are the
    fields, bound in fold arms by the capture name. The pattern is a parser, captures are semantic
    values. `_docs/overview.md` §2.2 teaches the form (`Ratio <p: Int>/<q: Int>`,
    `Cartesian <re: Float>+<im: Float>i`). Remaining to pin (the #85 work items):

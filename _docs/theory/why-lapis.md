@@ -89,7 +89,7 @@ every claim:
   declarations.
 - **Subtyping works.** Comb inheritance (NewtonScript-style dual delegation) gives
   `ExtendedColor <: Color` with inherited and overridable fold handlers. Field narrowing gives
-  `NumList <: List` without generics.
+  `IntList <: List` without generics.
 - **Contracts work.** Demands/ensures/rescue/invariant with LSP subcontracting (demands OR-weaken,
   ensures AND-strengthen). Fault-tolerant folds where rescue handles per-node failures while the
   traversal continues.

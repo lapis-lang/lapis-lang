@@ -118,21 +118,24 @@ check will run (the same `assignments` enumeration).
 
 ### 2.3 Pattern types are always infinite
 
-A pattern-matched data type (`PatternDataType`) is a regular language over the lexer alphabet. By
-the Chomsky–Schützenberger theorem, every regular language has a **rational** generating function;
-for `Nat = [0-9]+` the equation is $L = 1 + 10\,L$ (the geometric series $1/(1-a)$) — no closed
-bound, hence no exhaustion, ever. This is the formal refutation of proof-by-exhaustion as a default
-discharge for the pattern universe (`Rational`, `Complex`, `Nat`, `Int`, `String`): the classifier
-returns "unbounded" for every one of them, permanently.
+A pattern-matched data type is a regular language over the lexer alphabet. By the
+Chomsky–Schützenberger theorem, every regular language has a **rational** generating function.
+`Int`'s single pattern `-?[0-9]+` states its equation directly: a digit block $D$ with
+$D = 1 + 10\,D$ (a geometric series of ratio 10), optionally prefixed by `-`. The per-length counts
+are $c_n = 10^n + 10^{n-1}$ for $n \ge 2$ — the $10^n$ non-negative strings plus the `-`-prefixed
+$10^{n-1}$ — with $c_1 = 10$ (no negative string has length 1: a lone `-` carries no digit). So
+$c_1 = 10$, $c_2 = 110$, $c_3 = 1100$, each a geometric series with ratio 10. No closed bound, hence
+no exhaustion, ever. This is the formal refutation of proof-by-exhaustion as a default discharge for
+the pattern universe (`Rational`, `Complex`, `Int`, `String`): the classifier returns "unbounded"
+for every one of them, permanently.
 
 Pattern types get their counting from the **coefficient** reading (§3), whose pattern arm is now the
 **language-equation reading** (implemented, `pattern_lang.ts`): each pattern's AST states its
 equation directly — character/class → count at length 1, concatenation → convolution, star →
 $L = \varepsilon + P \cdot L$, plus → $P \cdot P^*$, optional → the $\varepsilon$-branch, type
-reference → the referenced type's counts (memoized, cycles rejected loudly). For `Nat = [0-9]+` this
-reads as $L = P \cdot L$ with $P$ = 10 chars — $c_n = 10^n$, exactly as the geometric series
-$1/(1-a)$ says. Discharge is `machineFinite` sub-space sweeps (§5) or derivation (§6) — never
-exhaustion.
+reference → the referenced type's counts (memoized, cycles rejected loudly). The same arithmetic on
+`-?[0-9]+` reproduces $c_1 = 10$, $c_2 = 110$, $c_3 = 1100$ — the two branches' series summed.
+Discharge is `machineFinite` sub-space sweeps (§5) or derivation (§6) — never exhaustion.
 
 ## 3. Coefficients: certified screen coverage
 
@@ -263,9 +266,9 @@ universe is instead a **one-line language fiat**: `.` and classes range over cod
 
 In type-algebra terms, the sub-space sweep applies §2.2's sweep arithmetic to a **filtered
 carrier**: the certified size is the sub-space's cardinality, which `exhaustLaw` knows exactly
-because it enumerated it. This is the discharge route for machine-finite _pattern_ carriers (`Nat`,
-`Int`, `Char`, user-declared pattern types) — the only route besides §6's derivation, since §2.3
-bars them from structural exhaustion forever.
+because it enumerated it. This is the discharge route for machine-finite _pattern_ carriers (`Int`,
+`Char`, user-declared pattern types) — the only route besides §6's derivation, since §2.3 bars them
+from structural exhaustion forever.
 
 ## 6. Derivation: the BMF engine (implemented — `src/core/derivation.ts`)
 

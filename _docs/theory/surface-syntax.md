@@ -35,8 +35,8 @@ char after keyword must not be `alnum` or `_`) to prevent `dataFoo` from matchin
 ### 1.3 Pattern-Matched Data Types
 
 Base types are eliminated (see [`design-decisions.md`](../design-decisions.md) §"No base types").
-`Nat`, `Int`, `String`, `Bool`, etc. are `data` types with pattern-matched or named constructors.
-The lexer is driven by `data` declarations: each pattern constructor is a lexical rule.
+`Int`, `String`, `Bool`, etc. are `data` types with pattern-matched or named constructors. The lexer
+is driven by `data` declarations: each pattern constructor is a lexical rule.
 
 **Pattern language** (restricted regular fragment with type references):
 
@@ -52,7 +52,7 @@ The lexer is driven by `data` declarations: each pattern constructor is a lexica
 | Counted — exact   | `{n}`                | `#[A-F0-9]{6}`      | exactly n of the preceding             |
 | Counted — min     | `{n,}`               | `x{2,}`             | n or more of the preceding             |
 | Counted — range   | `{n,m}`              | `#[0-9]{1,3}`       | between n and m of the preceding       |
-| Type reference    | `<TypeName>`         | `<Char>`, `<Nat>`   | match the pattern of another data type |
+| Type reference    | `<TypeName>`         | `<Char>`, `<Int>`   | match the pattern of another data type |
 | Escape            | `\`                  | `\+`, `\.`, `\<`    | literal special char                   |
 
 **Metacharacters** (must be escaped when meant literally): `+ * ? [ ] \ . < > { }`.
@@ -139,32 +139,38 @@ precedence over patterns when both could match.
 
 **Lexer priority:** patterns > operators > identifiers. Within each phase, longest match wins.
 
-**Default (built-in) data types and their patterns:**
+**Default (built-in) data types and their patterns** — derived from [`prelude.md`](./prelude.md) §2,
+which is the single definition site:
 
-| Type     | Pattern(s)                 | Example         | Notes                                            |
-| -------- | -------------------------- | --------------- | ------------------------------------------------ |
-| `Char`   | `.`                        | `'a'`, `'7'`    | Any single character; the first data type        |
-| `String` | `"<Char>*"`                | `"hello"`       | Double-quoted sequence of Chars (type reference) |
-| `Nat`    | `[0-9]+`                   | `42`            | Natural numbers                                  |
-| `Int`    | `-[0-9]+` and `[0-9]+`     | `-3`, `42`      | Negative and non-negative                        |
-| `Bool`   | `True` and `False` (named) | `true`, `false` | Named constructors, not patterns                 |
+| Type     | Pattern(s)                 | Example         | Notes                                                  |
+| -------- | -------------------------- | --------------- | ------------------------------------------------------ |
+| `Char`   | `'.'`                      | `'a'`, `'7'`    | Any single character; the first data type              |
+| `String` | `"<Char>*"`                | `"hello"`       | Double-quoted sequence of Chars (type reference)       |
+| `Int`    | `-?[0-9]+`                 | `-3`, `42`      | Signed integer, one pattern covering both signs        |
+| `Bool`   | `True` and `False` (named) | `true`, `false` | Named constructors, not patterns                       |
+| `Nat`    | none (named)               | `Nat Succ …`    | Peano: `Zero`, `Succ pred: Family` — no pattern member |
 
 User-defined types (e.g., `Complex`, `Rational`) declare their own patterns. The built-ins are
 **examples-shaped here in their VALUE spellings** — a Char value is spelled `'a'` (§1.4's quoted
-forms), the PATTERN for Char remains the undelimited `.`; the quoting belongs to the value syntax,
-not the pattern language. Escape handling inside quoted values (`\n`/`\t` vs the delimiter escapes
-only) stays open — see §9.1.
+forms), and Char's PATTERN is the quoted form `'.'` too: the delimiters are part of the pattern, so
+the pattern matches its own example and the quote heads stay reserved (§1.3's `'`/`"` ownership
+rule). Escape handling inside quoted values (`\n`/`\t` vs the delimiter escapes only) stays open —
+see §9.1.
+
+`Int` is a single pattern, not two: `-[0-9]+` and `[0-9]+` would be two pattern members claiming the
+same token language where one suffices, and a lone `-?[0-9]+` is what makes `Int` the sole owner of
+the integer lexeme space.
 
 **Elimination (pattern-matched fold):** a fold over a pattern-matched data type eliminates the
-token, not a variant. The annotation names the pattern-matched carrier — a registered
-`PatternDataType` (e.g., the `NatPat = [0-9]+` pattern type, distinct from a variant-based `data`
-type; a variant-carrier fold takes the §4.1 form instead). In the LC core's concrete syntax the
-handler head re-spells the constructor — the same `match("p")` form the introduction uses — and the
-body references the fixed binding `match` (the matched token, typed at `Token`); there is no
+token, not a variant. The annotation names the pattern-matched carrier — a registered `DataType`
+carrying pattern members (e.g., the `IntPat = -?[0-9]+` pattern type, distinct from a variant-based
+`data` type; a variant-carrier fold takes the §4.1 form instead). In the LC core's concrete syntax
+the handler head re-spells the constructor — the same `match("p")` form the introduction uses — and
+the body references the fixed binding `match` (the matched token, typed at `Token`); there is no
 binding-list position (a pattern has no fields):
 
 ```lapis
-fold [NatPat] tok { match("[0-9]+") -> toNumber(match), ... }
+fold [IntPat] tok { match("-?[0-9]+") -> toNumber(match), ... }
 ```
 
 The handler's pattern must be declared on the fold's carrier (the same gate the introduction form
@@ -172,6 +178,12 @@ runs — anchored, resolvable, declared), exhaustiveness covers every declared p
 canonically, and dispatch compares the token's canonical source. See [`lc.md`](./lc.md) §5.2b
 (T-FoldMatch) and §3.1 (E-FoldMatch). The surface language's declarative fold form (§5.1) elaborates
 to this form when the carrier is a pattern type.
+
+`toNumber` is illustrative, not declared: turning a matched token into a runtime number is part of
+the machine-numbers gap ([#119](https://github.com/lapis-lang/lapis-lang/issues/119),
+[`prelude.md`](./prelude.md) §5.5). The handler's shape — one arm per declared pattern, `match`
+bound at `Token` — is what this section pins; what the body does with the token is the fold author's
+business.
 
 ### 1.4 Comments
 
@@ -291,7 +303,7 @@ flowchart TD
     binaryExpr --> unaryExpr
     unaryExpr --> unary_chain["unaryExpr ' ' ident"]
     unaryExpr --> primary
-    primary --> prim_data["pattern-matched data (Nat, Int, String, ...)"]
+    primary --> prim_data["pattern-matched data (Int, String, ...)"]
     primary --> prim_ref["self / Family / Self / old f / prev f / aux f"]
     primary --> prim_nil["nil / true / false"]
     primary --> prim_array["{ expr, ... }  (ArrayLit)"]
@@ -404,7 +416,7 @@ error, never a silent function value — the uniform-access getter/method split 
 Partial application (a function value of fewer arguments than the operation's arity) has no
 production yet; see overview §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
 
-### 3.2 Array Literal `{ expr, expr, ... }`
+### 3.2 List Literal `{ expr, expr, ... }`
 
 ```lapis
 {}                        — empty array
@@ -446,11 +458,11 @@ The spec record appears after a fold/unfold/map name. Entries are either `key: v
 (boolean presence).
 
 ```lapis
-<out: Number>
+<out: Int>
 <in: Any, out: Bool>
 <para>
-<histo, out: Number>
-<aux: #length, out: Number>
+<histo, out: Int>
+<aux: #length, out: Int>
 <out: Family, properties: (distributive: #sum)>
 ```
 
@@ -815,7 +827,7 @@ data Stack
     Empty
     Push value: Any rest: Family
 
-    fold size <out: Number>
+    fold size <out: Int>
         Empty -> 0
         Push _ rest -> 1 + rest
 
@@ -827,7 +839,7 @@ data Stack
         Empty -> nil
         Push value rest -> value , old rest
 
-    unfold FromArray <in: Array>
+    unfold FromArray <in: List>
         Empty arr -> arr isEmpty
         Push arr -> arr notEmpty | value: arr first rest: arr tail
 ```
@@ -865,10 +877,10 @@ does not declare.
    of whether `,` should have different precedence is moot under the Smalltalk model — it doesn't.
    Users must use parentheses if they want different grouping.
 
-4. **Keyword send ambiguity with specs.** A spec record `<out: Number>` uses `:` inside angle
-   brackets, while a keyword send `append: 3` uses `:` in message position. The grammar
-   disambiguates by context (specs only appear after fold/unfold/map names), but this is fragile.
-   Consider whether a different spec syntax would be cleaner.
+4. **Keyword send ambiguity with specs.** A spec record `<out: Int>` uses `:` inside angle brackets,
+   while a keyword send `append: 3` uses `:` in message position. The grammar disambiguates by
+   context (specs only appear after fold/unfold/map names), but this is fragile. Consider whether a
+   different spec syntax would be cleaner.
 
 5. **Multi-line expressions.** The current grammar requires expressions to be on a single line (or
    an indented continuation for case-arm bodies). No explicit line-continuation syntax. A long
@@ -889,7 +901,7 @@ does not declare.
 7. **Pattern constructors with captures (decided conceptually; pinning in
    [#85](https://github.com/lapis-lang/lapis-lang/issues/85)).** Pattern constructors support named
    captures (`<name: TypeName>`) that extract sub-matches as typed fields. E.g.,
-   `Rect <real: Nat>\+<imag: Nat>j` for `Complex`, where `real` and `imag` are bound in fold
+   `Rect <real: Int>\+<imag: Int>j` for `Complex`, where `real` and `imag` are bound in fold
    handlers. Conceptually sound (pattern = parser, captures = semantic values). #85 owns the surface
    spelling, handler-schema, and capture-reading work; the fold arm-keying rule is decided in
    `_docs/overview.md` §12.10 (constructor-name keying; single-pattern types may key on the type
