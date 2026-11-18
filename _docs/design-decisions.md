@@ -27,10 +27,16 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
 ## Core calculus
 
 - **F<: + μ/ν + guarded fold/unfold + qualified types.** NOT Fω — no higher-kinded polymorphism.
-- Subtyping subsumes generics (Meyer OOSC, Bracha). Comb inheritance + field narrowing is the
-  mechanism.
+- **No generics, no type parameters — permanently.** Subtyping is the _sole_ abstraction mechanism,
+  not a substitute waiting to be swapped back (Meyer OOSC, Bracha). Comb inheritance + field
+  narrowing is the mechanism, and the surface has **no type-variable production and no parameter
+  list on any declaration** (`surface-grammar.md` §3.8, §4.1). There is no `data List<a>`, no `t[τ]`
+  in type position, and no `typeParam:` spec key. This is a closed decision: the calculus stays F<:,
+  and no future proposal reopens it. Where a generic type would appear, one of three existing forms
+  does the work instead — a **subtype** with narrowed fields, the declaring type itself (`Self`), or
+  the lattice top **`Any`**.
 - Cost: loss of parametricity. Recovered _by declaration_ via `properties` annotations (associative,
-  idempotent, etc.). Reframe `properties` as the price paid for subtyping-over-generics.
+  idempotent, etc.). `properties` is the price paid for subtyping-over-generics.
 - No general fixpoint. Recursion only via fold (terminating, data finite) and unfold (productive,
   guarded). Sized-types story specialized to bialgebraic setting.
 - **Iso-recursive, not equi-recursive.** `fold_T`/`unfold_T` are explicit core terms, not silent
@@ -50,10 +56,10 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
 The calculus is shaped by three deliberate choices, each with a cost that is paid back by a design
 feature:
 
-1. **F<:, not Fω.** No higher-kinded polymorphism. Subtyping (with bounded quantification) subsumes
-   generics (Meyer, Bracha). Protocols are predicates over the subtyping lattice, not
-   type-constructors. The cost — loss of parametricity — is recovered _by declaration_ via
-   `properties`.
+1. **F<:, not Fω.** No higher-kinded polymorphism, and **no generics at any kind**. Subtyping is the
+   sole abstraction mechanism (Meyer, Bracha); protocols are predicates over the subtyping lattice,
+   not type-constructors. The cost — loss of parametricity — is recovered _by declaration_ via
+   `properties`. Permanent: no surface type-variable or type-parameter production exists or will.
 
 2. **μ/ν, not general fix.** Data is μ (initial algebra); codata is ν (final coalgebra). No `fix` or
    `Y`. Termination of folds and productivity of unfolds follow from the F-structure being the
@@ -354,7 +360,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   interning and equality, and the `#name` reference-vs-value spelling collision — exactly the clause
   `overview.md` §12.23 leaves open for `Symbol`.
 
-## Function values: blocks are codata, not a literal
+## Function values: no literal, no wrapper type
 
 - **There is no block literal.** `[params | expr]` is removed from the grammar. It was the surface
   language's last anonymous binder: no top-level definition form, no `let … in`, and no arm-level
@@ -365,20 +371,22 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   summary (`lc.md` §2.2, `E-Op`); an anonymous lambda carries none of them. A block literal was also
   a thunk-by-hand in the one place (contracts) where the elaborator was already going to delay the
   body.
-- **A function value is a `Block`, an ordinary codata type.** `Block<σ,τ> = ν α. Π value: (σ → τ)`
-  lives in the prelude (`overview.md` §12.27), declared like any other `behavior`. Block values are
-  produced by `unfold`; an operation reference is the other function value and has type `σ → τ`
-  directly.
+- **A function value is a value of function type.** Its type is the operation's curried signature, a
+  `FunType` chain (`ops.ts`'s `OpSig.signature`) — there is no function-value type in the prelude,
+  and no wrapper for a lambda to inhabit. An intermediate `Block<σ,τ>` codata type was considered
+  and **rejected**: it would have needed type parameters to be writable, which §2.1 rules out, and
+  it would have been uninhabited anyway, since an `unfold` cannot produce a `σ → τ` and an operation
+  reference already _is_ one.
 - **Applying a function value needs no production.** A keyword send already means "eliminate the
   receiver, then apply the arguments" (`elaboration.md` §2.5): `fold` eliminates data, **observation
-  eliminates codata** (`E-Obs`). So `b value: x` elaborates to `(b.value) x` — observe, then apply.
+  eliminates codata**, and **application eliminates a function type**. So `f value: x` applies `f`.
   There is no `expr expr` production and no dedicated `value:` suffix; application falls out of the
-  send rule that already exists. This is why blocks-as-codata is not cosmetic: it makes application
-  _derived_ instead of _added_.
-- **Parentheses re-open the message chain.** `(b value: x) value: y` is two sends, not one two-part
-  selector — the same mechanism that keeps uniform binary precedence unambiguous. `Block` is
-  single-parameter; multi-parameter blocks are curried and spelled by nesting, matching the core's
-  `Observer` (one type slot). No tuple/product type is introduced.
+  send rule that already exists. Making application _derived_ rather than _added_ is what keeps the
+  surface free of both an application production and a function-value type.
+- **Parentheses re-open the message chain.** `(f value: x) value: y` is two sends, not one two-part
+  selector — the same mechanism that keeps uniform binary precedence unambiguous. A function type is
+  single-parameter; multi-argument function values are curried and spelled by nesting, matching the
+  core's `Observer` (one type slot). No tuple/product type is introduced.
 - **Under-application is an error.** `xs append` where `append` has an `<in: …>` parameter is an
   arity error, never a silently produced function value. The uniform-access getter/method split is
   unchanged. Partial application (a section) is a separate open item — `overview.md` §12.27,

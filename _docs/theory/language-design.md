@@ -21,13 +21,18 @@ syntax, semantics, type system, and evaluation model, and defines an iterative i
 
 ## 2. Key Design Decisions
 
-### 2.1 Subtyping Subsumes Generics (not Fω)
+### 2.1 Subtyping is the Only Abstraction Mechanism (not Fω)
 
-Lapis avoids parametric polymorphism (generics) in favor of a sufficiently expressive subtyping
-discipline. Following Meyer (OOSC) and Bracha (Pluggable Type Systems), bounded quantification over
-a subtyping lattice recovers most of what generics buy you: `NumList <: List` _is_ `List<Number>`
-expressed as a subtype rather than a type parameter. Comb inheritance + field narrowing is the
-mechanism.
+Lapis has **no parametric polymorphism (generics) and no type parameters — now or in the future**. A
+subtyping discipline is the whole of the language's type abstraction. Following Meyer (OOSC) and
+Bracha (Pluggable Type Systems), a subtyping lattice covers what a generic type would express:
+`NumList <: List` _is_ `List<Number>` expressed as a subtype rather than a type parameter. Comb
+inheritance + field narrowing is the mechanism.
+
+This is expressed in the surface grammar as an absence: `atomType` has no lowercase production
+(§`surface-grammar.md` 3.8), and no declaration form takes a parameter list (`surface-grammar.md`
+§4.1–§4.6). There is no `data List<a>`, no type-application form, and no `typeParam:` spec key.
+Every site that would call for one of those uses a subtype, `Self`, or `Any`.
 
 **Core calculus:** F<: (System F with subtyping) + μ/ν types + guarded fold/unfold
 
@@ -216,7 +221,7 @@ from Stage 1 (avoiding the trap of bolting types onto a working evaluator after 
 
 - [ ] Confirm eager-data / lazy-codata as the evaluation model (§2.2)
 - [ ] Confirm Boolean-as-data, no primitive `if` (§2.6)
-- [ ] Confirm F<: (not Fω) as the core (§2.1)
+- [x] Confirm F<: (not Fω) as the core, with no generics and no type parameters (§2.1)
 - [ ] Confirm contracts-not-effects (§2.4)
 - [ ] Draft core calculus typing rules ([`lc.md`](./lc.md))
 - [ ] Draft soundness sketch (Progress/Preservation statements)

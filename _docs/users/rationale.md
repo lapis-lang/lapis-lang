@@ -448,7 +448,7 @@ query PathFinder
     accept:  #solved
     done:    #done
 
-    unfold Search <in: s (start: String, goal: String, graph: Object)>
+    unfold Search <in: SearchSeed>
         path -> {s start}
         solved -> s start = s goal
         done -> s exhausted
@@ -456,6 +456,14 @@ query PathFinder
 
 PathFinder explore: (start: "a", goal: "e", graph: myGraph)
 PathFinder explore: (start: "a", goal: "e", graph: myGraph) options: (maxResults: 1)
+```
+
+The seed is a declared type — the surface has no record type production, and a multi-value seed is
+spelled the same way `take`'s `Slice` is:
+
+```lapis
+data SearchSeed
+    SearchSeed start: String goal: String graph: Any
 ```
 
 `explore` drives the search: unfold the seed into an initial state, observe `accept` — if true,
@@ -495,7 +503,7 @@ data Stack
     Empty
     Push
         invariant: self | self size >= 0
-        value: Object
+        value: Any
         rest: Family
 
     fold pop <out: Array>

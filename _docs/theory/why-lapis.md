@@ -250,11 +250,13 @@ library.
   any language.
 
 - **Subtyping (comb inheritance).** This is _valuable_ — it subsumes generics and avoids
-  parametricity loss — but it is not _essential_ to the unique property. You could have Lapis with
-  generics instead of subtyping and the fold/unfold enforcement + law exploitation would still work.
-  Subtyping is a _design choice_ that shapes the language's character (Meyer's influence), not the
-  _reason_ the language exists. (The parametricity cost and its recovery via `properties` is a
-  consequence of this choice, not a motivation for the language.)
+  parametricity loss — but it is not _essential_ to the unique property. The fold/unfold enforcement
+  and law exploitation would work under a different type discipline too. Subtyping is a _design
+  choice_ that shapes the language's character (Meyer's influence), not the _reason_ the language
+  exists; the parametricity cost and its recovery via `properties` is a consequence of that choice,
+  not a motivation for the language. The choice is nonetheless **final**: there are no type
+  variables or type parameters in the surface language and none are planned (`design-decisions.md`
+  §"Core calculus", `surface-grammar.md` §3.8).
 
 **The honest answer to question 5:** Three things are essential — enforced fold/unfold, first-class
 exploitable laws, and the μ/ν duality. Everything else — the syntax, the sugar forms, the contracts,
