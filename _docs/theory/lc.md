@@ -79,19 +79,19 @@ registry gate: `f(a)` parses as an op application only when `f ∈ Ω`, while va
 requires whitespace (`f a`, never `f(a)`).
 
 **The `match` form in LC concrete syntax.** In the surface language the lexer introduces `match(pₖ)`
-implicitly (a literal `42` lexes against `Nat`'s pattern). LC's grammar-based realization makes the
+implicitly (a literal `42` lexes against `Int`'s pattern). LC's grammar-based realization makes the
 introduction explicit: `match("p")` — a quoted pattern source. The pattern must be one of a
 registered pattern type's declared patterns (anchored: its FIRST ATOM — the first leaf, descending
 through the postfix wrappers `*`/`+`/`?` — is a literal, a class, or a type reference; a leading `.`
-rejects, so `Nat = [0-9]+` anchors while `.*` does not), and the term types as that type (T-Pattern,
-§5.1). LC syntax has no other string literals — this is the one deliberate exception: the payload is
-a _pattern_ (the constructor), not a term. A delimiter `"` inside the payload is escaped (`\"`). The
-bare `Ident` atom for a registered pattern type (§2.3's token) remains the registry-gated short
-form; the two routes yield the same value shape. `match` is reserved from operation names
-(`BUILTIN_CALL_FORMS`, §2.4) so the call shape can never be shadowed by an Ω entry. The surface
-language's comment form (`/* ... */` — `surface-syntax.md` §1.4) has no core presence: comments are
-consumed before the surface-to-core elaboration runs, so LC source carries none, and the quoted
-pattern payload here is the one DQ form in the calculus's own concrete syntax.
+rejects, so `Int = -?[0-9]+` anchors while `.*` does not), and the term types as that type
+(T-Pattern, §5.1). LC syntax has no other string literals — this is the one deliberate exception:
+the payload is a _pattern_ (the constructor), not a term. A delimiter `"` inside the payload is
+escaped (`\"`). The bare `Ident` atom for a registered pattern type (§2.3's token) remains the
+registry-gated short form; the two routes yield the same value shape. `match` is reserved from
+operation names (`BUILTIN_CALL_FORMS`, §2.4) so the call shape can never be shadowed by an Ω entry.
+The surface language's comment form (`/* ... */` — `surface-syntax.md` §1.4) has no core presence:
+comments are consumed before the surface-to-core elaboration runs, so LC source carries none, and
+the quoted pattern payload here is the one DQ form in the calculus's own concrete syntax.
 
 ### 2.3 Values
 

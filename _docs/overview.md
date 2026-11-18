@@ -92,8 +92,8 @@ Variants carry fields by naming them:
 
 ```lapis
 data Point
-    Point2D x: Number y: Number
-    Point3D x: Number y: Number z: Number
+    Point2D x: Int y: Int
+    Point3D x: Int y: Int z: Int
 ```
 
 Construction is prefix — the variant name, then the fields:
@@ -155,17 +155,18 @@ delimiters are part of the pattern) while `1 / 2` can never be a Rational.
 
 ### 2.3 The built-ins are data too
 
-Where did `Nat` come from, and why does `42` spell a number? §2.1 showed the trick without naming
-it: the "built-in" types are ordinary `data` declarations whose constructors are **patterns**:
+Where did `Int` come from, and why does `42` spell a number? §2.1 showed the trick without naming
+it: the "built-in" types are ordinary `data` declarations whose constructors are **patterns**
+([`theory/prelude.md`](./theory/prelude.md) §2 is the single definition site):
 
 | Type     | Pattern(s)         | Example   |
 | -------- | ------------------ | --------- |
 | `Char`   | `'.'`              | `'a'`     |
 | `String` | `"<Char>*"`        | `"hello"` |
-| `Nat`    | `[0-9]+`           | `42`      |
+| `Int`    | `-?[0-9]+`         | `42`      |
 | `Float`  | `-?[0-9]*\.[0-9]+` | `3.14`    |
 
-When you write `42`, it's `Nat`'s pattern `[0-9]+` that matched it — the same move as `Color`'s
+When you write `42`, it's `Int`'s pattern `-?[0-9]+` that matched it — the same move as `Color`'s
 `#[0-9A-F]{6}`, just declared for you. The literal shapes a program recognizes are chosen by the
 program, not the language. And the value spellings — `'a'` one character, `"hello"` a string — are
 the same spellings every user declaration's literals take (§1.4's reservation rules keep the forms
@@ -173,18 +174,23 @@ disjoint from comments and from declared patterns). For the two quoted built-ins
 part of the pattern — `'.'`, `"<Char>*"` — which is why the `'` and `"` heads are reserved: Char and
 String own them, and no user pattern may match a string beginning with either.
 
+`Bool` and `Nat` are the two built-ins declared with **named variants** instead of patterns; §3.1
+has `Bool`'s, and `Nat` is the Peano carrier (`Zero`, `Succ pred: Family`) the law section's `add`
+is declared over. A named carrier can be destructured by a fold's arms, which a pattern carrier
+cannot — that is the whole reason both kinds exist.
+
 ### 2.4 Subtyping: extending a declared data
 
 A data type can be declared as an **extension** of another, with `<:` ("is a"):
 
 ```lapis
 data Point2
-    Cartesian2 x: Number y: Number
-    Polar2     r: Number theta: Number
+    Cartesian2 x: Int y: Int
+    Polar2     r: Int theta: Int
 
 data Point3 <: Point2
-    Cartesian3 x: Number y: Number z: Number
-    Polar3     r: Number theta: Number phi: Number
+    Cartesian3 x: Int y: Int z: Int
+    Polar3     r: Int theta: Int phi: Int
 ```
 
 `Point3` is a new type whose variants are **the parent's variants plus its own**. The parent's
@@ -221,13 +227,17 @@ declares, then delegates to `Point2` and repeats. Two consequences matter in pra
 fields appear:
 
 ```lapis
-data NatList <: IntList
-    Cons head: Nat rest: Family
+data List
+    Nil
+    Cons head: Any rest: Family
+
+data IntList <: List
+    Cons head: Int rest: Family
 ```
 
-`NatList` re-declares `Cons` with `head: Nat` — a narrowing of `IntList`'s `head: Int` (every `Nat`
-is an `Int`, so the substitution holds). Unmentioned fields — `rest` here — are inherited unchanged;
-introducing a field the parent doesn't have is rejected.
+`IntList` re-declares `Cons` with `head: Int` — a narrowing of `List`'s `head: Any` (every `Int` is
+an `Any`'s inhabitant, so the substitution holds). Unmentioned fields — `rest` here — are inherited
+unchanged; introducing a field the parent doesn't have is rejected.
 
 And `Family` — "the rest of the type being declared" (introduced properly in §2.5) — is what makes
 these extensions possible at all. A `Family`-typed field means "any future subtype's rest" — that's
@@ -252,41 +262,41 @@ A field's type is any type in scope — including the one being declared. Two sp
 self-reference, same meaning:
 
 ```lapis
-data NatList
+data IntList
     Nil
-    Cons head: Nat rest: NatList    /* by name — if NatList is in scope */
+    Cons head: Int rest: IntList    /* by name — if IntList is in scope */
 ```
 
 And a field can reference "the rest of the type being declared" positionally with `Family`:
 
 ```lapis
-data NatList
+data IntList
     Nil
-    Cons head: Nat rest: Family      /* same meaning, no name needed */
+    Cons head: Int rest: Family      /* same meaning, no name needed */
 ```
 
 `Family` is the spelling that works _before_ the type's own name could resolve — mutually recursive
 declarations, or just not wanting to repeat the name. §2.4 already met `Family`'s second job: a
 `Family`-typed field keeps the recursion **open** — any future subtype's rest may fill it — while
-the by-name spelling closes it: `rest: NatList` means exactly `NatList`, no more, no less (the whole
+the by-name spelling closes it: `rest: IntList` means exactly `IntList`, no more, no less (the whole
 value is always one fixed type).
 
 `Nil` is the empty list; `Cons` carries a head and the rest. Values are built by chaining:
 
 ```lapis
-NatList Cons head: 1 rest: (NatList Cons head: 2 rest: NatList Nil)
+IntList Cons head: 1 rest: (IntList Cons head: 2 rest: IntList Nil)
 ```
 
 ```lapis
 Cons head: 1 rest: (Cons head: 2 rest: Nil)
 ```
 
-The `NatList` qualifiers are optional — both spellings are legal, bare by default; the qualifier
+The `IntList` qualifiers are optional — both spellings are legal, bare by default; the qualifier
 earns its keep only when `Cons` or `Nil` would be ambiguous in scope (another in-scope type
 declaring the same variant name).
 
 That's an algebraic data type — the thing behind sealed-interface hierarchies and dataclass unions —
-— in seven lines, with recursion spelled either `rest: NatList` or `rest: Family`.
+— in seven lines, with recursion spelled either `rest: IntList` or `rest: Family`.
 ([spec §4.1](./theory/surface-syntax.md#4-declaration-formats))
 
 ### 2.6 The lattice's bounds: `Any` and `Nothing`
@@ -326,11 +336,11 @@ declaration set together, so declaration order doesn't matter:
 
 ```lapis
 data Expr
-    Lit value: Nat
+    Lit value: Int
     BlockExpr stmt: Stmt body: Family  /* references Stmt — not yet declared */
 
 data Stmt
-    Assign name: String value: Nat
+    Assign name: String value: Int
     Seq first: Family second: Family   /* Family = this type's rest — no name needed */
 ```
 
@@ -339,7 +349,7 @@ the wrong sort are rejected at construction:
 
 ```lapis
 Point2D x: 1 y: 2                 /* a Point — fine */
-Expr Lit value: Point2D x: 1 y: 2 /* rejected — a Point is not a Nat */
+Expr Lit value: Point2D x: 1 y: 2 /* rejected — a Point is not an Int */
 ```
 
 That's the whole mechanism: each type is its own declaration, cross-references are ordinary field
@@ -357,11 +367,11 @@ Operations are declared **inside** the data declaration. A `fold` has one case a
 each arm replaces the constructor with an operation:
 
 ```lapis
-data NatList
+data IntList
     Nil
-    Cons head: Nat rest: Family
+    Cons head: Int rest: Family
 
-    fold sum <out: Nat>
+    fold sum <out: Int>
         Nil -> 0
         Cons head rest -> head + rest
 ```
@@ -372,7 +382,7 @@ Using it is the same shape — name the operation, pass the value:
 xs sum              /* 3 */
 ```
 
-This is the _only_ way to consume a `NatList` — and that's the point. Every consumer of a data type
+This is the _only_ way to consume an `IntList` — and that's the point. Every consumer of a data type
 has the same shape, so the compiler knows the shape of every operation you write.
 ([spec §5.1](./theory/surface-syntax.md#5-foldunfoldmapmerge-declarations))
 
@@ -391,13 +401,13 @@ total:
 | `_` (wildcard) | one arm that catches whatever the others don't — open variant sets | —             |
 
 A **parameterized fold** carries one input — here, an element to append. The spec carries only the
-type (`in: Nat`): a fold takes at most one input, so there is nothing for a name to disambiguate —
+type (`in: Int`): a fold takes at most one input, so there is nothing for a name to disambiguate —
 the arm binds it, like every field, as an extra trailing binding in the arm's binding list. The type
 gates the call site (`xs append: 3`). Recursive positions arrive as partially-applied continuations:
 give the input and the traversal continues:
 
 ```lapis
-fold append <in: Nat, out: Family>
+fold append <in: Int, out: Family>
     Nil v -> Cons head: v rest: Nil
     Cons head rest v -> Cons head: head rest: (rest append: v)
 
@@ -408,7 +418,7 @@ An **auxiliary fold** fuses a companion computation into the traversal — check
 node's depth, but that's a second pass unless `aux` rides along:
 
 ```lapis
-fold depth <out: Nat>
+fold depth <out: Int>
     Leaf -> 0
     Node left right -> 1 + (left max right)
 
@@ -433,15 +443,15 @@ operation, it is declared **inside** the data declaration — one arm per varian
 whether the seed produces that variant, and what the next seed is:
 
 ```lapis
-data NatList
+data IntList
     Nil
-    Cons head: Nat rest: Family
+    Cons head: Int rest: Family
 
-    unfold Range <in: Nat>
+    unfold Range <in: Int>
         Nil n -> n = 0
         Cons n -> n > 0 | head: n rest: n - 1
 
-NatList Range: 3      /* Cons 3 (Cons 2 (Cons 1 Nil)) — a list, built from a number */
+IntList Range: 3      /* Cons 3 (Cons 2 (Cons 1 Nil)) — a list, built from a number */
 ```
 
 A generator arm is a **guard | payload**: the guard decides whether the arm applies; when it holds,
@@ -472,10 +482,10 @@ construct, generates potentially endless structure:
 
 ```lapis
 behavior Stream
-    head: <out: Number>
+    head: <out: Int>
     tail: <out: Self>
 
-    unfold From <in: Number>
+    unfold From <in: Int>
         head n -> n
         next n -> n + 1
 
@@ -490,16 +500,16 @@ Observers can take input too, and one behavior can offer several generators:
 
 ```lapis
 behavior Stream
-    head: <out: Number>
+    head: <out: Int>
     tail: <out: Self>
-    nth:  <in: Number, out: Number>       /* the i-th observation */
+    nth:  <in: Int, out: Int>       /* the i-th observation */
 
-    unfold From <in: Number>
+    unfold From <in: Int>
         head n -> n
         next n -> n + 1
         nth n i -> (n + i)
 
-    unfold Fibonacci <in: (a: Number, b: Number)>
+    unfold Fibonacci <in: (a: Int, b: Int)>
         head pair -> pair a
         next pair -> (a: pair b, b: (pair a + pair b))
 
@@ -518,21 +528,21 @@ Unfold builds the structure; fold tears it down. `merge` fuses them into **one t
 intermediate structure is never built:
 
 ```lapis
-data NatList
+data IntList
     Nil
-    Cons head: Nat rest: Family
+    Cons head: Int rest: Family
 
-    fold sum <out: Nat>
+    fold sum <out: Int>
         Nil -> 0
         Cons head rest -> head + rest
 
-    unfold From <in: Nat>
+    unfold From <in: Int>
         Nil n -> n = 0
         Cons n -> n > 0 | head: n rest: n - 1
 
     merge Total <#From, #sum>
 
-NatList Total: 5    /* 15 — one pass, no list materialized */
+IntList Total: 5    /* 15 — one pass, no list materialized */
 ```
 
 You wrote the two-pass specification (generate a list of descending numbers, then sum it). The
@@ -545,7 +555,7 @@ factorial, with no list ever allocated.
 Map transforms each field position; all other structure is preserved by construction:
 
 ```lapis
-map scaleEach <in: Number, out: Family>
+map scaleEach <in: Int, out: Family>
     Nil x -> Family Nil
     Cons head rest x -> Family Cons head: head * x rest: (rest scaleEach: x)
 ```
@@ -713,7 +723,7 @@ state and an output — in the same declaration language as everything else:
 
 ```lapis
 io Prompt
-    count: Number
+    count: Int
     Tick n -> (state: (n + 1), output: n)
 ```
 
@@ -728,7 +738,7 @@ explicitly at instantiation:
 ```lapis
 module Lists (T: Type)
     List:  data Nil / Cons head: T rest: Family
-    NumList: data Nil / Cons head: Nat rest: Family
+    IntList: data Nil / Cons head: Int rest: Family
 
 Lists Num:    /* an instance — its own fresh types */
 Lists String: /* another instance — independent */
@@ -760,7 +770,7 @@ time (fusion) and at **call time** (short-circuit guards):
 
 ```lapis
 data Num
-    N value: Number
+    N value: Int
 
     fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
         N value other -> Num N: value + other value
@@ -781,7 +791,7 @@ Contract clauses are keyword parts of the fold spec — preconditions checked be
 postconditions with `old` snapshots, structured recovery:
 
 ```lapis
-fold pop <out: Array>
+fold pop <out: List>
     demands: self | self size > 0
     ensures: self old result | result size = old size - 1
     Empty -> Error signal: "Cannot pop empty stack"
@@ -798,15 +808,15 @@ supplies a default that conforming types inherit when they don't declare the ope
 
 ```lapis
 protocol Ordered
-    fold compare <in: Self, out: Number>
+    fold compare <in: Self, out: Int>
     fold lessThan <in: Self, out: Bool>
         (self compare: other) < 0
 
 data Num
-    N value: Number
+    N value: Int
 
     satisfies: Ordered
-    fold compare <in: Self, out: Number>
+    fold compare <in: Self, out: Int>
         N value other -> value - other value
 ```
 
@@ -913,7 +923,7 @@ data Stack
     Empty
     Push value: Any rest: Family
 
-    fold size <out: Number>
+    fold size <out: Int>
         Empty -> 0
         Push _ rest -> 1 + rest
 
@@ -925,7 +935,7 @@ data Stack
         Empty -> nil
         Push value rest -> value , old rest
 
-    unfold FromArray <in: Array>
+    unfold FromArray <in: List>
         Empty arr -> arr isEmpty
         Push arr -> arr notEmpty | value: arr first rest: arr tail
 ```
@@ -973,8 +983,8 @@ keyword-part _reference_ (§7.4), resolved against declared names at declaration
 
 ## 10. What We Left Out, On Purpose
 
-- **No base types.** `Nat`, `Int`, `String`, `Bool` are ordinary `data` types you could have
-  declared yourself. Uniformity is what makes laws checkable over _all_ types.
+- **No base types.** `Int`, `String`, `Bool` are ordinary `data` types you could have declared
+  yourself. Uniformity is what makes laws checkable over _all_ types.
 - **No general recursion.** No `fix`, no `while`, no self-call. Totality by construction — no
   termination checker, no fuel monad.
 - **No operator precedence ladder.** Uniform binary precedence; parentheses when grouping matters.
@@ -1026,7 +1036,7 @@ is a real finding for the spec:
    field's value is the next seed, not a value.** `rest: n - 1` does not build a list; it says "the
    rest is whatever unfolding the seed `n - 1` produces" — the prototype draws the same line (for a
    recursive field, the returned value becomes the seed for the recursive unfolding). The spec must
-   pin this reading of the recursive slot and say how it is checked (the seed is a `Nat`, not a
+   pin this reading of the recursive slot and say how it is checked (the seed is an `Int`, not a
    `NatList`). **(c) The separator.** `|` follows the binding-head convention (a block literal's
    `params | expr` head, since retired, §12.27) rather than inventing a token, and the arm body is
    its own restricted production — so `|` there is the separator, not the binary operator `|` (§2.1
@@ -1046,7 +1056,7 @@ is a real finding for the spec:
    each element" — and can a `map` carry laws? The overview uses the §5.3 form; the spec should
    reconcile.
 4. **User-defined pattern types lack a declaration form.** §1.3 says user types declare their own
-   patterns (prose: `NatPat = [0-9]+`), but no `data`-level syntax is pinned for it. This overview
+   patterns (prose: `IntPat = -?[0-9]+`), but no `data`-level syntax is pinned for it. This overview
    now _teaches_ a concrete form (§2.1): a `data` declaration mixing named variants and pattern
    members (`data Color: Red Green Blue #[0-9A-F]{6}`), which is exactly the mixed-carrier surface
    spelling in PBI #80's scope (tentative there, incl. the lexing syntax). The spec must pin it —
@@ -1079,22 +1089,22 @@ is a real finding for the spec:
    across the two constructor kinds:
 
    - **Pattern constructors.** `42` is bare when exactly one in-scope `data` declaration's pattern
-     matches it. But `Nat`, `Float`, and `Number` may each declare patterns that match `42` — then
-     bare `42` is ambiguous and `Nat 42` resolves it. So patterns _do_ get a qualification form (via
-     their type name, standing in for the anonymous constructor), closing the earlier "patterns have
-     no names to qualify" claim.
+     matches it. But `Int` and `Float` may each declare patterns that match `42` — then bare `42` is
+     ambiguous and `Int 42` resolves it. So patterns _do_ get a qualification form (via their type
+     name, standing in for the anonymous constructor), closing the earlier "patterns have no names
+     to qualify" claim.
    - **Named variants.** `Point2D x: 1 y: 2` is bare when the variant name is unique in scope; the
      type prefix (`Point Point2D ...`) is required only when two types declare colliding names — the
      same rule the grammar already applies to fold arms, which resolve variants bare today.
    - **One principle, both kinds:** the qualifier names the _type_ whose constructor is meant; it is
-     optional exactly when name/pattern resolution is unique in scope. If `Nat` were the only number
+     optional exactly when name/pattern resolution is unique in scope. If `Int` were the only number
      type in scope, `42` would need no qualification — and likewise `Point2D x: 1
      y: 2` needs
      none unless another type also declares `Point2D`.
 
    The elaborator already drops the qualifier (so bare-default costs nothing in the core); the spec
    needs to state the uniqueness rule and pin the ambiguity diagnostic ("ambiguous: `42` matches
-   both `Nat` and `Float` — qualify").
+   both `Int` and `Float` — qualify").
 
    One gap the uniqueness rule does not cover: **bare construction of an inherited variant.** §2.4's
    `Point3 Cartesian2 x: 1 y: 2` is not disambiguation — the variant name is unique (declared in
@@ -1190,7 +1200,7 @@ is a real finding for the spec:
 
 13. **A type named `Family` is legal — and it shadows the open-recursion keyword.** Probed against
     `src/core/grammar.ts`: `data Family { Nil;
-    Cons head: Nat rest: Family }` parses, publishes,
+    Cons head: Int rest: Family }` parses, publishes,
     and registers. The registry's variant index resolves `Cons`/`Nil` deterministically
     (first-declaration-wins across types), so the declaration is unambiguous as a declaration. The
     wrinkle: the core's type-name resolution chain is bound-Δ → built-ins (`Any`/`Nothing`/`Token`)
@@ -1255,65 +1265,77 @@ is a real finding for the spec:
     (`data T <: Parent`) plus **same-name covariant narrowing** (the child re-declares the inherited
     variant with narrower fields — no new fields). Whether a variant itself may be declared as an
     extension of another variant (`Cartesian3 <: Cartesian2
-    x: Number y: Number; z: Number`) —
-    new fields _added_ rather than narrowed — is undecided: it would let the narrowing rule's "no
-    new fields" clause be met at a different level (the parent variant doesn't have `z`, the child
-    variant does), which is exactly the shape the §4.1 rule rejects today. Decision needed in #86:
-    either pin variant-level extension as a separate form (fields add, subtyping becomes the sum
-    over the extension chain) or close it (narrowing is the only per-variant mechanism, and
-    `Cartesian3` is simply a _new_ variant of `Point3` that happens to share fields with
-    `Cartesian2` — no subtype relationship between the variants themselves).
-    **Reference-implementation check (lapis-js):** there is no variant-level extension anywhere —
-    not in the README ("ADT Extension (Subtyping)" pins `[extend]` on the ADT plus same-name
-    covariant narrowing, with the explicit error "variant introduces new field not present in the
-    parent ADT. Child variants may only narrow existing fields"), not in `examples/point.mts` (where
-    `Point2D`/`Point3D` are simply two variants of one ADT — no subtype relationship between them),
-    and not in the test suite (`adt-extension.test.mts` exercises `Point3D` as a new variant of an
-    extended ADT; `field-narrowing.test.mts` states the rules as "Child may not introduce NEW
-    fields"; the "no such variant in parent" case asserts a new variant has no comb link). The DSL's
-    answer is the _close_ branch: variants relate only by same-name narrowing; `Cartesian3` relates
-    to `Cartesian2` only by the type-level story (`Point3 <: Point2` carries all the subtyping).
-    Lapis's surface can match: new fields live in _new_ variants; narrowing sharpens existing ones —
-    the §2.4 example reads correctly under that discipline without a new form. **Statability check
-    (the core):** the pin branch may be unavailable without new theory — the type lattice
-    (`types.ts`) has no variant-level type; variants are summand _tags_ of a `DataType`, and a
-    variant name spelled in type position falls through `atomType`'s chain (bound-Δ → built-ins →
-    registry → fallback) to an unbound `TypeVar` (the #56 leak class). A variant-level
-    `Cartesian3 <: Cartesian2` is therefore not merely unpinned but _unstatable_ without inventing
-    record types for field subsets as first-class lattice members — a theory addition, not a syntax
-    tweak. What _does_ relate the two Cartesian variants: the shared naming stem (a human-facing
-    convention, unchecked), chain co-membership (`Point3 <: Point2` carries all the subtyping), and
-    — for same-name variants only — the comb **delegation links** (lookup, not subtyping;
-    `Point3.Cartesian2 ⤳ Point2.Cartesian2`). Optional middle path if the convention is to mean
-    something: a declaration-time shape-inclusion lint (shared fields covariant, extra fields
-    allowed) verifies the sibling reading without a lattice edge — inert unless eliminations are
-    ever keyed per-variant. **Precedent (Scala's case-class inheritance):** Scala 2 permitted
-    `case class B(x: Int) extends A(x * 2)` — a child case class extending a parent case class, i.e.
-    exactly the variant-level extension shape — and deprecated it because it broke two guarantees:
-    the generated `copy` method (an `A`-typed `copy` drops `B`'s added fields) and the pattern
-    matcher (`B(5) match { case A(_) => true }` — Scala's spec resolves it as a static error,
-    "constructor cannot be instantiated to expected type", because the constructor patterns and
-    unapply extractors disagree on the hierarchy; Malayeri's "wondering about case class
-    inheritance", scala-lang.org/old/node/5659). Scala 3 prohibits it outright: case classes cannot
-    extend case classes, and the ADT idiom is sealed traits + case subclasses — variants related by
-    **type-level** edges, never variant-to-variant edges. The failure modes are exactly the ones our
-    pinned rules avoid: Lapis's folds key arms on variant names and dispatch by member set (no
-    unapply-extractor ambiguity), and narrowing forbids new fields (no widening `copy` problem).
-    Scala's retreat from the shape is corroborating evidence for the close branch: where the
-    precedent went, the language followed and disallowed it.
+    x: Int y: Int; z: Int`) — new fields
+    _added_ rather than narrowed — is undecided: it would let the narrowing rule's "no new fields"
+    clause be met at a different level (the parent variant doesn't have `z`, the child variant
+    does), which is exactly the shape the §4.1 rule rejects today. Decision needed in #86: either
+    pin variant-level extension as a separate form (fields add, subtyping becomes the sum over the
+    extension chain) or close it (narrowing is the only per-variant mechanism, and `Cartesian3` is
+    simply a _new_ variant of `Point3` that happens to share fields with `Cartesian2` — no subtype
+    relationship between the variants themselves). **Reference-implementation check (lapis-js):**
+    there is no variant-level extension anywhere — not in the README ("ADT Extension (Subtyping)"
+    pins `[extend]` on the ADT plus same-name covariant narrowing, with the explicit error "variant
+    introduces new field not present in the parent ADT. Child variants may only narrow existing
+    fields"), not in `examples/point.mts` (where `Point2D`/`Point3D` are simply two variants of one
+    ADT — no subtype relationship between them), and not in the test suite (`adt-extension.test.mts`
+    exercises `Point3D` as a new variant of an extended ADT; `field-narrowing.test.mts` states the
+    rules as "Child may not introduce NEW fields"; the "no such variant in parent" case asserts a
+    new variant has no comb link). The DSL's answer is the _close_ branch: variants relate only by
+    same-name narrowing; `Cartesian3` relates to `Cartesian2` only by the type-level story
+    (`Point3 <: Point2` carries all the subtyping). Lapis's surface can match: new fields live in
+    _new_ variants; narrowing sharpens existing ones — the §2.4 example reads correctly under that
+    discipline without a new form. **Statability check (the core):** the pin branch may be
+    unavailable without new theory — the type lattice (`types.ts`) has no variant-level type;
+    variants are summand _tags_ of a `DataType`, and a variant name spelled in type position falls
+    through `atomType`'s chain (bound-Δ → built-ins → registry → fallback) to an unbound `TypeVar`
+    (the #56 leak class). A variant-level `Cartesian3 <: Cartesian2` is therefore not merely
+    unpinned but _unstatable_ without inventing record types for field subsets as first-class
+    lattice members — a theory addition, not a syntax tweak. What _does_ relate the two Cartesian
+    variants: the shared naming stem (a human-facing convention, unchecked), chain co-membership
+    (`Point3 <: Point2` carries all the subtyping), and — for same-name variants only — the comb
+    **delegation links** (lookup, not subtyping; `Point3.Cartesian2 ⤳ Point2.Cartesian2`). Optional
+    middle path if the convention is to mean something: a declaration-time shape-inclusion lint
+    (shared fields covariant, extra fields allowed) verifies the sibling reading without a lattice
+    edge — inert unless eliminations are ever keyed per-variant. **Precedent (Scala's case-class
+    inheritance):** Scala 2 permitted `case class B(x: Int) extends A(x * 2)` — a child case class
+    extending a parent case class, i.e. exactly the variant-level extension shape — and deprecated
+    it because it broke two guarantees: the generated `copy` method (an `A`-typed `copy` drops `B`'s
+    added fields) and the pattern matcher (`B(5) match { case A(_) => true }` — Scala's spec
+    resolves it as a static error, "constructor cannot be instantiated to expected type", because
+    the constructor patterns and unapply extractors disagree on the hierarchy; Malayeri's "wondering
+    about case class inheritance", scala-lang.org/old/node/5659). Scala 3 prohibits it outright:
+    case classes cannot extend case classes, and the ADT idiom is sealed traits + case subclasses —
+    variants related by **type-level** edges, never variant-to-variant edges. The failure modes are
+    exactly the ones our pinned rules avoid: Lapis's folds key arms on variant names and dispatch by
+    member set (no unapply-extractor ambiguity), and narrowing forbids new fields (no widening
+    `copy` problem). Scala's retreat from the shape is corroborating evidence for the close branch:
+    where the precedent went, the language followed and disallowed it.
 
-18. **`Number` is used throughout the overview but is declared nowhere — an undeclared-type leak
-    from the reference DSL.** The §2.3 built-ins table (and the spec's, `surface-syntax.md` §1.3)
-    lists `Char`/`String`/`Nat`/`Int`/`Float`/`Bool`/`Symbol` — no `Number`. Every `Number` in §2–§8
-    was a JS-DSL habit (`Number` is lapis-js's primitive guard), not a Lapis type. The consistency
-    rule the overview now follows: **a type named `XList` carries `X`, and example types are drawn
-    only from §2.3's declared set.** Applied: `NatList` carries `Nat` (head, `sum`'s `out`, `From`'s
-    seed), §2.4's narrowing example is now `NatList <: IntList` (every `Nat` is an `Int` — the
-    covariance demo uses declared types only), and §2.3's lead-in references `Nat`. Remaining
-    `Number` sites are deliberately generic (Point coordinates, Stream observers, `scaleEach`,
-    `Num`, `compare`, `size`) — the standard library will decide whether a general numeric carrier
-    (`Number`) exists; until then these read as any declared numeric type. Spec impact: none on
-    `surface-syntax.md` (it never used `Number`); the overview's examples were the sole offender.
+18. **`Number` was used throughout the overview but is declared nowhere — an undeclared-type leak
+    from the reference DSL. CLOSED: there is no `Number`; every site is `Int` or `Float`.** The §2.3
+    built-ins table (and the spec's, `surface-syntax.md` §1.3) listed no `Number`, and every
+    `Number` in §2–§8 was a JS-DSL habit (`Number` is lapis-js's primitive guard), not a Lapis type.
+    The consistency rule the overview follows: **a type named `XList` carries `X`, and example types
+    are drawn only from the prelude's declared set.** Applied: `IntList` carries `Int` (head,
+    `sum`'s `out`, `From`'s seed), §2.4's narrowing example is `IntList <: List` (narrowing
+    `head: Any` — the covariance demo uses declared types only), and §2.3's lead-in references
+    `Int`.
+
+    **Resolved by the prelude** ([`theory/prelude.md`](./theory/prelude.md), which is now the single
+    definition site for built-in names): there is no general numeric carrier. Every former `Number`
+    site resolves one of three ways — `Int` where the value is a count or an index (coordinates,
+    `size`, `depth`, `fib`, `length`, Stream observers, `scaleEach`, `map` transforms, io state,
+    `Num`'s field, `compare`'s result), `Float` where the value participates in `sqrt` (the
+    quadratic's coefficients and discriminant — deferred with `Float`, prelude §5.3), and
+    `Self`/`Any` where the operation returns its own operand type or genuinely varies
+    (`add <out: Self>`, `List`'s `head: Any`). The `Nat`-as-pattern spelling that briefly replaced
+    it is also gone: `Nat` is now the Peano carrier (§2.5), and the integer literals belong to
+    `Int`. The remaining blocker is that `Int`'s literals and arithmetic are not yet executable
+    ([#119](https://github.com/lapis-lang/lapis-lang/issues/119)).
+
+    Spec impact: `surface-syntax.md` §1.3 and `overview.md` §2.3 are both derived from the prelude;
+    `elaboration.md`, `syntax-design.md`, `surface-grammar.md`, `design-decisions.md`,
+    `language-design.md`, and both `users/` documents were swept.
 
 19. **The fold family's options and variants are taught by §3.1 but unpinned in `surface-syntax.md`
     — the README (lapis-js) is the semantics-of-record.** The reference DSL's "Fold Operations"
@@ -1337,13 +1359,13 @@ is a real finding for the spec:
     wrinkle this pass surfaced — and the review's ruling now resolves it: **`in:` carries only the
     type.** §3.4's table pinned `in`'s value as `paramName Type` or `Type` (its own example
     `<in: target Any, out: Bool>`), but the two-part form is unspellable under the spec-record's own
-    grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable as an expr: a
-    unary send's message must be a camelCase ident, `Nat` is PascalCase) — and the reference DSL
+    grammar production (`specEntry --> ident ':' ws expr` — `v Int` is unparseable as an expr: a
+    unary send's message must be a camelCase ident, `Int` is PascalCase) — and the reference DSL
     never used it: every `in:` site in lapis-js is type-only (`in: Number`, `in: family`,
     `in: { monoid: Any, f: Function }` — the structured form's names are the input record's fields,
     not a binding name). The ruling: a fold takes at most one input, so the spec has nothing for a
-    name to disambiguate — the type suffices, and `in: Nat` parses under the existing production
-    exactly as `out: Number` does. The consequence the spec must pin: **where the arms bind the
+    name to disambiguate — the type suffices, and `in: Int` parses under the existing production
+    exactly as `out: Int` does. The consequence the spec must pin: **where the arms bind the
     input.** The overview's rule: the arm binds it like a field — folds bind it as an extra trailing
     binding in the arm's binding list (`Cons head rest v -> ...`; bindings beyond the variant's
     field count bind the input, optional per arm), and unfold arms — which §5.2 pins without
@@ -1423,31 +1445,34 @@ is a real finding for the spec:
     the direct spelling `'''` (the middle quote is the character) retiring `'\''`. Spec impact:
     `surface-syntax.md` §1.3's Char row and the "examples-shaped" note.
 
-23. **`Symbol` was never decided — a spec-table invention whose claimed value needs no data type.**
-    The §2.3 table (and spec §1.3's, noted "Used in merge references"; `elaboration.md` §2.1
-    elaborates `#sum` to `match("#sum") : Symbol`) carried a built-in `Symbol` with pattern
-    `#[a-zA-Z][a-zA-Z0-9]*` — but no design decision blesses it (`design-decisions.md` is silent),
-    the core registers no such type (every `Symbol` in `src/` is a JS brand symbol — `TYPE_BRAND`
-    and friends, plumbing, not a language type), and the reference DSL's `Symbol` is the JS
-    primitive used as a field guard (`Item: { id: Symbol, ... }`), not a declared pattern type — so
-    it was not carried over from lapis-js either. The claimed value dissolves on inspection: every
-    `#`-spelled site in this document (`merge Total <#From, #sum>`, `aux: #depth`,
-    `inverse: #toCelsius`, `properties: (distributive: #add)`) is a **keyword-part reference**
-    (§7.4) — resolved at declaration/elaboration time against declared names, never a data value
-    flowing through a fold — so the reference form needs no carrier type. The only data-field uses
-    were this document's own invented examples (§2.7's `Assign name: Symbol`, §5.3's
-    `Lists Symbol:`), which `String` serves. Keeping it would also cost: `#sum` would be spelled two
-    ways — a Symbol _value_ and an operation _reference_ — with no rule saying which applies;
-    equality is unspecified (structural folds vs interned singleton identity — the classic
-    Lisp-symbol question); and `#foo` for an undeclared name would be a valid Symbol but a broken
-    reference, with the gating site unclear. **The resolution this overview takes: `Symbol` is
-    retired** — dropped from §2.3's table; `#name` stays as the reference form (§7.4), and
-    name-carrying fields use `String` (§2.7, §5.3 updated). `#` itself stays a free pattern head
-    (`Color`'s `#[0-9A-F]{6}` proves it) — no reserved-head change. **Applied** 2026-11-18: the
-    `Symbol` row is gone from `surface-syntax.md` §1.3's table and the `#sum` row from
-    `elaboration.md` §2.1. If interned names are ever needed (cheap-equality keys, enum-like atoms),
-    that is a new decision — and it must answer interning/equality and the reference-vs-value
-    spelling collision it would create.
+23. **`Symbol` was never decided — a spec-table invention whose claimed value needs no data type.
+    CLOSED: `Symbol` is retired, and `#name` is a reference, never a value.** The §2.3 table (and
+    spec §1.3's, noted "Used in merge references"; `elaboration.md` §2.1 elaborates `#sum` to
+    `match("#sum") : Symbol`) carried a built-in `Symbol` with pattern `#[a-zA-Z][a-zA-Z0-9]*` — but
+    no design decision blesses it (`design-decisions.md` is silent), the core registers no such type
+    (every `Symbol` in `src/` is a JS brand symbol — `TYPE_BRAND` and friends, plumbing, not a
+    language type), and the reference DSL's `Symbol` is the JS primitive used as a field guard
+    (`Item: { id: Symbol, ... }`), not a declared pattern type — so it was not carried over from
+    lapis-js either. The claimed value dissolves on inspection: every `#`-spelled site in this
+    document (`merge Total <#From, #sum>`, `aux: #depth`, `inverse: #toCelsius`,
+    `properties: (distributive: #add)`) is a **keyword-part reference** (§7.4) — resolved at
+    declaration/elaboration time against declared names, never a data value flowing through a fold —
+    so the reference form needs no carrier type. The only data-field uses were this document's own
+    invented examples (§2.7's `Assign name: Symbol`, §5.3's `Lists Symbol:`), which `String` serves.
+    Keeping it would also cost: `#sum` would be spelled two ways — a Symbol _value_ and an operation
+    _reference_ — with no rule saying which applies; equality is unspecified (structural folds vs
+    interned singleton identity — the classic Lisp-symbol question); and `#foo` for an undeclared
+    name would be a valid Symbol but a broken reference, with the gating site unclear. **The
+    resolution this overview takes: `Symbol` is retired** — dropped from §2.3's table; `#name` stays
+    as the reference form (§7.4), and name-carrying fields use `String` (§2.7, §5.3 updated). `#`
+    itself stays a free pattern head (`Color`'s `#[0-9A-F]{6}` proves it) — no reserved-head change.
+    **Applied** 2026-11-18: the `Symbol` row is gone from `surface-syntax.md` §1.3's table and the
+    `#sum` row from `elaboration.md` §2.1. The prelude ([`theory/prelude.md`](./theory/prelude.md))
+    then made the retirement structural: `Symbol` is in no row of §2's type table, and §3's operator
+    tables name only declared folds, so a `#`-spelled site has nowhere to acquire a carrier type
+    even by accident. If interned names are ever needed (cheap-equality keys, enum-like atoms), that
+    is a new decision — and it must answer interning/equality and the reference-vs-value spelling
+    collision it would create.
 
 24. **Primordials under the ban on imports — "always in scope" is a module-design decision, not a
     fact.** §2.6 taught `Any`/`Nothing` as "always in scope", and §2.3's built-ins table implies the
@@ -1457,21 +1482,21 @@ is a real finding for the spec:
     IDE/runtime-provided namespace object). Newspeak takes the model to its end — even `Object` is
     namespace-resolved (top-level classes inherit from no specific superclass; all names are late
     bound) — so under the full model even Lapis's top type would be a namespace lookup, not an
-    ambient name. The primordials (`Nat`/`Int`/`Float`/`Char`/`String`/`Bool`, `Any`/`Nothing`,
-    `Token`) must therefore be placed by decision: (a) **language-ambient** — a small fixed set
-    every module sees, an explicit exception to the ban; defensible because they are
-    language-defined rather than user linkage, and the bounds are load-bearing (a namespace without
-    `Any`/`Nothing` breaks `Nothing <: X <: Any` for every type in it — the lattice needs them to
-    exist wherever their names resolve); (b) **namespace-carried** — every module is instantiated
-    against a namespace object carrying the primordials (the Newspeak shape; permits primordial-free
-    namespaces at the cost of the lattice story and per-module boilerplate); (c) **explicit
-    dependencies** — purest under the ban, maximal ceremony. The core already chose (a) for its own
-    resolution chain (bound-Δ → built-ins `Any`/`Nothing`/`Token` → registry → fallback) — but that
-    is the closed calculus; the surface scope is the open question. §2.6 now teaches the bounds as
-    lattice facts (semantic — they hold regardless of spelling scope) and flags the spellings'
-    availability as the spec's decision. Spec impact: `surface-syntax.md` §1.3 (built-ins' scope
-    status), the bounds' scope status, and the module section — §5.3's mechanism (finding 20's
-    unpinned grammar) is where the choice lands.
+    ambient name. The primordials (`Int`/`Float`/`Char`/`String`/`Bool`, `Any`/`Nothing`, `Token`)
+    must therefore be placed by decision: (a) **language-ambient** — a small fixed set every module
+    sees, an explicit exception to the ban; defensible because they are language-defined rather than
+    user linkage, and the bounds are load-bearing (a namespace without `Any`/`Nothing` breaks
+    `Nothing <: X <: Any` for every type in it — the lattice needs them to exist wherever their
+    names resolve); (b) **namespace-carried** — every module is instantiated against a namespace
+    object carrying the primordials (the Newspeak shape; permits primordial-free namespaces at the
+    cost of the lattice story and per-module boilerplate); (c) **explicit dependencies** — purest
+    under the ban, maximal ceremony. The core already chose (a) for its own resolution chain
+    (bound-Δ → built-ins `Any`/`Nothing`/`Token` → registry → fallback) — but that is the closed
+    calculus; the surface scope is the open question. §2.6 now teaches the bounds as lattice facts
+    (semantic — they hold regardless of spelling scope) and flags the spellings' availability as the
+    spec's decision. Spec impact: `surface-syntax.md` §1.3 (built-ins' scope status), the bounds'
+    scope status, and the module section — §5.3's mechanism (finding 20's unpinned grammar) is where
+    the choice lands.
 
 25. **Surface application is missing — nothing can apply a function value. CLOSED: there is no
     application production, and none is needed.** The core has `appProd` (juxtaposition,
@@ -1615,7 +1640,7 @@ is a real finding for the spec:
     _any_ unrecognized name in type position is accepted and becomes an opaque type variable:
     `\x:Natt. x`, `\x:Number. x`, and `\x:Object. x` all parse and type-check when the only intent
     can have been a typo or a type that was never declared. The minted variable is rigid, not
-    permissive — `isSubtype(Nat, Natt)` and `isSubtype(Natt, Nat)` are both `false` — so the
+    permissive — `isSubtype(Int, Natt)` and `isSubtype(Natt, Int)` are both `false` — so the
     consequence is not silent unsoundness but a _late and confusing_ error: the mistake surfaces
     where the two variables fail to relate, far from the misspelling that caused it. With no
     type-variable production in the surface (§12.29), an unknown name can have no legitimate

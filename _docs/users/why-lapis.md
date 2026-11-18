@@ -37,15 +37,15 @@ a fold, and every fold respects the algebra.
 Here's what that looks like:
 
 ```lapis
-data NumList
+data IntList
     Nil
-    Cons head: Number tail: Family
+    Cons head: Int tail: Family
 
-    fold sum <out: Number>
+    fold sum <out: Int>
         Nil -> 0
         Cons head tail -> head + tail
 
-    fold scaleEach <in: Number, out: Family, properties: (distributive: #sum)>
+    fold scaleEach <in: Int, out: Family, properties: (distributive: #sum)>
         Nil x -> Family Nil
         Cons head tail x -> Family Cons head: head * x tail: (tail scaleEach: x)
 

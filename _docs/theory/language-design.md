@@ -26,7 +26,7 @@ syntax, semantics, type system, and evaluation model, and defines an iterative i
 Lapis has **no parametric polymorphism (generics) and no type parameters — now or in the future**. A
 subtyping discipline is the whole of the language's type abstraction. Following Meyer (OOSC) and
 Bracha (Pluggable Type Systems), a subtyping lattice covers what a generic type would express:
-`NumList <: List` _is_ `List<Number>` expressed as a subtype rather than a type parameter. Comb
+`IntList <: List` _is_ `List<Int>` expressed as a subtype rather than a type parameter. Comb
 inheritance + field narrowing is the mechanism.
 
 This is expressed in the surface grammar as an absence: `atomType` has no lowercase production
@@ -176,8 +176,8 @@ and unfold are the only recursion forms.
        | σ ∧ τ          intersection type (protocol conformance)
 ```
 
-Base types (`ι`) are eliminated — `Nat`, `Int`, `String`, `Bool`, etc. are all `μ` types
-(pattern-matched or named constructors). See [`lc.md`](./lc.md) §2.1 and
+Base types (`ι`) are eliminated — `Int`, `String`, `Bool`, etc. are all `μ` types (pattern-matched
+or named constructors). See [`lc.md`](./lc.md) §2.1 and
 [`design-decisions.md`](../design-decisions.md) §"No base types".
 
 **Terms:**

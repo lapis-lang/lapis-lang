@@ -59,7 +59,7 @@ Literals are pattern-matched or named constructors of `data` types.
 | Surface                             | Core                                 | Notes                                                                                                                                                                                            |
 | ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `'a'` (single char, spelled quoted) | `match("a") : Char`                  | Pattern-matched constructor of `Char = μ α. .` (any single character); the surface Char value is single-quoted — `surface-syntax.md` §1.4 — and the core form's payload is the matched character |
-| `42`                                | `match("42") : Nat`                  | Pattern-matched constructor of `Nat = μ α. [0-9]+`                                                                                                                                               |
+| `42`                                | `match("42") : Int`                  | Pattern-matched constructor of `Int = μ α. -?[0-9]+`                                                                                                                                             |
 | `-3`                                | `match("-3") : Int`                  | Pattern-matched constructor of `Int = μ α. (-[0-9]+ \| [0-9]+)`                                                                                                                                  |
 | `"hello"`                           | `match("hello") : String`            | Pattern-matched constructor of `String = μ α. "<Char>*"` (type reference)                                                                                                                        |
 | `nil`                               | `nil`                                | A built-in value of type `Any` (or `Nothing` in a strict reading)                                                                                                                                |
@@ -118,7 +118,7 @@ see [`surface-syntax.md`](./surface-syntax.md) §2.1):
 
 | Surface  | Core                   | Notes                                                             |
 | -------- | ---------------------- | ----------------------------------------------------------------- |
-| `a + b`  | `add(ℰ(a), ℰ(b))`      | `add` is a fold on `Nat`/`Int`/`Complex`                          |
+| `a + b`  | `add(ℰ(a), ℰ(b))`      | `add` is a fold on `Int`/`Complex`                                |
 | `a - b`  | `sub(ℰ(a), ℰ(b))`      | Similarly                                                         |
 | `a * b`  | `mul(ℰ(a), ℰ(b))`      |                                                                   |
 | `a / b`  | `div(ℰ(a), ℰ(b))`      |                                                                   |
@@ -126,12 +126,12 @@ see [`surface-syntax.md`](./surface-syntax.md) §2.1):
 | `a < b`  | `lessThan(ℰ(a), ℰ(b))` | Requires `Ordered` protocol                                       |
 | `a \| b` | `or(ℰ(a), ℰ(b))`       | Fold on `Bool`                                                    |
 | `a & b`  | `and(ℰ(a), ℰ(b))`      | Fold on `Bool`                                                    |
-| `a , b`  | `cons(ℰ(a), ℰ(b))`     | Array/structure cons; a built-in or fold                          |
+| `a , b`  | `cons(ℰ(a), ℰ(b))`     | List/structure cons; a built-in or fold                           |
 
 **Key principle:** There are no primitive operators in the core. Every operator is an operation
-application that resolves to a fold on the appropriate type. For pattern-matched types (`Nat`,
-`Int`, `String`), these are folds with pattern- matched handlers that transform the `Token`; for
-user types, they are user-declared folds.
+application that resolves to a fold on the appropriate type. For pattern-matched types (`Int`,
+`String`), these are folds with pattern- matched handlers that transform the `Token`; for user
+types, they are user-declared folds.
 
 **Symbolic operation names:** Operators can be symbolic (`+`, `*`, `<`, `<=`) or named (`add`,
 `mul`, `lessThan`). Symbolic operators are recognized by longest match among declared operators.
@@ -186,7 +186,7 @@ supports.
 | Surface            | Core                                      | Notes                                     |
 | ------------------ | ----------------------------------------- | ----------------------------------------- |
 | `{}`               | `Nil` (empty array)                       | Or a built-in empty-array value           |
-| `{a, b, c}`        | `Cons(ℰ(a), Cons(ℰ(b), Cons(ℰ(c), Nil)))` | Array literal = nested cons               |
+| `{a, b, c}`        | `Cons(ℰ(a), Cons(ℰ(b), Cons(ℰ(c), Nil)))` | List literal = nested cons                |
 | `(k1: v1, k2: v2)` | `{k1 = ℰ(v1), k2 = ℰ(v2)}`                | Record = product type (built-in or sugar) |
 
 Arrays are elaborated to a built-in `List` type (a μ-type with `Nil` and `Cons` variants). Records
@@ -226,7 +226,7 @@ A surface `data` declaration elaborates to:
 data Stack
     Empty
     Push value: Any rest: Family
-    fold size <out: Number>
+    fold size <out: Int>
         Empty -> 0
         Push _ rest -> 1 + rest
 ```
@@ -242,7 +242,7 @@ size = fold_Stack e {
 }
 ```
 
-Where `rest` in the `Push` handler is the already-folded result (of type `Number`), because `Family`
+Where `rest` in the `Push` handler is the already-folded result (of type `Int`), because `Family`
 positions are recursively folded.
 
 **A seedless unfold is a constant constructor.** When an unfold's spec record omits `in:`, it takes
@@ -275,9 +275,9 @@ A surface `behavior` declaration elaborates to:
 
 ```lapis
 behavior Stream
-    head: <out: Number>
+    head: <out: Int>
     tail: <out: Self>
-    unfold From <in: Number>
+    unfold From <in: Int>
         head n -> n
         tail n -> n + 1
 ```
@@ -285,7 +285,7 @@ behavior Stream
 Elaborates to:
 
 ```
-Stream = ν α. (head: Number, tail: α)
+Stream = ν α. (head: Int, tail: α)
 
 From = unfold_Stream s {
     head → λn. n,
@@ -383,7 +383,7 @@ A `query` is sugar over `behavior` with three required cospan projections:
 
 ```lapis
 query PathFinder
-    path: Array
+    path: List
     solved: Bool
     done: Bool
     next: Self
@@ -405,7 +405,7 @@ data SearchSeed
 
 Elaborates to:
 
-1. A **behavior type** `PathFinder = ν α. (path: Array, solved: Bool, done: Bool, next: α)`.
+1. A **behavior type** `PathFinder = ν α. (path: List, solved: Bool, done: Bool, next: α)`.
 2. Three **cospan projections** (field references, not folds):
    - `output = path` (extracts the result)
    - `accept = solved` (which observations are successes)
@@ -422,7 +422,7 @@ An `io` declaration elaborates to a **Mealy machine data value** — a pure reco
 
 ```lapis
 io Counter
-    state: Number
+    state: Int
     Increment state -> (state: state + 1, output: state + 1)
     Reset _ -> (state: 0, output: 0)
 ```
@@ -456,11 +456,11 @@ A `satisfies: ProtocolName` clause on a data/behavior declaration adds a conform
 
 ```lapis
 data Num
-    N value: Number
+    N value: Int
     satisfies: Ordered
     fold equals <in: Self, out: Bool>
         N value other -> value = other value
-    fold compare <in: Self, out: Number>
+    fold compare <in: Self, out: Int>
         N value other -> value - other value
 ```
 
@@ -521,7 +521,7 @@ A histomorphism gives the handler access to all prior fold results (`prev field`
 **Surface:**
 
 ```lapis
-fold fib <histo, out: Number>
+fold fib <histo, out: Int>
     Zero -> 0
     One -> 1
     Succ pred -> pred + prev pred
@@ -569,7 +569,7 @@ A zygomorphism fuses a primary fold with an auxiliary fold.
 **Surface:**
 
 ```lapis
-fold average <aux: #length, out: Number>
+fold average <aux: #length, out: Int>
     Nil -> 0
     Cons head tail -> head + tail / aux length
 ```
@@ -598,7 +598,7 @@ single traversal.
 **Data map (eager, O(n)):**
 
 ```lapis
-map double <in: Number, out: Family>
+map double <in: Int, out: Family>
     Box contents x -> Family Box contents: (contents * x)
 ```
 
@@ -710,7 +710,7 @@ array has n+1 elements (the last is the fold of the base case).
 **Surface:**
 
 ```lapis
-fold pop <out: Array>
+fold pop <out: List>
     demands: self | self size > 0
     Empty -> Error signal: 'Cannot pop empty stack'
     Push value rest -> value , old rest
@@ -768,7 +768,7 @@ to `(old, result)` with `self` bound. EnsuresError _is_ caught by rescue.
 **Surface:**
 
 ```lapis
-fold pop <out: Array>
+fold pop <out: List>
     rescue: self err args retry | retry value: 0
     ...
 ```
@@ -959,18 +959,18 @@ data ExtendedColor <: Color
 **Surface:**
 
 ```lapis
-data NumList <: List
-    Cons head: Number tail: Family
+data IntList <: List
+    Cons head: Int tail: Family
 ```
 
 **Elaboration:**
 
-1. `NumList` is a subtype of `List` (μ-depth subtyping — `head: Number <: head: Any`). The narrowing
+1. `IntList` is a subtype of `List` (μ-depth subtyping — `head: Int <: head: Any`). The narrowing
    rules at declaration time: each re-specified field's type must be a subtype of the parent's
    (covariant), no new fields may be introduced, and unmentioned fields are inherited unchanged.
-2. `NumList.Cons` instances are `instanceof List.Cons` and `instanceof List` (comb inheritance:
+2. `IntList.Cons` instances are `instanceof List.Cons` and `instanceof List` (comb inheritance:
    prototype chain + delegation chain).
-3. Operations on `List` accept `NumList` instances (subsumption via `T-Sub`).
+3. Operations on `List` accept `IntList` instances (subsumption via `T-Sub`).
 
 ## 8. Elaboration Summary Table
 

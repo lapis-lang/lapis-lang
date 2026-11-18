@@ -46,7 +46,7 @@ Val ::= VVariant(T, C, [Val])        a constructed variant: type T, constructor 
 ```
 
 Note: `VInt` and `VStr` are eliminated — integers and strings are pattern-matched data types
-(`Nat = μ α. [0-9]+`, `String = μ α. "<Char>*"`), so their values are `VMatch(Nat, "42")` and
+(`Int = μ α. -?[0-9]+`, `String = μ α. "<Char>*"`), so their values are `VMatch(Int, "42")` and
 `VMatch(String, "hello")` respectively. The fold handler for a pattern-matched type transforms the
 `Token` into whatever representation the runtime needs (e.g., a native integer).
 

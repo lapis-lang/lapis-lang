@@ -264,7 +264,7 @@ recordLiteral  ::= "(" ( ident ":" ␣ expr ( "," ␣ ident ":" ␣ expr )* )? "
 specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 ```
 
-**Array literal** — `{1, 2, 3}`. Elaborates to nested cons.
+**List literal** — `{1, 2, 3}`. Elaborates to nested cons.
 
 **Record literal** — `(x: 3, y: 4)`. The named-argument form. (A record may also carry _bare flags_
 — `(commutative, associative)` — but only inside a spec's `properties` value; see §3.7.)
@@ -335,10 +335,10 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 > argument type from the arm that binds it, so a separate declaration-time type parameter would be a
 > second spelling for something the arm already carries.
 
-> **Decided (overview §12.19).** `in:` carries **only the type** — `in: Nat`, never `in: v Nat`. A
+> **Decided (overview §12.19).** `in:` carries **only the type** — `in: Int`, never `in: v Int`. A
 > fold takes at most one input, so there is nothing for a name to disambiguate; the name would also
-> be unspellable under the spec record's own production (`specEntry ::= ident ":" ␣ expr` — `v Nat`
-> is not an `expr`, since a unary send's message must be a camelCase `ident` and `Nat` is
+> be unspellable under the spec record's own production (`specEntry ::= ident ":" ␣ expr` — `v Int`
+> is not an `expr`, since a unary send's message must be a camelCase `ident` and `Int` is
 > PascalCase). **The arm binds the input**, and the same `armHead` binding list carries it: a fold
 > arm's bindings beyond the variant's field count bind the input (`Cons head rest v -> …`, optional
 > per arm); an unfold arm's bindings bind the **seed** (`Empty arr -> …`, `Push arr -> …` — the arm
@@ -379,7 +379,7 @@ atomType       ::= "(" typeExpr ")"
 > type discipline.
 >
 > Subtyping is the sole abstraction mechanism. Where a generic type would be introduced, one of
-> three existing forms is used instead: a **subtype** with narrowed fields (`NumList <: List`, every
+> three existing forms is used instead: a **subtype** with narrowed fields (`IntList <: List`, every
 > field covariance-checked), the **declaring type itself** (`Self` in an operation spec, which is
 > what lets `Num add <in: Self, out: Self>` return its operand type), or the lattice's top **`Any`**
 > where the element type genuinely varies and no relation between the element and the container is
@@ -659,7 +659,7 @@ the Smalltalk shape; the field names are _labels_ there, not bindings, so `n` is
 because a fieldless variant has nothing to say:
 
 ```lapis
-unfold Range <in: Nat>
+unfold Range <in: Int>
     Nil n -> n = 0
     Cons n -> n > 0 | head: n rest: n - 1
 ```
@@ -702,7 +702,7 @@ bodies transform each field. There is no separate single-line transform form; a 
 literal, it is the operation's own body.
 
 ```lapis
-map double <in: Number, out: Family>
+map double <in: Int, out: Family>
     Nil x -> Family Nil
     Cons head tail x -> Family Cons head: (head * x) tail: (tail double: x)
 ```
@@ -844,9 +844,9 @@ the `sqrt` domain as a `demands:` contract, and the `Int`-pattern trap on `-b` �
 
 ```lapis
 data Quadratic
-    Coeffs a: Number b: Number c: Number
+    Coeffs a: Float b: Float c: Float
 
-    fold discriminant <out: Number>
+    fold discriminant <out: Float>
         Coeffs a b c -> (b * b) - (4 * a * c)
 
     fold roots <aux: #discriminant, out: QuadraticRoots>
@@ -856,16 +856,23 @@ data Quadratic
             minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))
 ```
 
-Two details in that snippet are load-bearing rather than stylistic. `- b` **must not** be written
-`-b`: contiguity is position-meaningful, so `-b` at the start of a token is a pattern-matched `Int`
-constructor (`-[0-9]+`) while `- expr` in prefix position is `negate`. And the `demands:` clause is
-how `sqrt`'s partiality is handled — the principal square root is undefined over the reals for a
-negative radicand, so `roots` is callable only on a value with a non-negative discriminant, which
-makes the precondition checkable instead of a silent domain error.
+Two details in that snippet are load-bearing rather than stylistic. `- b` is written with a space:
+contiguity is position-meaningful, so a contiguous `-3` is one `Int` token (the `-?[0-9]+` pattern)
+while `- expr` in prefix position is `negate` applied to `expr`. The space is what picks the second
+reading. And the `demands:` clause is how `sqrt`'s partiality is handled — the principal square root
+is undefined over the reals for a negative radicand, so `roots` is callable only on a value with a
+non-negative discriminant, which makes the precondition checkable instead of a silent domain error.
+
+**This example is a target, not runnable code.** `Float` and `sqrt` are deferred by the prelude
+([`prelude.md`](./prelude.md) §5.3) because `sqrt`'s domain restriction needs `demands:` and
+contract elaboration is not in the surface implementation's first cut; `Float`'s language
+(`-?[0-9]*\.[0-9]+`) is disjoint from `Int`'s, so adding it later costs no collision. The `Int`
+arithmetic it also depends on has its own blocker
+([#119](https://github.com/lapis-lang/lapis-lang/issues/119)).
 
 This is strictly better than a local would be, on four counts that an anonymous binder cannot match:
 
-- **Type.** `discriminant` is declared `out: Number`; a local would carry only the type of its
+- **Type.** `discriminant` is declared `out: Float`; a local would carry only the type of its
   expression, and the surface has no binder that could introduce one in the first place (there is no
   `let`, and no block literal — §3.6.1).
 - **Reuse.** It is callable elsewhere (`q discriminant`) instead of being scoped to one body.

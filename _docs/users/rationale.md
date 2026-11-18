@@ -243,7 +243,7 @@ data Stack
     Empty
     Push value: Any rest: Family
 
-    fold size <out: Number>
+    fold size <out: Int>
         Empty -> 0
         Push _ rest -> 1 + rest
 
@@ -271,10 +271,10 @@ the value paired with the original remaining stack.
 
 ```lapis
 behavior Stream
-    head: <out: Number>
+    head: <out: Int>
     tail: <out: Self>
 
-    unfold From <in: Number>
+    unfold From <in: Int>
         head n -> n
         tail n -> n + 1
 
@@ -320,15 +320,15 @@ it.
 ### 5.4 Fusion
 
 ```lapis
-data NumList
+data IntList
     Nil
-    Cons head: Number tail: Family
+    Cons head: Int tail: Family
 
-    fold sum <out: Number>
+    fold sum <out: Int>
         Nil -> 0
         Cons head tail -> head + tail
 
-    fold scaleEach <in: Number, out: Family, properties: (distributive: #sum)>
+    fold scaleEach <in: Int, out: Family, properties: (distributive: #sum)>
         Nil x -> Family Nil
         Cons head tail x -> Family Cons head: head * x tail: (tail scaleEach: x)
 
@@ -440,7 +440,7 @@ state.
 
 ```lapis
 query PathFinder
-    path:    Array
+    path:    List
     solved:  Bool
     done:    Bool
     next:    Self
@@ -506,7 +506,7 @@ data Stack
         value: Any
         rest: Family
 
-    fold pop <out: Array>
+    fold pop <out: List>
         demands: self | self size > 0
         ensures: self old result | result size = 2
         rescue:  self err args retry | retry value: 0
