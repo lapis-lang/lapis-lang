@@ -127,15 +127,17 @@ Yes, partially. Here is the honest survey:
 > and the most instructive contrast. Its lineage (per Sweeney's own two-decade trajectory: Ontic's
 > committed choice → λℵ's set-theoretic terms → the untyped Verse calculus with success/failure,
 > unification, and lenient evaluation) converges with Lapis on rejecting the primitive conditional:
-> Verse's `if` _fails_ when the condition doesn't hold; Lapis's `ifTrue:ifFalse:` is a fold over
-> `Bool`. But the architectures diverge sharply: Verse makes logic, failure, and time **ambient**
-> (one unified calculus, a fixed closed effect vocabulary, transactions for `var`), and buys
-> totality only per-effect (`converges` vs `computes`) — a sublanguage suitable for proofs, with a
-> planned Verse-written verifier. Lapis **stratifies**: failure is data (`Result`), logic is a
-> fixpoint fragment, time is outside the core (Mealy IO), and totality is unconditional — the whole
-> language. Notably, Verse has **no algebraic-law story at all** — no laws, no `≡`, no exploitation.
-> The full comparison — types-as-predicates vs types-as-shapes, and why the terms-only foundation is
-> incompatible with the bialgebraic core — is [`lapis-vs-verse.md`](./lapis-vs-verse.md).
+> Verse's `if` _fails_ when the condition doesn't hold; Lapis has no `if` at all. Branching is
+> structural dispatch — fold arms dispatch on variants, `guard | payload` arms decide on unfold
+> seeds — and `Bool` is a predicate carrier that never hosts an eliminator. But the architectures
+> diverge sharply: Verse makes logic, failure, and time **ambient** (one unified calculus, a fixed
+> closed effect vocabulary, transactions for `var`), and buys totality only per-effect (`converges`
+> vs `computes`) — a sublanguage suitable for proofs, with a planned Verse-written verifier. Lapis
+> **stratifies**: failure is data (`Result`), logic is a fixpoint fragment, time is outside the core
+> (Mealy IO), and totality is unconditional — the whole language. Notably, Verse has **no
+> algebraic-law story at all** — no laws, no `≡`, no exploitation. The full comparison —
+> types-as-predicates vs types-as-shapes, and why the terms-only foundation is incompatible with the
+> bialgebraic core — is [`lapis-vs-verse.md`](./lapis-vs-verse.md).
 
 **No existing language combines enforced algebraic structure with practical law exploitation and a
 practical ecosystem.** Charity came closest on enforcement but failed on everything else. Haskell

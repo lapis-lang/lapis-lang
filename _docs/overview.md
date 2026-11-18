@@ -846,7 +846,7 @@ operators**. All binary operators name folds, evaluated left-to-right:
 ```lapis
 1 + 2 * 3           /* 9 — parses as (1 + 2) * 3 */
 1 + (2 * 3)         /* 7 — explicit parentheses for mathematical grouping */
-nats take: 5        /* keyword form: multi-argument */
+xs append: 3        /* keyword form: multi-argument */
 Color Red toHex     /* unary chains: left to right */
 ```
 
@@ -1478,9 +1478,8 @@ is a real finding for the spec:
     keyword self-send on a continuation, the same shape as `xs append: 3` — and `(tail x)` is
     respelled `(tail scaleEach: x)` for the same reason. Only `(tail x)` was wrong.
 
-    The documented conditional needed no apply form either: `ifTrue:ifFalse:` is a fold over `Bool`
-    whose arm bodies force the chosen branch (`elaboration.md` §7). Its remaining problem is arity,
-    not application — a fold takes one `in:` value, and it has two branches (§12.28).
+    The documented conditional needed no apply form either — because it is gone. Branching is
+    structural dispatch, and there is no `ifTrue:ifFalse:` to apply (§12.28).
 
     Consequence: **the surface has no anonymous binder and no higher-order literal.** A function
     value is an operation reference, which carries a declared type, laws, and a cost summary — the
@@ -1547,18 +1546,24 @@ is a real finding for the spec:
     §2.1/§3.1/§4.1/§4.2/ §5.3, `elaboration.md` §2.3/§2.5/§7/§8, `design-decisions.md` §"Function
     values".
 
-28. **The conditional's branch arity — a fold takes one input, `ifTrue:ifFalse:` has two.** §12.25
-    closes the _application_ half of the conditional: the fold's arm bodies observe and apply the
-    chosen branch (`t value`, not `t`), so only the chosen branch runs. The remaining defect is
-    structural. A fold takes at most one `in:` value (`surface-grammar.md` §3.7), so two branches
-    cannot both ride the traversal; and there is no first-class product/record type in the core to
-    pack them (`elaboration.md` §9 open question 5). Candidates: (a) a record type in the core, so
-    the branches arrive as one `in:` value; (b) a two-part selector on an operation declared by the
-    `Bool`'s type, whose arms close over one branch each — which makes the conditional a _method_
-    rather than a fold with two arguments; (c) nest two single-branch folds, which is total and free
-    but reads badly. Decide the arity **before** `Bool` and its operations enter the prelude (#93) —
-    the conditional is the prelude's most visible operation, and `overview.md` §3.1's rule that a
-    fold carries at most one input is the constraint it has to satisfy
-    ([#111](https://github.com/lapis-lang/lapis-lang/issues/111)). Spec impact: `elaboration.md` §7
-    (the `ifTrue:ifFalse:` definition), `language-design.md` §2.6, `syntax-design.md` §"Behavior",
-    and #93's operator table.
+28. ~~**The conditional's branch arity — a fold takes one input, `ifTrue:ifFalse:` has two.**~~
+    **Retired — the construct is gone, not repaired.** The finding asked how to fit two branches
+    into one `in:`. That question has no answer because the premise was wrong: `Bool` should never
+    have hosted an eliminator. Every operation is declared inside the type it eliminates and matches
+    that type's variants; `ifTrue:ifFalse:` discards its eliminated structure and takes its outcomes
+    as parameters, so it has nothing to dispatch on. It also cannot be declared usefully (it needs a
+    result-type variable, and `atomType` has no lowercase production), and its strict form breaks
+    totality — both branches evaluate before dispatch, so `take`'s untaken branch recurses at zero.
+
+    The replacement is not a new rule but the existing asymmetry: **fold arms dispatch on a variant;
+    unfold arms decide on a seed** (`guard | payload`, `surface-grammar.md` §5.2). A decision over a
+    value with no discriminating variants is a decision on a seed and belongs in an unfold over a
+    declared seed type — `take` is the worked case (`syntax-design.md` §"Behavior"). `Bool` remains
+    a predicate carrier and appears in result position only.
+
+    Fold-arm guards were considered and rejected: no fold-over-data arm in the corpus needs one, and
+    guards would make arms order-sensitive, spending exhaustiveness checking, the per-variant
+    induction skeleton (`derivation.ts`), and variant-keyed inheritance (#86). Spec impact:
+    `elaboration.md` §10 (which now states the rule), `language-design.md` §2.6, `syntax-design.md`
+    §"Behavior" and its syntax summary, the comparative docs (`why-lapis.md`, `lapis-vs-coal.md`,
+    `lapis-vs-verse.md`), and `design-decisions.md` §"No primitive conditional".

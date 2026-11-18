@@ -34,10 +34,11 @@ other; the convergence points below are independent arrivals.
 Two independent convergences worth recording, because they validate design instincts:
 
 1. **No primitive conditional.** Verse's `if` is not a boolean test — the condition is a
-   pattern/goal that _succeeds or fails_, and failure is the branching mechanism. Lapis's
-   `ifTrue:ifFalse:` is a fold over `Bool = μ α. (True | False)` — branching is elimination. Two
-   opposite lineages (failure-as-control vs elimination-as-dispatch) arriving at "no primitive `if`"
-   from completely different directions.
+   pattern/goal that _succeeds or fails_, and failure is the branching mechanism. Lapis has no `if`
+   and no named eliminator for `Bool` either: branching is structural dispatch (fold arms on
+   variants, `guard | payload` arms on unfold seeds), and `Bool` is a predicate carrier that appears
+   in result position only. Two opposite lineages (failure-as-control vs elimination-as-dispatch)
+   arriving at "no `if`" from completely different directions.
 2. **Totality as a property worth engineering for.** Verse encodes it per-effect (`<converges>` vs
    `<computes>`); Lapis has it unconditionally. But both treat termination as a _designed-in
    property_, not an accident — and both have explicit machinery for reasoning about which programs

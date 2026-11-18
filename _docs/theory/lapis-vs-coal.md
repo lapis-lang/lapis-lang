@@ -146,14 +146,18 @@ relational/cospan layer.
 **Coal:** Primitive `if-then-else`. Both branches must be present and produce the same type. Guards
 (`when`/`otherwise`) in pattern matching.
 
-**Lapis:** No primitive `if`. `Boolean` is a data type (`μ α. True | False`); `ifTrue:ifFalse:` is a
-fold over it. Branching is fold-based dispatch.
+**Lapis:** No `if` at all — no primitive `if`, and no named eliminator for `Bool` either. `Boolean`
+is a data type (`μ α. True | False`) that appears in result position only: predicates (`isWarm`,
+`contains`, `lessThan`) eliminate a meaningful type and produce a verdict. Branching is structural
+dispatch — fold arms key on variants, unfold arms decide on a seed by `guard | payload`.
 
-**Honest assessment:** Coal's `if-then-else` is pragmatic and familiar. Lapis's "no primitive if" is
-philosophically consistent (everything is fold/unfold) but adds friction for simple conditionals.
-The honest truth is that Coal's `if` is sugar for a fold over `Bool` — Lapis just makes the
-desugaring explicit and forbids the sugar. Whether this is a feature or an annoyance depends on the
-audience.
+**Honest assessment:** Coal's `if-then-else` is pragmatic and familiar. Lapis's position is stricter
+than "`if` is sugar for a fold": it rejects the eliminator, not just the syntax. A `Bool`-declared
+operation that returns its two arguments dispatches on a type with no structure to dispatch on, so
+it inverts the rule that every operation is declared inside the type it eliminates. The cost is real
+— a predicate over a value with no discriminating variants must be written as an unfold over an
+explicit seed type, which is more ceremony than `if x then a else b`. Whether that is a feature or
+an annoyance depends on the audience.
 
 ### 6. Syntax
 

@@ -891,35 +891,34 @@ data NumList <: List
 
 ## 8. Elaboration Summary Table
 
-| Surface Construct    | Core Elaboration                                                  | Section        |
-| -------------------- | ----------------------------------------------------------------- | -------------- |
-| `data T`             | `T = μ α. Σᵢ Cᵢ(Fᵢ(α))`                                           | §3.1           |
-| `behavior T`         | `T = ν α. Πⱼ oⱼ(Gⱼ(α))`                                           | §3.2           |
-| `protocol P`         | Qualified type constraint                                         | §3.3           |
-| `relation R`         | `data` + span projections + join invariant + closure/reachability | §3.4           |
-| `query Q`            | `behavior` + cospan projections + explore                         | §3.5           |
-| `io M`               | Mealy machine record `{init, request, respond}`                   | §3.6           |
-| `satisfies: P`       | Intersection type `τ <: P`                                        | §3.7           |
-| `fold op <spec>`     | `fold_T e {Cᵢ → hᵢ}`                                              | §3.1           |
-| `unfold Ctor <spec>` | `unfold_T s {oⱼ → gⱼ}`                                            | §3.2           |
-| `map op <spec>`      | fold (data) or unfold (codata) with transform                     | §4.4           |
-| `merge op <#a, #b>`  | Composed fold/unfold (fusion rules)                               | §4.5           |
-| `scan foldName`      | fold with array-accumulating result type                          | §4.6           |
-| `<para>`             | fold with pair result type `(Result, Raw)`                        | §4.1           |
-| `<histo>`            | fold with stream result type `Stream<Result>`                     | §4.2           |
-| `<aux: name>`        | fold with pair result type `(Primary, Aux)`                       | §4.3           |
-| `demands: <body>`    | Guard before body; DemandsError bypasses rescue                   | §5.1           |
-| `ensures: <body>`    | Guard after body; EnsuresError caught by rescue                   | §5.2           |
-| `rescue: <body>`     | try/catch elaborated to Result; retry counter                     | §5.3           |
-| `invariant: <body>`  | Check at construction + around operations                         | §5.4           |
-| `properties: (...)`  | Law constraints; verified + exploited                             | §6.1           |
-| `extend` (`<:`)      | μ-width subtyping + fold inheritance                              | §7.1           |
-| Field narrowing      | μ-depth subtyping                                                 | §7.2           |
-| `ifTrue:ifFalse:`    | `fold [Bool] b {True → t, False → f}`                             | elaboration §7 |
-| Binary operators     | Message sends → folds on the operand type                         | §2.4           |
-| `double` (op ref)    | The operation's definition term (a `FunType`)                     | §2.3           |
-| `b value: x`         | `b.value x` — observe the `Block`, then apply                     | §2.5           |
-| `{a, b, c}`          | Nested cons on built-in List                                      | §2.6           |
+| Surface Construct    | Core Elaboration                                                  | Section |
+| -------------------- | ----------------------------------------------------------------- | ------- |
+| `data T`             | `T = μ α. Σᵢ Cᵢ(Fᵢ(α))`                                           | §3.1    |
+| `behavior T`         | `T = ν α. Πⱼ oⱼ(Gⱼ(α))`                                           | §3.2    |
+| `protocol P`         | Qualified type constraint                                         | §3.3    |
+| `relation R`         | `data` + span projections + join invariant + closure/reachability | §3.4    |
+| `query Q`            | `behavior` + cospan projections + explore                         | §3.5    |
+| `io M`               | Mealy machine record `{init, request, respond}`                   | §3.6    |
+| `satisfies: P`       | Intersection type `τ <: P`                                        | §3.7    |
+| `fold op <spec>`     | `fold_T e {Cᵢ → hᵢ}`                                              | §3.1    |
+| `unfold Ctor <spec>` | `unfold_T s {oⱼ → gⱼ}`                                            | §3.2    |
+| `map op <spec>`      | fold (data) or unfold (codata) with transform                     | §4.4    |
+| `merge op <#a, #b>`  | Composed fold/unfold (fusion rules)                               | §4.5    |
+| `scan foldName`      | fold with array-accumulating result type                          | §4.6    |
+| `<para>`             | fold with pair result type `(Result, Raw)`                        | §4.1    |
+| `<histo>`            | fold with stream result type `Stream<Result>`                     | §4.2    |
+| `<aux: name>`        | fold with pair result type `(Primary, Aux)`                       | §4.3    |
+| `demands: <body>`    | Guard before body; DemandsError bypasses rescue                   | §5.1    |
+| `ensures: <body>`    | Guard after body; EnsuresError caught by rescue                   | §5.2    |
+| `rescue: <body>`     | try/catch elaborated to Result; retry counter                     | §5.3    |
+| `invariant: <body>`  | Check at construction + around operations                         | §5.4    |
+| `properties: (...)`  | Law constraints; verified + exploited                             | §6.1    |
+| `extend` (`<:`)      | μ-width subtyping + fold inheritance                              | §7.1    |
+| Field narrowing      | μ-depth subtyping                                                 | §7.2    |
+| Binary operators     | Message sends → folds on the operand type                         | §2.4    |
+| `double` (op ref)    | The operation's definition term (a `FunType`)                     | §2.3    |
+| `b value: x`         | `b.value x` — observe the `Block`, then apply                     | §2.5    |
+| `{a, b, c}`          | Nested cons on built-in List                                      | §2.6    |
 
 ## 9. Open Questions
 
@@ -954,49 +953,53 @@ data NumList <: List
    calculus doesn't currently have a record type. _Decision needed:_ add records to the core, or
    elaborate to ad-hoc data types.
 
+   Note the standing rule this question now rests on: **a decision needing more than one value in
+   scope is expressed by a declared seed type**, not by packing a product and projecting it. A
+   `data` declaration is the surface's answer to "I need two things at once," and it composes with
+   every recursion scheme (`syntax-design.md` §"Behavior"'s `TakeSeed`).
+
 6. **Operator resolution.** Binary operators elaborate to folds on the operand type. But which fold?
    `a + b` where `a : Num` elaborates to `Num.add(a, b)`, but the surface syntax doesn't name the
    fold — the compiler must resolve `+` to the `add` fold on `Num` by convention. This requires a
    standard library of operator-to-fold mappings, or a way to declare operator bindings in the
    surface language.
 
-## 7. Boolean and Conditional
+## 10. No Conditional Construct
 
-There is **no primitive `if`** in LC. `Boolean` is a data type:
+There is **no conditional** in LC or in the surface language — no primitive `if`, and no named
+eliminator for `Bool`. `Bool = μ α. (True | False)` is an ordinary data type, and it appears in
+**result position only**: a predicate eliminates a meaningful type and produces a verdict.
 
-```
-Bool = μ α. (True | False)
-```
-
-`ifTrue:ifFalse:` is a fold over `Bool`, whose branch arguments are function values (a `Block`, or
-an operation reference — §2.3):
-
-```
-ifTrue:ifFalse: b = fold [Bool] b { True → t value, False → f value }
+```lapis
+fold isWarm <out: Boolean>
+    Red -> true
+    Green -> false
+    Blue -> false
 ```
 
-The arm bodies **observe and apply** the chosen branch — they return `t value`, not `t`. Returning
-the branch itself would type the fold's result as a function, defeating the point.
+Branching is **structural dispatch**, in exactly two forms:
 
-The surface syntax `(n = 0) ifTrue: then ifFalse: else` is a keyword send to the `Bool` receiver,
-which desugars to this fold. The "no conditional" claim is literally true: branching is fold-based
-dispatch.
+- **Fold arms** dispatch on a variant. The arm keying _is_ the decision — `Red -> true` needs no
+  guard, because `Red` is the condition.
+- **Unfold arms** decide on a seed: `guard | payload`, first match wins (`surface-grammar.md` §5.2).
 
-Two consequences the spec must carry:
+A decision that is neither — a predicate computed over a value with no discriminating variants —
+belongs in an unfold over a declared seed type, not in a fold arm's body. `take` is the worked case
+(`syntax-design.md` §"Behavior"): its recursion is primitive recursion on a numeric seed whose step
+observes a `Stream`, so it is an anamorphism, not a catamorphism with a conditional inside.
 
-- **A branch is forced, not evaluated eagerly.** The fold's arms apply the branch, so only the
-  chosen branch runs — the untaken branch is never observed. This is why a `Block` argument (rather
-  than a value) is the useful spelling: totality means an untaken branch cannot _diverge_, but
-  evaluating it would still cost, and cost is a declared, observable property of this language
-  (`cost.ts`). Laziness here is an economic choice, not a divergence workaround.
-- **Two arguments exceed the fold's one-input rule.** A fold takes at most one `in:` value
-  (`surface-grammar.md` §3.7), so `ifTrue:ifFalse:` cannot carry both branches as `in:` parameters.
-  It is spelled as a _pair_ of branches — a product the core has no first-class record type for (§9
-  open question 5) — or as a two-part selector on a `Bool`-declared operation whose arms close over
-  one branch. This is unfinished: see `overview.md` §12.28 and
-  [#111](https://github.com/lapis-lang/lapis-lang/issues/111).
+Two structural reasons the conditional has no home here:
 
-## 8. Contracts and Blame
+- **A `Bool`-declared eliminator inverts the declaration-site rule.** Every operation is declared
+  inside the type it eliminates, and its arms match that type's variants. An operation that discards
+  its eliminated structure and takes its outcomes as parameters has nothing to dispatch on.
+- **Fold arms stay order-free.** Their meaning is a total function from variants, which is what
+  makes exhaustiveness checkable, keeps `derivation.ts`'s per-variant induction skeleton intact, and
+  lets an extending type re-declare arms for its new variants alone (#86). Guards would make arms a
+  first-match chain and spend all three properties. `unfold` escapes this because generators are
+  first-match _by construction_ and carry no exhaustiveness premise.
+
+## 11. Contracts and Blame
 
 Contract clauses (`demands`, `ensures`, `rescue`, `invariant`) are **not core constructs**. They
 elaborate to core terms (see §5 above). The core remains effect-free: `raise` and `try/catch`

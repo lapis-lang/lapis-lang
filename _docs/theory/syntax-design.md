@@ -257,26 +257,56 @@ behavior Stream
         head -> self
         tail -> self
 
-    fold take <in: Number, out: Array>
-        _ head tail n ->
-            (n = 0) ifTrue: emptyArray ifFalse: ({head} , (tail take: n - 1))
-
     map map <in: (Object -> Object), typeParam: Object>
         head -> transform value: head
 
 (Stream From: 0) head                      /* 0 */
 (Stream From: 0) tail head                /* 1 */
-(Stream From: 0) take: 5                  /* [0, 1, 2, 3, 4] */
-((Stream From: 0) map: double) take: 3    /* [0, 2, 4] */
+((Stream From: 0) map: double) head       /* 0 */
 ```
 
 `Self` in the observer spec declares a continuation (lazy self-reference). Observations are memoized
 — accessing `(Stream From: 0) tail` twice returns the same instance.
 
 There is no top-level binding form, so the stream is constructed where it is used rather than named.
-`emptyArray` and `double` are operation references — the surface's only function values (a block
-literal would have been an anonymous binder). The `ifTrue:ifFalse:` branch arity (a fold takes one
-input, this has two) is still open — `overview.md` §12.28.
+`double` is an operation reference — the surface's only function value (a block literal would have
+been an anonymous binder).
+
+### Taking a prefix: a decision on a seed, not on a variant
+
+Bounding a stream to `n` elements is not a decision any `Stream` variant can express — `Stream` is
+codata, so it has no variants at all. It is a decision on a **numeric seed**, and that places it in
+an `unfold`, whose arms decide by `guard | payload` (`surface-grammar.md` §5.2). The seed carries
+both of the values the decision needs, so no product type and no conditional is involved:
+
+```lapis
+data Slice
+    Slice remaining: Nat source: Stream
+
+/* `Array` is the prelude's list; its variants are `Nil` and `Cons`. */
+data Array
+    Nil
+    Cons head: Object rest: Family
+
+    unfold Take <in: Slice>
+        Nil slice -> slice remaining = 0
+        Cons slice ->
+            slice remaining > 0
+                | head: slice source head
+                  rest: Slice remaining: slice remaining - 1 source: slice source tail
+
+Array Take: (Slice remaining: 5 source: (Stream From: 0))    /* [0, 1, 2, 3, 4] */
+```
+
+The unfold is declared inside `Array` because an unfold produces the type that encloses it — the
+result type is the declaration site, never a parameter. Reading the arms as a decision table: the
+base arm produces `Nil` when the seed's budget is spent, and the step arm produces a `Cons` whose
+rest is the next seed (the budget one smaller, the source one observation further along). That is
+the `NatList Range` shape from `overview.md` §3.2, with a two-field seed.
+
+This is why branching needs no conditional: **fold arms dispatch on a variant, unfold arms decide on
+a seed.** A decision that is neither — one computed over a value with no discriminating variants —
+is a decision on a seed, and belongs here.
 
 ---
 
@@ -458,8 +488,8 @@ asynchronously.
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | `data` + indented body                     | Algebraic data type: variants and operations                                                                    |
 | `behavior` + indented body                 | Final coalgebra: observers, unfolds, folds, maps, merges                                                        |
-| `fold name <spec>` + indented cases        | Structural dispatch — catamorphism; replaces `ifTrue:ifFalse:`                                                  |
-| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism                                                                           |
+| `fold name <spec>` + indented cases        | Structural dispatch — catamorphism; arms dispatch on variants, so the arm keying is the decision                |
+| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism; arms decide on a seed by `guard \| payload`                              |
 | `merge name <#a, #b>`                      | Fold-fold fusion (single-traversal composition)                                                                 |
 | `protocol` + indented body                 | Trait / interface with optional default method bodies                                                           |
 | `relation` + indented body                 | Data ADT with allegory / Datalog operations                                                                     |

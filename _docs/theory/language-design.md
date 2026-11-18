@@ -115,13 +115,21 @@ This leaves room for Lapis as a **Programming Language System** (Smalltalk/DBMS 
 live-image mode where types and laws are checked at runtime, a batch compiler that proves what it
 can and rejects what it can't, or a hybrid. The core calculus doesn't choose; the _system_ does.
 
-### 2.6 No Primitive Conditional — Boolean is Data
+### 2.6 No Conditional — Branching is Structural Dispatch
 
-The design doc says fold-based dispatch replaces conditionals. To make this literally true:
-`Boolean` is a data type with two variants (`True`, `False`), and `ifTrue:ifFalse:` is an ordinary
-fold over it. There is no primitive `if` in the core. `(n = 0) ifTrue: then ifFalse: else` in the
-Stream example is a keyword send to a `Bool` — a fold, not a language primitive. (Branch arity — a
-fold takes one input and the conditional has two branches — is still open; `overview.md` §12.28.)
+There is no `if` in Lapis, and no named eliminator for `Boolean` either. `Boolean` is an ordinary
+data type with two variants (`True`, `False`) which appears in **result position only**: a predicate
+eliminates a meaningful type and produces a verdict (`fold isWarm <out: Boolean>`).
+
+Branching takes exactly two forms, both structural:
+
+- **Fold arms dispatch on a variant.** The arm keying _is_ the decision.
+- **Unfold arms decide on a seed** — `guard | payload`, first match wins.
+
+A decision over a value with no discriminating variants is a decision on a _seed_, so it belongs in
+an unfold over a declared seed type rather than in an arm body. Taking a prefix of a `Stream` is the
+worked case (`syntax-design.md` §"Behavior"). This is why no conditional is needed — not because
+`if` was re-spelled as a fold over `Bool`, but because the two dispatch forms cover what it was for.
 
 ## 3. Document Structure
 

@@ -334,7 +334,6 @@ is no operator hierarchy. Binary operators are fold names — symbolic (`+`, `*`
 **Keyword messages** (lowest precedence, multi-argument, collected greedily):
 
 ```lapis
-nats take: 5
 a between:and: lo hi
 stack append: 3
 ```
@@ -862,9 +861,9 @@ does not declare.
    Users must use parentheses if they want different grouping.
 
 4. **Keyword send ambiguity with specs.** A spec record `<out: Number>` uses `:` inside angle
-   brackets, while a keyword send `take: 5` uses `:` in message position. The grammar disambiguates
-   by context (specs only appear after fold/unfold/map names), but this is fragile. Consider whether
-   a different spec syntax would be cleaner.
+   brackets, while a keyword send `append: 3` uses `:` in message position. The grammar
+   disambiguates by context (specs only appear after fold/unfold/map names), but this is fragile.
+   Consider whether a different spec syntax would be cleaner.
 
 5. **Multi-line expressions.** The current grammar requires expressions to be on a single line (or
    an indented continuation for case-arm bodies). No explicit line-continuation syntax. A long
