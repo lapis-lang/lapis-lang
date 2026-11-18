@@ -20,7 +20,7 @@ primary declaration forms.
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | Indentation              | Defines block extent; replaces `[...]` for multi-line declaration bodies and case tables                                               |
 | Newline                  | Statement separator                                                                                                                    |
-| `[params \| expr]`       | First-class block value (lambda) — used for callbacks, guards, and contract clauses                                                    |
+| `double` / `Int double`  | Function value — an operation reference, optionally type-qualified; there is no block literal                                          |
 | `Variant fields -> body` | Pattern case in fold/unfold: `->` separates the pattern from the body; single-expression bodies inline, multi-line bodies indent below |
 | `(key: val, ...)`        | Inline spec / named-argument record                                                                                                    |
 | Keyword message          | Multi-argument send: `size: 3` or `contains: 2`                                                                                        |
@@ -78,9 +78,9 @@ data Point
         Point2D x y -> "(" , x printString , ", " , y printString , ")"
         Point3D x y z -> "(" , x printString , ", " , y printString , ", " , z printString , ")"
 
-p = Point Point2D x: 3 y: 4
-p distanceFromOrigin      /* 5.0 */
-p asString                /* "(3, 4)" */
+Point Point2D x: 3 y: 4
+    distanceFromOrigin      /* 5.0 */
+    asString                /* "(3, 4)" */
 ```
 
 Each handler case binds the variant's fields as named parameters on the left-hand side of `->`, in
@@ -111,19 +111,16 @@ data Stack
         Empty -> {}
         Push value rest -> {value} , rest
 
-    fold contains <in: target Object, out: Boolean>
-        Empty -> false
-        Push value rest -> value = target | (rest value: target)
+    fold contains <in: Object, out: Boolean>
+        Empty target -> false
+        Push value rest target -> value = target | (rest contains: target)
 
-    unfold FromArray <in: arr Array>
-        Empty -> arr isEmpty | {}
-        Push -> arr notEmpty | (value: arr first, rest: arr tail)
+    unfold FromArray <in: Array>
+        Empty arr -> arr isEmpty | {}
+        Push arr -> arr notEmpty | value: arr first rest: arr tail
 
-s = Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
-s size            /* 2 */
-s peek            /* 3 */
-s toArray         /* [3, 2] */
-s contains: 2     /* true */
+Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
+    /* then: size 2, peek 3, toArray [3, 2], contains: 2 */
 ```
 
 ---
@@ -217,7 +214,8 @@ cases.
 data Box
     Box contents: Object
 
-    map double <typeParam: Number> [v | v * 2]
+    map double <typeParam: Number>
+        Box contents -> Family Box contents: (contents * 2)
 
 (Box Box contents: 5) double   /* Box(contents: 10) */
 ```
@@ -238,7 +236,7 @@ data List
         Nil -> Family Nil
         Cons head tail -> Family Cons head: head * 2 tail: tail
 
-    /* Horner pair — single traversal when "distributive:sum" is detected */
+    /* Horner pair — single traversal when "distributive: #sum" is detected */
     merge doubleSum <#double, #sum>
 ```
 
@@ -251,32 +249,34 @@ behavior Stream
     head: <out: Object>
     tail: <out: Self>
 
-    unfold From <in: n Number>
-        head -> n
-        tail -> n + 1
+    unfold From <in: Number>
+        head -> self
+        tail -> self + 1
 
-    unfold Constant <in: n Number>
-        head -> n
-        tail -> n
+    unfold Constant <in: Number>
+        head -> self
+        tail -> self
 
-    fold take <in: n Number, out: Array>
-        _ head tail ->
-            n = 0
-                ifTrue:  [{}]
-                ifFalse: [{head} , (tail take: n - 1)]
+    fold take <in: Number, out: Array>
+        _ head tail n ->
+            (n = 0) ifTrue: emptyArray ifFalse: ({head} , (tail take: n - 1))
 
-    map map <in: transform Block, typeParam: Object>
+    map map <in: (Object -> Object), typeParam: Object>
         head -> transform value: head
 
-nats = Stream From: 0
-nats head                     /* 0 */
-nats tail head                /* 1 */
-nats take: 5                  /* [0, 1, 2, 3, 4] */
-(nats map: [n | n * 2]) take: 3   /* [0, 2, 4] */
+(Stream From: 0) head                      /* 0 */
+(Stream From: 0) tail head                /* 1 */
+(Stream From: 0) take: 5                  /* [0, 1, 2, 3, 4] */
+((Stream From: 0) map: double) take: 3    /* [0, 2, 4] */
 ```
 
 `Self` in the observer spec declares a continuation (lazy self-reference). Observations are memoized
-— accessing `nats tail` twice returns the same instance.
+— accessing `(Stream From: 0) tail` twice returns the same instance.
+
+There is no top-level binding form, so the stream is constructed where it is used rather than named.
+`emptyArray` and `double` are operation references — the surface's only function values (a block
+literal would have been an anonymous binder). The `ifTrue:ifFalse:` branch arity (a fold takes one
+input, this has two) is still open — `overview.md` §12.28.
 
 ---
 
@@ -284,17 +284,17 @@ nats take: 5                  /* [0, 1, 2, 3, 4] */
 
 ```lapis
 protocol Eq
-    equals: <in: other Self, out: Boolean>
-    notEquals: <in: other Self, out: Boolean>
+    equals: <in: Self, out: Boolean>
+    notEquals: <in: Self, out: Boolean>
         (self equals: other) not
 
 protocol Ordered <: Eq
-    compare: <in: other Self, out: Number>
-    lessThan: <in: other Self, out: Boolean>
+    compare: <in: Self, out: Number>
+    lessThan: <in: Self, out: Boolean>
         (self compare: other) < 0
-    greaterThan: <in: other Self, out: Boolean>
+    greaterThan: <in: Self, out: Boolean>
         (self compare: other) > 0
-    between:and: <in: lo Self, hi Self, out: Boolean>
+    between:and: <in: Self, out: Boolean>
         (self lessThan: hi) & (self greaterThan: lo)
 
 /* Declare conformance */
@@ -302,8 +302,8 @@ data Num
     N value: Number
 
     satisfies: Ordered
-    fold compare <in: other Self, out: Number>
-        N value -> value - other value
+    fold compare <in: Self, out: Number>
+        N value other -> value - other value
 
 (Num N: 3) lessThan: (Num N: 5)    /* true */
 (Num N: 3) instanceof: Ordered     /* true */
@@ -323,42 +323,42 @@ algebraic laws automatically.
 data Num
     N value: Number
 
-    fold add <in: other Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
-        N value -> Num N: value + other value
+    fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
+        N value other -> Num N: value + other value
 
-    fold multiply <in: other Self, out: Self, properties: (commutative, associative, identity: (Num N: 1), distributiveOver: #add)>
-        N value -> Num N: value * other value
+    fold multiply <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 1), distributive: #add)>
+        N value other -> Num N: value * other value
 ```
 
 Declared properties trigger `LawError` at runtime when violated on random samples, and enable the
-Horner-rule merge optimisation when `distributiveOver:` is present.
+Horner-rule merge optimisation when `distributive:` is present.
 
 ---
 
 ## Design by Contract
 
-Contract clauses are keyword parts of the fold spec — the same block mechanism, no special language
-forms.
+Contract clauses are keyword parts of the fold spec — a binding head and an indented body, the same
+body form as a case arm, no special language forms.
 
 ```lapis
 data Stack
     Empty  Push
-        invariant: [self | self size >= 0]
+        invariant: self | self size >= 0
         value: Object
         rest:  Family
 
     fold pop <out: Array>
-        demands: [self | self size > 0]
-        ensures: [self old result | result size = 2]
-        rescue:  [self err args retry | retry value: 0]
+        demands: self | self size > 0
+        ensures: self old result | result size = 2
+        rescue:  self err args retry | retry value: 0
         Empty -> (Error signal: "Cannot pop empty stack")
         Push value rest -> value , old rest
 
-    fold append <in: val Object, out: Family>
-        demands: [self | val notNil]
-        ensures: [self old result | result size = old size + 1]
-        Empty -> Family Push value: val rest: Family Empty
-        Push value rest -> Family Push value: value rest: (rest append: val)
+    fold append <in: Object, out: Family>
+        demands: self | val notNil
+        ensures: self old result | result size = old size + 1
+        Empty val -> Family Push value: val rest: Family Empty
+        Push value rest val -> Family Push value: value rest: (rest append: val)
 ```
 
 | Clause       | Meaning                                            |
@@ -465,10 +465,10 @@ asynchronously.
 | `relation` + indented body                 | Data ADT with allegory / Datalog operations                                                                     |
 | `query` + indented body                    | Behavior with cospan structure / Prolog-style search                                                            |
 | `io` + indented body                       | Mealy machine: state fields + PascalCase step handlers                                                          |
-| `[params \| expr]`                         | First-class block value (lambda) — used for callbacks, guards, and contract clauses                             |
+| `double` / `Int double`                    | Function value — an operation reference, optionally type-qualified; no block literal                            |
 | `(key: val, ...)`                          | Inline spec or named-argument record                                                                            |
 | `Variant fields -> body`                   | Pattern case: `->` separates pattern from body; single-expression bodies inline, multi-line bodies indent below |
-| `in: paramName Type`                       | Names the `in:` argument for use across all case arms of a fold or unfold                                       |
+| `in: Type`                                 | Names the `in:` argument's type; the arm binds the value as a trailing binding                                  |
 | `old fieldName`                            | Raw pre-fold sub-node (paramorphism)                                                                            |
 | `prev fieldName`                           | Previous fold result, one step back (histomorphism)                                                             |
 | `aux foldName`                             | Auxiliary fold result (zygomorphism)                                                                            |

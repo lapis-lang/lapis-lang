@@ -45,15 +45,15 @@ data NumList
         Nil -> 0
         Cons head tail -> head + tail
 
-    fold scaleEach <in: x Number, out: Family, properties: (distributive: sum)>
-        Nil -> Family Nil
-        Cons head tail -> Family Cons head: head * x tail: (tail x)
+    fold scaleEach <in: Number, out: Family, properties: (distributive: #sum)>
+        Nil x -> Family Nil
+        Cons head tail x -> Family Cons head: head * x tail: (tail scaleEach: x)
 
     merge scaledSum <#scaleEach, #sum>
 ```
 
 Read that last line: `merge scaledSum <#scaleEach, #sum>`. That's the specification — "scale each
-element, then sum." The `properties: (distributive: sum)` on `scaleEach` is the law that says
+element, then sum." The `properties: (distributive: #sum)` on `scaleEach` is the law that says
 scaling distributes over summing. The compiler verifies the law at declaration time (by testing it
 against generated samples), then performs the fusion when it sees the `merge`. You wrote the
 two-pass specification. The compiler calculated the one-pass program.

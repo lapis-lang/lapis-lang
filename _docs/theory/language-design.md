@@ -119,8 +119,9 @@ can and rejects what it can't, or a hybrid. The core calculus doesn't choose; th
 
 The design doc says fold-based dispatch replaces conditionals. To make this literally true:
 `Boolean` is a data type with two variants (`True`, `False`), and `ifTrue:ifFalse:` is an ordinary
-fold over it. There is no primitive `if` in the core. The `n = 0 ifTrue: [{}] ifFalse: [...]` in the
-Stream example is a keyword application on a Boolean — a fold, not a language primitive.
+fold over it. There is no primitive `if` in the core. `(n = 0) ifTrue: then ifFalse: else` in the
+Stream example is a keyword send to a `Bool` — a fold, not a language primitive. (Branch arity — a
+fold takes one input and the conditional has two branches — is still open; `overview.md` §12.28.)
 
 ## 3. Document Structure
 

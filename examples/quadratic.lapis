@@ -52,7 +52,7 @@ data Quadratic
      * than on a fold result, and belongs with the prelude's numeric story (#93).
      */
     fold roots <aux: #discriminant, out: QuadraticRoots>
-        demands: [self | self hasRealRoots]
+        demands: self | self hasRealRoots
         Coeffs a b c -> Roots
             plus: ((- b + ((aux discriminant) sqrt)) / (2 * a))
             minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))

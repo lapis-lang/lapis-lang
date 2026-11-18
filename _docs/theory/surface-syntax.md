@@ -249,12 +249,18 @@ have the same precedence, evaluated left-to-right).
 
 ### 2.1 Precedence Table
 
-| Level       | Production    | Message type                                    | Associativity      | AST Node      |
-| ----------- | ------------- | ----------------------------------------------- | ------------------ | ------------- |
-| 1 (lowest)  | `keywordExpr` | Keyword calls                                   | Left               | `KeywordCall` |
-| 2           | `binaryExpr`  | Binary calls (all symbolic operators)           | **Left (uniform)** | `BinaryCall`  |
-| 3 (highest) | `unaryExpr`   | Unary calls                                     | Left               | `UnaryCall`   |
-| —           | `primary`     | literals, refs, blocks, arrays, records, parens | —                  | various       |
+| Level       | Production    | Message type                            | Associativity      | AST Node      |
+| ----------- | ------------- | --------------------------------------- | ------------------ | ------------- |
+| 1 (lowest)  | `keywordExpr` | Keyword calls                           | Left               | `KeywordCall` |
+| 2           | `binaryExpr`  | Binary calls (all symbolic operators)   | **Left (uniform)** | `BinaryCall`  |
+| 3 (highest) | `unaryExpr`   | Unary calls                             | Left               | `UnaryCall`   |
+| —           | `primary`     | literals, refs, arrays, records, parens | —                  | various       |
+
+**No application level.** There is no `expr expr` production and no `value:` suffix dedicated to
+application. Applying a function value is a keyword send: a send eliminates its receiver — `fold` on
+data, observation on codata — and applies the arguments to the result. A function value is a `Block`
+(a codata type), so its application is the ordinary observation `b value: x` (§3.1). There is
+nothing to add to this table.
 
 **Uniform binary precedence:** ALL binary operators (`+`, `-`, `*`, `/`, `<`, `<=`, `=`, `,`, `&`,
 `|`, etc.) have the same precedence. `1 + 2 * 3` parses as `(1 + 2) * 3 = 9`. Explicit parentheses
@@ -289,11 +295,10 @@ flowchart TD
     primary --> prim_data["pattern-matched data (Nat, Int, String, ...)"]
     primary --> prim_ref["self / Family / Self / old f / prev f / aux f"]
     primary --> prim_nil["nil / true / false"]
-    primary --> prim_block["[params | expr]  (Block)"]
     primary --> prim_array["{ expr, ... }  (ArrayLit)"]
     primary --> prim_paren["( expr )"]
     primary --> prim_pascal["PascalIdent (VariantRef)"]
-    primary --> prim_ident["camelCase ident"]
+    primary --> prim_ident["camelCase ident  (arm binding, else operation reference)"]
 ```
 
 **Note:** The `binaryExpr` production is a single level — all binary operators parse at the same
@@ -364,29 +369,45 @@ flowchart LR
 
 ## 3. Composite Expressions
 
-### 3.1 Block Literal `[params | expr]`
+### 3.1 Function Values (no block literal)
 
-A first-class block (lambda). Two forms:
+There is **no block literal**. `[params | expr]` is not a production of the surface language, and
+nothing in the grammar introduces an anonymous binder.
+
+A function value is a `Block` — an ordinary codata type from the prelude (`overview.md` §12.27):
+
+```
+Block<σ, τ> = ν α. Π value: (σ → τ)
+```
+
+so a block is observed like any other codata value:
 
 ```lapis
-[expr]                    — no parameters
-[x y | expr]              — one or more parameters
+double                    — the function value (an operation reference)
+Int double                — the same, qualified by its declaring type
+transform value: head     — observe: applies the block to `head`
 ```
 
-```mermaid
-flowchart LR
-    lb["'['"] --> params{"ident (' ' ident)*"}
-    params -->|yes| bar["' | '"]
-    bar --> body["expr"]
-    params -->|no params| body2["expr"]
-    body --> rb["']'"]
-    body2 --> rb
-```
+**Why the literal goes away.** A block literal is an anonymous binder, and every other binder the
+language had was already removed (no top-level definition form, no `let … in`, no arm-level binding
+— overview §12.6, `design-decisions.md` §"Program shape and name introduction"). A block literal is
+the last one, and it buys nothing that a declared operation does not: the reference form carries a
+declared type, a `properties:` law set, membership in `Ω`, and a memoized cost summary (`lc.md`
+§2.2, `E-Op`), none of which an anonymous lambda has.
 
-**AST:** `Block(params: Ident[], body: Node)`
+**Where blocks used to appear, and what replaces them:**
 
-Blocks are used for: callbacks, guards, contract clauses, map transforms, and case-arm bodies (when
-multi-line).
+| Site                                 | Was                       | Now                                       |
+| ------------------------------------ | ------------------------- | ----------------------------------------- |
+| Contract clauses (`demands:` etc.)   | `demands: [guard]`        | `demands:` on its own line, indented body |
+| `map`'s transform                    | `map f <…> [params \| e]` | the same arm form as a `fold`             |
+| A transformed codata observer (§4.4) | `<in: transform Block>`   | a declared operation, referenced by name  |
+| Call-site callback                   | `xs map: [n \| n * 2]`    | `xs map: double`                          |
+
+**Under-application is an error.** `xs append` where `append` takes an `in:` argument is an arity
+error, never a silent function value — the uniform-access getter/method split (§2.3) is unchanged.
+Partial application (a function value of fewer arguments than the operation's arity) has no
+production yet; see overview §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
 
 ### 3.2 Array Literal `{ expr, expr, ... }`
 
@@ -431,7 +452,7 @@ The spec record appears after a fold/unfold/map name. Entries are either `key: v
 
 ```lapis
 <out: Number>
-<in: target Object, out: Boolean>
+<in: Object, out: Boolean>
 <para>
 <histo, out: Number>
 <aux: #length, out: Number>
@@ -453,7 +474,7 @@ flowchart LR
 
 | Key          | Value                       | Meaning                                |
 | ------------ | --------------------------- | -------------------------------------- |
-| `in`         | `paramName Type` or `Type`  | Input parameter with type              |
+| `in`         | `typeExpr`                  | Input parameter with type              |
 | `out`        | `Type`                      | Output/return type                     |
 | `para`       | (flag)                      | Paramorphism — `old field` available   |
 | `histo`      | (flag)                      | Histomorphism — `prev field` available |
@@ -485,7 +506,9 @@ data TypeName [<: Parent]
     unfold ConstructorName <spec>
         Pattern bindings -> body
         ...
-    map opName <spec> [params | expr]
+    map opName <spec>
+        Pattern bindings -> body
+        ...
     merge opName <#op1, #op2>
     satisfies: ProtocolName
 ```
@@ -548,7 +571,8 @@ behavior TypeName [<: Parent]
         _ observations -> body
     unfold ConstructorName <spec>
         observer -> generator
-    map opName <spec> [params | expr]
+    map opName <spec>
+        observer -> transform
     merge opName <#op1, #op2>
 ```
 
@@ -634,9 +658,10 @@ fold opName <spec>
 ```
 
 Contract clauses (`invariant:`, `demands:`, `ensures:`, `rescue:`) appear before case arms, one per
-line. Each case arm is `VariantName binding1 binding2 -> body` where bindings are field names
-(camelCase) or `_` (wildcard). The body is either inline (same line after `->`) or indented on the
-next line.
+line, each with an indented body one column deeper than the clause (like a multi-line case arm — the
+clause's expression is always forced by the fold machinery, so it needs no literal). Each case arm
+is `VariantName binding1 binding2 -> body` where bindings are field names (camelCase) or `_`
+(wildcard). The body is either inline (same line after `->`) or indented on the next line.
 
 ```mermaid
 flowchart TD
@@ -645,7 +670,7 @@ flowchart TD
     spec --> nl["newline"]
     nl --> line["indented line"]
     line --> contract{"contractClause?"}
-    contract -->|yes| cline["invariant/demands/ensures/rescue: [block]"]
+    contract -->|yes| cline["invariant/demands/ensures/rescue: <indented body>"]
     cline --> more{"newline + line?"}
     contract -->|no> arm["caseArm"]
     arm --> more
@@ -681,12 +706,15 @@ Same structure as fold, but:
 ### 5.3 Map Declaration
 
 ```lapis
-map opName <spec> [params | expr]
+map opName <spec>
+    Pattern bindings -> body
+    ...
 ```
 
-A single-line declaration: the transform is a block literal.
+The same arm form as a fold: a map elaborates to a fold (data) or an unfold (codata) whose arm
+bodies transform each field, so it is declared with a body rather than a single-line literal.
 
-**AST:** `MapDecl(name, spec, transform: Block)`
+**AST:** `MapDecl(name, spec, arms: CaseArm[])`
 
 ### 5.4 Merge Declaration
 
@@ -795,9 +823,9 @@ data Stack
         Empty -> nil
         Push value rest -> value , old rest
 
-    unfold FromArray <in: arr Array>
-        Empty -> arr isEmpty
-        Push -> arr notEmpty | (value: arr first, rest: arr tail)
+    unfold FromArray <in: Array>
+        Empty arr -> arr isEmpty
+        Push arr -> arr notEmpty | value: arr first rest: arr tail
 ```
 
 The three trailing annotations below are §1.4's grade rule in action — each records its expression's
@@ -847,10 +875,12 @@ does not declare.
    is no arm-level binding form (`overview.md` §12.6). Is that sufficient, or do we need a
    continuation operator?
 
-6. **Nested blocks and indentation.** A block `[params | expr]` contains an expression, which could
-   be a multi-line indented body. How does block-internal indentation interact with the surrounding
-   indentation context? The grammar currently treats the block body as a single `expr` production,
-   which doesn't handle multi-line block bodies. This needs resolution.
+6. **Indented bodies inside nested contexts.** A declaration body (a fold arm, a contract clause, a
+   map arm) contains an expression that may itself be an indented body. How does the child
+   indentation interact with the surrounding context? The grammar currently treats such a body as a
+   single `expr` production, which does not handle a body whose own expression needs an indented
+   continuation. This needs resolution. (The block literal is no longer one of these contexts: it is
+   not a production — §3.1.)
 
 7. **Pattern constructors with captures (decided conceptually; pinning in
    [#85](https://github.com/lapis-lang/lapis-lang/issues/85)).** Pattern constructors support named
