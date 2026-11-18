@@ -243,9 +243,9 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 
 ## No conditional — branching is structural dispatch
 
-- Boolean is a data type: `Bool = μ α. (True | False)`, and it appears in **result position only**.
-  A predicate eliminates a meaningful type and produces a verdict (`fold isWarm <out: Boolean>`);
-  `Bool` is never a declaration site.
+- `Bool` is a data type: `Bool = μ α. (True | False)`, and it appears in **result position only**. A
+  predicate eliminates a meaningful type and produces a verdict (`fold isWarm <out: Bool>`); `Bool`
+  is never a declaration site.
 - **There is no named eliminator for `Bool`** and no sugar for one. An operation declared on `Bool`
   that returns its two outcomes takes them as parameters — it discards its eliminated structure and
   has nothing to dispatch on, inverting the rule that every operation is declared inside the type it

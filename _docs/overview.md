@@ -792,12 +792,15 @@ fold pop <out: Array>
 
 ### 6.3 Protocols: operations a type must provide
 
-A `protocol` declares folds that conforming types must provide; `satisfies:` asserts conformance,
-verified structurally. Abstract methods may carry default bodies:
+A `protocol` declares operations that conforming types must provide; `satisfies:` asserts
+conformance, verified structurally. A member is a kind-marked signature, and an indented body
+supplies a default that conforming types inherit when they don't declare the operation themselves:
 
 ```lapis
 protocol Ordered
     fold compare <in: Self, out: Number>
+    fold lessThan <in: Self, out: Bool>
+        (self compare: other) < 0
 
 data Num
     N value: Number
@@ -806,6 +809,10 @@ data Num
     fold compare <in: Self, out: Number>
         N value other -> value - other value
 ```
+
+A default body composes operations over `self` and may read the `in:` value as `other` — it can't
+dispatch on a variant, because a protocol never sees its conformers' variants. Only `fold` and `map`
+members take a default.
 
 ([spec §4.3](./theory/surface-syntax.md#43-protocol---qualified-type))
 
@@ -946,7 +953,7 @@ two other common shapes (previous results, auxiliary results) as keywords, not l
 | `map`       | Transform fields, structure preserved               |
 | `merge`     | Fuse generate + consume into one pass               |
 | `satisfies` | Assert a type meets a protocol                      |
-| `not`       | Boolean negation (prefix)                           |
+| `not`       | Negation on `Bool` (prefix)                         |
 | `self`      | The current instance (always in scope)              |
 | `Family`    | "The rest of this data" — recursion in data         |
 | `Self`      | "The rest of this behavior" — recursion in behavior |
@@ -1329,8 +1336,8 @@ is a real finding for the spec:
     subsections with surface spellings decided — the overview's table is the candidate shape. One
     wrinkle this pass surfaced — and the review's ruling now resolves it: **`in:` carries only the
     type.** §3.4's table pinned `in`'s value as `paramName Type` or `Type` (its own example
-    `<in: target Any, out: Boolean>`), but the two-part form is unspellable under the spec-record's
-    own grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable as an expr: a
+    `<in: target Any, out: Bool>`), but the two-part form is unspellable under the spec-record's own
+    grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable as an expr: a
     unary send's message must be a camelCase ident, `Nat` is PascalCase) — and the reference DSL
     never used it: every `in:` site in lapis-js is type-only (`in: Number`, `in: family`,
     `in: { monoid: Any, f: Function }` — the structured form's names are the input record's fields,
@@ -1345,7 +1352,7 @@ is a real finding for the spec:
     (`pair a`). Alternatives considered and set aside: the record's fields bound directly by name (a
     second binding mechanism), and a fixed seed binding in arm scope (the `match` precedent — costs
     a reserved-ish name). Spec impact: §3.4's `in` row (`Type` only; its own example respelled
-    `<in: Any, out: Boolean>`), §5.1's arm shape (the trailing input binding), §5.2's arm shape
+    `<in: Any, out: Bool>`), §5.1's arm shape (the trailing input binding), §5.2's arm shape
     (binding lists), and the record-input call site (`Stream Fibonacci: (a: 0, b: 1)` — finding 1's
     use-site territory). Spec gap shared with #86 work item 3 (dispatch) and #25 (elaboration
     pipeline); lapis-js README "Fold Operations" carries the semantics-of-record for each option
@@ -1436,10 +1443,11 @@ is a real finding for the spec:
     reference, with the gating site unclear. **The resolution this overview takes: `Symbol` is
     retired** — dropped from §2.3's table; `#name` stays as the reference form (§7.4), and
     name-carrying fields use `String` (§2.7, §5.3 updated). `#` itself stays a free pattern head
-    (`Color`'s `#[0-9A-F]{6}` proves it) — no reserved-head change. Spec impact: `surface-syntax.md`
-    §1.3's Symbol row and `elaboration.md` §2.1's `#sum` row. If interned names are ever needed
-    (cheap-equality keys, enum-like atoms), that is a new decision — and it must answer
-    interning/equality and the reference-vs-value spelling collision it would create.
+    (`Color`'s `#[0-9A-F]{6}` proves it) — no reserved-head change. **Applied** 2026-11-18: the
+    `Symbol` row is gone from `surface-syntax.md` §1.3's table and the `#sum` row from
+    `elaboration.md` §2.1. If interned names are ever needed (cheap-equality keys, enum-like atoms),
+    that is a new decision — and it must answer interning/equality and the reference-vs-value
+    spelling collision it would create.
 
 24. **Primordials under the ban on imports — "always in scope" is a module-design decision, not a
     fact.** §2.6 taught `Any`/`Nothing` as "always in scope", and §2.3's built-ins table implies the
@@ -1620,3 +1628,131 @@ is a real finding for the spec:
     the decision as permanent), `elaboration.md` §2.3/§2.5/§3.5/§4.2/§4.4, `surface-syntax.md`
     §2.1/§3.1/§3.4, `syntax-design.md` §"Field Transformation"/§"Behavior"/§"Query", and
     `users/rationale.md` §"Query".
+
+30. **A protocol member is a kind-marked signature with an optional default; the default binds
+    `other`; `between:and:` is retired.** Three defects in one construct, none needing new
+    semantics.
+
+    **(a) The kind keyword is required.** `protocolItem` listed the five declaration forms, so a
+    bodyless member matched nothing — `foldDecl`'s body is compulsory, and there is no signature
+    form. The repair is not a new bodiless form but the existing form with its body made optional:
+    `fold`/`map` members may omit their body, `unfold`/`merge`/`scan` may not. Dropping the keyword
+    instead would make the kind unspellable, and the kind is load-bearing: it decides whether a
+    default is permitted, and `merge`/`scan` are themselves kind-named. A protocol's members are not
+    all folds either — a monoid requires an `unfold` identity, a functor a `map` — so a folds-only
+    production is semantically wrong. Two of the four corpus sites already spelled `fold`; the other
+    two were respelled.
+
+    **(b) A default body binds `self` and `other` — and is an expression, not an arm list.** A
+    protocol cannot see its conformers' variants, so a default has no arm head and no bindings; it
+    can only compose operations over `self`. The `in:` value lands in a fixed name, `other`, bound
+    exactly when the member declares `in:` — the same machinery-supplied binding relationship a fold
+    arm has to its variant's fields (`surface-grammar.md` §3.7). Its kind-dependence is what makes
+    defaults work at all: `equals` can be derived from `compare`, and that derivation is the reason
+    a protocol carries bodies rather than only signatures. A default may carry contract clauses and
+    they are enforced around it, so an installed default is not a weaker operation than a declared
+    one.
+
+    **(c) `between:and:` is retired, and multi-part selectors with it.** The issue offered "retire"
+    or "per-part spec keys"; the second was never available. `in:` carries one type and a fold takes
+    one input (overview §12.19), so a two-part selector would need per-part keys — exactly the arity
+    the rule forbids. The one-input route is closed too: it would need `in: Bounds` with
+    `lo: Self hi: Self` fields, but a protocol declares no variants and `typeExpr` has no product
+    form, so there is no type to name. The greedy keyword-collection rule (§3.3) stays as the parse
+    rule; it simply has no satisfiable two-part case, and the elaboration says so (`elaboration.md`
+    §2.5).
+
+    **Conformance is a typing fact.** `satisfies: P` elaborates to `τ <: P`; a missing member is an
+    elaboration-time error, and a default is installed at elaboration time when the type declares no
+    operation of that name. There is no `instanceof`-style operation — asking "is this an
+    `Ordered`?" at runtime would be a value-level query over a typing fact, and a program that wants
+    one declares a fold for it.
+
+    Every corpus site was affected. The two documents that spelled members without the kind keyword
+    were respelled; the `Number`-typed members are left for the prelude (§12.18); and the
+    `instanceof:` illustration lines in `syntax-design.md` — pseudo-code for exposition, never a
+    desired surface form — were removed rather than given a production, since a conformance query is
+    a user-defined operation if a program wants one.
+
+    Spec impact: `surface-grammar.md` §3.3, §3.7, §4.3, §8, §10; `elaboration.md` §2.5, §3.3, §3.7;
+    `surface-syntax.md` §2.3, §4.3; `syntax-design.md` §"Protocols" and its `instanceof:` lines.
+
+31. **`Boolean` was written throughout the corpus but the type is `Bool` — the last undeclared-name
+    leak of §12.18's class.** The registered type is `Bool` (`src/core/laws.ts` matches
+    `name === "Bool"`; `test/fixtures.ts` and `law_checking.ts` define it), and
+    `design-decisions.md` §"No base types" pins `Bool = μ α. (True | False)`. `Boolean` appeared in
+    roughly twenty type positions across `surface-syntax.md`, `syntax-design.md`, `elaboration.md`,
+    `users/rationale.md`, `language-design.md`, `lapis-vs-coal.md`, `index.md`, and
+    `design-decisions.md` — the JS habit again (`Boolean` is the JS global), the same provenance as
+    `Number` and `Object`.
+
+    It survived for the same reason those did: `atomType` mints a free `TypeVar` for any
+    unrecognized name, so `out: Boolean` type-checked as an opaque, unrelated type rather than
+    failing. It would also have been an _inconsistent_ rejection once
+    [#116](https://github.com/lapis-lang/lapis-lang/issues/116) lands — `Boolean` is undeclared, so
+    the surface checker would refuse it, and every doc example would be ill-typed at once.
+
+    **Applied 2026-11-18:** every type-position and prose occurrence is now `Bool`. Prose that named
+    the concept generically ("Boolean negation") was rephrased to state the declared type —
+    "negation on `Bool`" — rather than swapping the word, so the docs read as being about the type
+    rather than about a JavaScript primitive. Spec impact: the eight files above. No code change —
+    `Boolean` never existed in `src/`.
+
+32. **`identity:` wants a value but `#name` is a reference — the law argument's surface spelling is
+    unpinned.** Every argument-taking law kind (`identity: e`, `absorbing: z`) is evaluated:
+    `law_checking.ts`'s `evalArgument` runs the declared term and rejects the declaration when it
+    does not evaluate, and the test corpus passes construction terms (`Zero()`, `Succ(Zero())`).
+    §12.23 is equally explicit on the other side: `#name` is the **keyword-part reference**
+    spelling, "resolved at declaration/elaboration time against declared names, never a data value
+    flowing through a fold." So `distributive: #add` is right — it names an operation — while
+    `identity: #Identity` would be a category error, because `Identity` is a constructor (an
+    `unfold`, §12.30) and the law needs the _value_ it produces.
+
+    The gap is that a protocol's identity is a **declared operation, not a literal**, so the value
+    cannot be written inline the way `identity: (Num N: 0)` writes one. The candidates:
+
+    - **`identity: Identity`** — the operation name applied to the conforming type, elaborated at
+      conformance time to the value its seedless unfold produces. Consistent with §3.6.1's "an
+      operation reference carries a declared type, a law set, and a cost summary," and it is the
+      same operation-reference form a function value uses.
+    - **`identity: #Identity`** — reuse the reference spelling and let the law machinery dereference
+      it. Closer to `distributive: #add`'s look, but it breaks §12.23's rule that a `#name` never
+      becomes a value, and would need an explicit exception.
+    - **Keep the argument a term** and require the conformer to spell the value
+      (`identity: (Num N: 0)`), which works today and is what `Num`'s own example does — but it
+      makes a protocol's member spec unable to state its own law, since a protocol cannot name its
+      conformers' constructors.
+
+    The third is the status quo and the cheapest; the first is the only one that lets a protocol
+    state the law at all. Spec impact: `surface-grammar.md` §3.7's `properties` row, `lc.md` §7.2's
+    `identity:e` notation, `elaboration.md` §6.1, and `design-decisions.md`'s `identity:Zero`
+    example (which already spells a bare PascalCase name — the operation-reference reading).
+
+33. **Operation aliasing (`.as('Identity')`) has no surface spelling.** The prototype aliases an
+    operation with a second name — `add.as('combine')`, `Zero.as('Identity')` — and its std library
+    relies on it so that the semiring naming convention (`add`/`Zero`) and the monoid naming
+    convention (`combine`/`Identity`) can be satisfied by one operation. Finding §12.19 already
+    flags this as unpinned ("`scan`, wildcard arms, aliasing" needs its own subsection); the surface
+    grammar has no alias production at all.
+
+    The pressure is now sharper than when it was filed, because a protocol is the one place two
+    naming conventions must coexist. A `Monoid` requires `combine`; a `Semiring` requires `add`; a
+    type satisfying both either declares two operations with duplicated bodies (and duplicated law
+    sets, which then have to be kept in sync by hand) or is rejected for a missing member. The
+    prototype's answer is that they are the same operation with two names.
+
+    The candidate spellings, none pinned:
+
+    - **A clause on the fold** — `fold add <in: Self, out: Self> as: #combine` (or a bare flag
+      `alias combine`), mirroring the `properties:`/`satisfies:` clause vocabulary.
+    - **A declaration-level clause** — `data Num … aliases: #add #combine`, keeping the operation
+      untouched and the renaming visible at the type.
+    - **A re-export form** — an alias declares no body and resolves to the named operation, which is
+      what the prototype's expansion actually does.
+
+    Whatever wins must answer what the law machinery does with an alias: the laws are attached to
+    the operation _name_ (§"Laws are environments, not terms"), so an alias is either a second `Ω`
+    entry sharing one definition and one law set, or a resolving reference that never enters `Ω` at
+    all. The former keeps `Ω`'s declarations honest; the latter keeps `Ω` acyclic without a special
+    case. Spec impact: `surface-grammar.md` §5.1 (the clause), `Ω`'s declaration rules in `ops.ts`,
+    and `elaboration.md` §6.1's law attachment.

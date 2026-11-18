@@ -122,9 +122,9 @@ can and rejects what it can't, or a hybrid. The core calculus doesn't choose; th
 
 ### 2.6 No Conditional — Branching is Structural Dispatch
 
-There is no `if` in Lapis, and no named eliminator for `Boolean` either. `Boolean` is an ordinary
-data type with two variants (`True`, `False`) which appears in **result position only**: a predicate
-eliminates a meaningful type and produces a verdict (`fold isWarm <out: Boolean>`).
+There is no `if` in Lapis, and no named eliminator for `Bool` either. `Bool` is an ordinary data
+type with two variants (`True`, `False`) which appears in **result position only**: a predicate
+eliminates a meaningful type and produces a verdict (`fold isWarm <out: Bool>`).
 
 Branching takes exactly two forms, both structural:
 
@@ -220,7 +220,7 @@ from Stage 1 (avoiding the trap of bolting types onto a working evaluator after 
 **Goal:** Pin down decisions that are cheap to make and expensive to change.
 
 - [ ] Confirm eager-data / lazy-codata as the evaluation model (§2.2)
-- [ ] Confirm Boolean-as-data, no primitive `if` (§2.6)
+- [ ] Confirm `Bool`-as-data, no primitive `if` (§2.6)
 - [x] Confirm F<: (not Fω) as the core, with no generics and no type parameters (§2.1)
 - [ ] Confirm contracts-not-effects (§2.4)
 - [ ] Draft core calculus typing rules ([`lc.md`](./lc.md))

@@ -62,7 +62,6 @@ Literals are pattern-matched or named constructors of `data` types.
 | `42`                                | `match("42") : Nat`                  | Pattern-matched constructor of `Nat = μ α. [0-9]+`                                                                                                                                               |
 | `-3`                                | `match("-3") : Int`                  | Pattern-matched constructor of `Int = μ α. (-[0-9]+ \| [0-9]+)`                                                                                                                                  |
 | `"hello"`                           | `match("hello") : String`            | Pattern-matched constructor of `String = μ α. "<Char>*"` (type reference)                                                                                                                        |
-| `#sum`                              | `match("#sum") : Symbol`             | Pattern-matched constructor of `Symbol = μ α. #[a-zA-Z][a-zA-Z0-9]*`                                                                                                                             |
 | `nil`                               | `nil`                                | A built-in value of type `Any` (or `Nothing` in a strict reading)                                                                                                                                |
 | `true`                              | `True`                               | Named variant construction of `Bool = μ α. (True \| False)`                                                                                                                                      |
 | `false`                             | `False`                              | Named variant construction of `Bool`                                                                                                                                                             |
@@ -141,13 +140,19 @@ Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; 
 
 ### 2.5 Unary and Keyword Applications
 
-| Surface            | Core                                        | Notes                                           |
-| ------------------ | ------------------------------------------- | ----------------------------------------------- |
-| `recv selector`    | `fold_T recv {Cᵢ → hᵢ}` (applied)           | Unary call = parameterless fold access          |
-| `recv key: arg`    | `fold_T recv {Cᵢ → hᵢ}` (applied to arg)    | Keyword call = parameterized fold               |
-| `recv k1: a k2: b` | `fold_T recv {Cᵢ → hᵢ}` (applied to (a, b)) | Multi-keyword call = fold with structured input |
-| `- expr`           | `negate(ℰ(expr))`                           | Prefix negation = operation application         |
-| `not expr`         | `not(ℰ(expr))`                              | Boolean negation = fold on `Bool`               |
+| Surface         | Core                                     | Notes                                   |
+| --------------- | ---------------------------------------- | --------------------------------------- |
+| `recv selector` | `fold_T recv {Cᵢ → hᵢ}` (applied)        | Unary call = parameterless fold access  |
+| `recv key: arg` | `fold_T recv {Cᵢ → hᵢ}` (applied to arg) | Keyword call = parameterized fold       |
+| `- expr`        | `negate(ℰ(expr))`                        | Prefix negation = operation application |
+| `not expr`      | `not(ℰ(expr))`                           | Negation = fold on `Bool`               |
+
+**A selector has one keyword part at most.** A fold takes the receiver and at most one `in:` value,
+so a two-part selector (`recv k1: a k2: b`) can name no declared operation — it is an arity error,
+not a differently-grouped call. The surface grammar collects keyword parts greedily
+([`surface-grammar.md`](./surface-grammar.md) §3.3), so the parse is unambiguous; the arity rule is
+what makes the two-part case unsatisfiable. A multi-argument operation is spelled by currying
+through the result, not by a longer selector.
 
 **Uniform access principle:** A unary call `recv selector` where `selector` is a parameterless fold
 is _not_ a function call — it is a property access (the fold is applied with no arguments, producing
@@ -240,6 +245,21 @@ size = fold_Stack e {
 Where `rest` in the `Push` handler is the already-folded result (of type `Number`), because `Family`
 positions are recursively folded.
 
+**A seedless unfold is a constant constructor.** When an unfold's spec record omits `in:`, it takes
+no seed, so its arms carry no bindings and the guard alone decides which arm produces:
+
+```lapis
+unfold Identity
+    Zero -> true
+```
+
+Elaborates to an unfold whose generator takes no argument — `Identity = unfold_T { Zero → true }` —
+and whose evaluation yields the nullary variant when its guard holds. Because there is no seed,
+there is no recursion input either: a seedless unfold produces one value, and a recursive field in
+its payload has no next seed to carry. That is why the shape is confined to constant constructors (a
+monoid's identity, a lattice's top) and why a protocol requires one from each conformer rather than
+defaulting it — the protocol cannot see the variants the arm would name.
+
 ### 3.2 `behavior` → ν-type + unfold/fold declarations
 
 A surface `behavior` declaration elaborates to:
@@ -283,17 +303,49 @@ signatures that a type must satisfy. Conformance is checked structurally.
 
 ```lapis
 protocol Eq
-    equals: <in: Self, out: Boolean>
+    fold equals <in: Self, out: Bool>
+    fold notEquals <in: Self, out: Bool>
+        (self equals: other) not
 ```
 
-Elaborates to a constraint `Eq` requiring a fold `equals : Self → Boolean` on the conforming type.
-The `satisfies:` clause on a data/behavior declaration adds the constraint: `τ satisfies Eq` becomes
-`τ <: Eq` (intersection type in the core, see [`lc.md`](./lc.md) §4).
+Elaborates to a constraint `Eq` requiring a fold `equals : Self → Bool` on the conforming type, and
+a fold `notEquals : Self → Bool` whose **default** is the body above. The `satisfies:` clause on a
+data/behavior declaration adds the constraint: `τ satisfies Eq` becomes `τ <: Eq` (intersection type
+in the core, see [`lc.md`](./lc.md) §4).
 
-**Default method bodies:** A protocol method with an indented body provides a default
-implementation. At conformance checking, if the conforming type doesn't declare the operation in its
-own `.ops()`, the default is installed on its prototype. This is an elaboration-time operation: the
-default body is elaborated to a core fold and attached to the type.
+**A member is a signature; the body is optional.** The kind keyword is required (`fold`, `unfold`,
+`map`, `merge`, `scan`) because the kind fixes what may be defaulted — see the table in
+[`surface-grammar.md`](./surface-grammar.md) §4.3. A member with no body must be provided by every
+conforming type; a member with a body is satisfied by that body when the conforming type does not
+declare the operation itself.
+
+**An `unfold` member is a constructor the conformer supplies**, so it takes no default and no seed:
+`unfold Identity` requires each conforming type to declare a constant constructor for its identity
+element (§3.1). A `merge`/`scan` member is a fusion directive and elaborates to nothing of its own.
+
+**A default body's scope is `self` and `other`.** A default body is not an arm — the protocol cannot
+see its conformers' variants — so it has no arm head and no bindings. It may read `self` (the
+receiver) and, when the member declares `in:`, `other` (that input value). Both names are supplied
+by the machinery, exactly as a fold arm's bindings are supplied by its variant. A body that mentions
+`other` when the member declares no `in:` is an unbound-name error
+([`surface-grammar.md`](./surface-grammar.md) §3.7).
+
+**A default may carry contract clauses**, and they are enforced around it: an installed default runs
+its `demands:` before the body and its `ensures:`/`rescue:` after, exactly as a declared operation
+does (§5). A default is not a weaker operation.
+
+**A default body elaborates to a core fold** over the conforming type, with the body as its handler.
+Installation is an elaboration-time step: the conforming type's constraint gains the default's
+operation only when the type does not declare one, so a declared operation always wins over a
+default and an inherited one always wins too. Only `fold` and `map` members may be defaulted; an
+`unfold` default is rejected at declaration because it would have to name a constructor the protocol
+cannot see, and `merge`/`scan` are fusion directives rather than computations.
+
+**Conformance is structural and transitive.** `protocol Ordered <: Eq` requires every `Ordered`
+conformer to satisfy `Eq`'s members as well; a member re-declared in the child keeps the parent's
+laws and unions the child's. There is no runtime "is this an `Ordered`?" test in the surface —
+conformance is a typing fact (`τ <: Ordered`), not a value-level query. A program that wants such a
+question declares its own fold for it.
 
 ### 3.4 `relation` → data + span projections
 
@@ -332,8 +384,8 @@ A `query` is sugar over `behavior` with three required cospan projections:
 ```lapis
 query PathFinder
     path: Array
-    solved: Boolean
-    done: Boolean
+    solved: Bool
+    done: Bool
     next: Self
     unfold Search <in: SearchSeed>
         path -> {s start}
@@ -406,6 +458,8 @@ A `satisfies: ProtocolName` clause on a data/behavior declaration adds a conform
 data Num
     N value: Number
     satisfies: Ordered
+    fold equals <in: Self, out: Bool>
+        N value other -> value = other value
     fold compare <in: Self, out: Number>
         N value other -> value - other value
 ```
@@ -414,9 +468,15 @@ Elaborates to:
 
 1. The type `Num` is declared with an intersection: `Num <: Ordered` (i.e., `Num` is a subtype of
    the `Ordered` protocol type).
-2. At conformance checking (elaboration time), the required operations are verified: `Ordered`
-   requires `compare`, and `Num` declares it. ✓
-3. `instanceof` checks (`n instanceof Ordered`) test the intersection: `typeOf(n) <: Ordered`.
+2. At conformance checking (elaboration time), the required operations are verified: each of
+   `Ordered`'s members is either declared by `Num` or carries a default body. A member with neither
+   is a conformance error naming the missing operation.
+3. Where a member has a default and `Num` does not declare it, the default's fold is installed on
+   `Num` at elaboration time — never at runtime, and never over a declared or inherited
+   implementation.
+
+Conformance is a typing fact (`Num <: Ordered`), not a value-level query: the surface has no
+`instanceof`-style operation. A program that needs one declares a fold for it.
 
 ## 4. Recursion Scheme Elaboration
 
@@ -994,7 +1054,7 @@ eliminator for `Bool`. `Bool = μ α. (True | False)` is an ordinary data type, 
 **result position only**: a predicate eliminates a meaningful type and produces a verdict.
 
 ```lapis
-fold isWarm <out: Boolean>
+fold isWarm <out: Bool>
     Red -> true
     Green -> false
     Blue -> false

@@ -151,8 +151,8 @@ relational/cospan layer.
 **Coal:** Primitive `if-then-else`. Both branches must be present and produce the same type. Guards
 (`when`/`otherwise`) in pattern matching.
 
-**Lapis:** No `if` at all — no primitive `if`, and no named eliminator for `Bool` either. `Boolean`
-is a data type (`μ α. True | False`) that appears in result position only: predicates (`isWarm`,
+**Lapis:** No `if` at all — no primitive `if`, and no named eliminator for `Bool` either. `Bool` is
+a data type (`μ α. True | False`) that appears in result position only: predicates (`isWarm`,
 `contains`, `lessThan`) eliminate a meaningful type and produce a verdict. Branching is structural
 dispatch — fold arms key on variants, unfold arms decide on a seed by `guard | payload`.
 
@@ -214,7 +214,7 @@ difference. The schemes elaborate to fold/unfold in both languages; Lapis just n
 | Contracts                     | No                       | Yes (demands/ensures/rescue/invariant, LSP)                       | Lapis                                                         |
 | Relations (Datalog)           | No                       | Yes (`relation`, `closure()`)                                     | Lapis (scope)                                                 |
 | Queries (Prolog)              | No                       | Yes (`query`, `explore()`)                                        | Lapis (scope)                                                 |
-| Conditionals                  | Primitive `if`           | Fold over `Boolean`                                               | Coal (pragmatic); Lapis (philosophically consistent)          |
+| Conditionals                  | Primitive `if`           | Fold over `Bool`                                                  | Coal (pragmatic); Lapis (philosophically consistent)          |
 | Recursion schemes             | fold, cofix              | fold, unfold, map, merge, scan, para, histo, zygo                 | Lapis (coverage); Coal (simpler)                              |
 | Syntax                        | ML/Haskell               | Self/Smalltalk                                                    | Tie (preference)                                              |
 | Ecosystem                     | Growing (LLVM backend)   | None (prototype only)                                             | Coal                                                          |
