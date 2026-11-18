@@ -95,16 +95,17 @@ in `primary` position can only denote an operation, so no new resolution rule is
 | ----------------------- | ------------------------------- | ------------------------------------------------------ |
 | `double`                | the operation's definition term | Function value; resolved through `Ω` when unbound in ρ |
 | `Int double`            | the same                        | Qualified: disambiguates a colliding name (§2.5)       |
-| `transform value: head` | `(g(seed)) head`                | Observe the `Block`, then apply — see §2.5             |
+| `transform value: head` | `(g(seed)) head`                | Apply the function-typed parameter — see §2.5          |
 
-`Block` is a prelude codata type, `Block<σ,τ> = ν α. Π value: (σ → τ)` (`overview.md` §12.27). Its
-constructors are `unfold`s; an operation reference is not a `Block` — it is the operation's
-definition, which has type `σ → τ` directly. Both are function values, and both apply through the
-keyword send (§2.5).
+A function value has type `σ → τ` — the operation's curried signature (`ops.ts`'s
+`OpSig.signature`). There is no separate function-value type in the prelude: a function value is the
+`FunType` it declares, and an operation reference is not an instance of some wrapper type — it is
+the operation's definition, which _has_ type `σ → τ` directly. Both apply through the keyword send
+(§2.5).
 
-**Contract clauses are not blocks.** `demands:`, `ensures:`, `invariant:`, and `rescue:` take an
-indented body (`surface-grammar.md` §5.1) whose expression the fold machinery forces at its own
-chosen moment. No thunk value is created, so no `Block` appears.
+**Contract clauses are not function values.** `demands:`, `ensures:`, `invariant:`, and `rescue:`
+take an indented body (`surface-grammar.md` §5.1) whose expression the fold machinery forces at its
+own chosen moment. No thunk value is created, so no function value appears.
 
 **Partial application** (a section: `(NatList append 3)`) has no surface spelling yet — see
 `overview.md` §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
@@ -155,22 +156,25 @@ distinction is made by the fold's spec: if it has no `in` parameter, it's a gett
 it's a method.
 
 **The elimination form is fixed by the receiver's kind.** `fold_T` is data's elimination; the codata
-dual is **observation** (`E-Obs`). So a send to a `Block` observes its `value` and applies:
+dual is **observation** (`E-Obs`); a function type's elimination is **application**, and its
+selector is the fixed keyword `value:`. So a send to a function-typed receiver applies it:
 
-| Surface                 | Core                   | Notes                                                |
-| ----------------------- | ---------------------- | ---------------------------------------------------- |
-| `b value`               | `b.value`              | Observe (a `Block` is total, so this never diverges) |
-| `b value: x`            | `b.value x`            | Observe, then apply — the surface's only application |
-| `transform value: head` | `transform.value head` | Applies a function-typed _parameter_; no production  |
+| Surface                 | Core             | Notes                                               |
+| ----------------------- | ---------------- | --------------------------------------------------- |
+| `f`                     | `f`              | The function value itself                           |
+| `f value: x`            | `f x`            | Apply — the surface's only application              |
+| `transform value: head` | `transform head` | Applies a function-typed _parameter_; no production |
 
 **This is the whole of surface application.** There is no `expr expr` production and no dedicated
 `value:` form: the keyword send already means "eliminate the receiver, then apply the arguments" —
-`fold` for data, observation for codata — so application is derived rather than added.
+`fold` for data, observation for codata, application for a function type — so application is derived
+rather than added.
 
 **Parentheses re-open the chain.** A parenthesised expression is a `primary`, so
-`(b value: x)
-value: y` is two sends. `Block` is single-parameter, so a multi-argument block is
-curried and spelled by nesting — the same shape `Observer`'s single type slot supports.
+`(f value: x)
+value: y` is two sends. A function type is single-parameter, so a multi-argument
+function value is curried and spelled by nesting — the same shape `Observer`'s single type slot
+supports.
 
 ### 2.6 Arrays and Records
 
@@ -331,11 +335,20 @@ query PathFinder
     solved: Boolean
     done: Boolean
     next: Self
-    unfold Search <in: s (start: String, goal: String, graph: Object)>
+    unfold Search <in: SearchSeed>
         path -> {s start}
         solved -> s start = s goal
         done -> s exhausted
         next -> s advanceSearch
+```
+
+The seed is a declared type, not an inline record shape — the surface has no record type production
+(`surface-grammar.md` §3.8), and a multi-value seed is spelled the same way `take`'s is
+(`syntax-design.md` §"Behavior"):
+
+```lapis
+data SearchSeed
+    SearchSeed start: String goal: String graph: Any
 ```
 
 Elaborates to:
@@ -457,26 +470,37 @@ fold fib <histo, out: Number>
 **Elaboration:** The fold's result type becomes a stream of results:
 
 ```
-σ = Stream<ResultType>    (a ν-type of fold results)
+σ = HistoStream    (a declared ν-type carrying one fold result and the prior stream)
 ```
 
-Each handler produces a `Stream` node: the current result consed onto the stream of previous
+A histomorphism needs a result that carries the prior results, and the surface has no type
+parameters with which to write `Stream<σ>` (`surface-grammar.md` §3.8) — so the stream is a
+**declared** codata type whose `result` observer is typed by the fold's own result, exactly the way
+`Self` types a continuation:
+
+```lapis
+behavior HistoStream
+    result: <out: Any>
+    prior:  <out: Self>
+```
+
+Each handler produces a `HistoStream` node: the current result consed onto the stream of previous
 results. `prev field` steps back one level in this stream:
 
 ```
 fib = fold_Fib e {
-    Zero() → Cons(0, Nil),
-    One() → Cons(1, Cons(0, Nil)),
-    Succ(pred) → Cons(pred_result + prev_pred, Cons(pred_result, pred_stream))
+    Zero() → HistoStream(0, Nil),
+    One() → HistoStream(1, HistoStream(0, Nil)),
+    Succ(pred) → HistoStream(pred_result + prev_pred, HistoStream(pred_result, pred_stream))
 }
 ```
 
 Where:
 
-- `pred` is the stream of results from the predecessor (the already-folded `Stream<ResultType>`).
-- `prev pred` is `pred.tail.head` — the second element of the stream, which is the result of folding
-  the predecessor's predecessor (fib(n-2)).
-- The final result is `fib(e).head` — the first element of the stream.
+- `pred` is the stream of results from the predecessor (the already-folded `HistoStream`).
+- `prev pred` is `pred.prior.result` — the second element of the stream, which is the result of
+  folding the predecessor's predecessor (fib(n-2)).
+- The final result is `fib(e).result` — the first element of the stream.
 
 ### 4.3 Zygomorphism (`<aux: name>`)
 
@@ -514,8 +538,8 @@ single traversal.
 **Data map (eager, O(n)):**
 
 ```lapis
-map double <typeParam: Number>
-    Box contents -> Family Box contents: (contents * 2)
+map double <in: Number, out: Family>
+    Box contents x -> Family Box contents: (contents * x)
 ```
 
 Elaborates to a fold whose result type is the data type itself (`σ = T`):
@@ -532,8 +556,8 @@ For recursive fields, the fold recurses automatically (the field is already fold
 **Codata map (lazy, O(1)):**
 
 ```lapis
-map map <in: (Object -> Object), typeParam: Object>
-    head -> transform value: head
+map map <in: (Any -> Any)>
+    head x -> x value: head
 ```
 
 Elaborates to an unfold that wraps each observation with the transform:
@@ -657,7 +681,7 @@ rescue wrapper.
 **Surface:**
 
 ```lapis
-fold append <in: Object, out: Family>
+fold append <in: Any, out: Family>
     ensures: self old result | result size = old size + 1
     ...
 ```
@@ -717,7 +741,7 @@ data Stack
     Empty
     Push
         invariant: self | self size >= 0
-        value: Object
+        value: Any
         rest: Family
 ```
 
@@ -881,10 +905,9 @@ data NumList <: List
 
 **Elaboration:**
 
-1. `NumList` is a subtype of `List` (μ-depth subtyping — `head: Number <: head: Object`). The
-   narrowing rules at declaration time: each re-specified field's type must be a subtype of the
-   parent's (covariant), no new fields may be introduced, and unmentioned fields are inherited
-   unchanged.
+1. `NumList` is a subtype of `List` (μ-depth subtyping — `head: Number <: head: Any`). The narrowing
+   rules at declaration time: each re-specified field's type must be a subtype of the parent's
+   (covariant), no new fields may be introduced, and unmentioned fields are inherited unchanged.
 2. `NumList.Cons` instances are `instanceof List.Cons` and `instanceof List` (comb inheritance:
    prototype chain + delegation chain).
 3. Operations on `List` accept `NumList` instances (subsumption via `T-Sub`).
@@ -906,7 +929,7 @@ data NumList <: List
 | `merge op <#a, #b>`  | Composed fold/unfold (fusion rules)                               | §4.5    |
 | `scan foldName`      | fold with array-accumulating result type                          | §4.6    |
 | `<para>`             | fold with pair result type `(Result, Raw)`                        | §4.1    |
-| `<histo>`            | fold with stream result type `Stream<Result>`                     | §4.2    |
+| `<histo>`            | fold with a declared stream result type (`HistoStream`)           | §4.2    |
 | `<aux: name>`        | fold with pair result type `(Primary, Aux)`                       | §4.3    |
 | `demands: <body>`    | Guard before body; DemandsError bypasses rescue                   | §5.1    |
 | `ensures: <body>`    | Guard after body; EnsuresError caught by rescue                   | §5.2    |
@@ -917,7 +940,7 @@ data NumList <: List
 | Field narrowing      | μ-depth subtyping                                                 | §7.2    |
 | Binary operators     | Message sends → folds on the operand type                         | §2.4    |
 | `double` (op ref)    | The operation's definition term (a `FunType`)                     | §2.3    |
-| `b value: x`         | `b.value x` — observe the `Block`, then apply                     | §2.5    |
+| `f value: x`         | `f x` — apply the function-typed receiver                         | §2.5    |
 | `{a, b, c}`          | Nested cons on built-in List                                      | §2.6    |
 
 ## 9. Open Questions

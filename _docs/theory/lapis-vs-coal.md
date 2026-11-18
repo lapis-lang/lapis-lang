@@ -88,6 +88,11 @@ Lapis's choice (subtyping over generics) is riskier — it sacrifices parametric
 is the real cost; Lapis pays it back with explicit `properties`, but that is a trade, not a win.
 Coal keeps parametricity for free.
 
+The trade is nonetheless **settled, not pending**: Lapis has no type variables, no type parameters,
+and no type-application form, and the surface grammar will not grow them (`design-decisions.md`
+§"Core calculus"). Coal's side of this table describes what Lapis deliberately gave up, not a gap to
+close.
+
 **Where Lapis's subtyping shines:** Comb inheritance with fold inheritance — an extended ADT
 inherits parent fold handlers and adds new ones, with polymorphic recursion. This is natural in
 Lapis (`ExtendedColor <: Color` with inherited `toHex`) and awkward in Coal's type-class model

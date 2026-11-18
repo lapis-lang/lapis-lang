@@ -133,10 +133,11 @@ Verse deliberately avoids Hindley–Milner (Sweeney concluded as early as 2002 t
 "dead-ends around... Haskell" and that unification was the more promising export). Types are checked
 where written, inferred where obvious — a usability choice for a mass audience. Lapis also rejects
 HM, but by _subsumption_: subtyping (bounded quantification, comb inheritance) replaces type
-parameters. Both languages land on "no full HM" from opposite directions — Verse for usability at
-scale, Lapis for a semantic principle (Meyer). Notably, both use unification-like machinery _inside_
-rather than on top: Verse in the logic engine, Lapis in the type-registry lookups and the
-prospective microKanren work (#35).
+parameters — permanently, since the surface has no type-variable or type-parameter production
+(`design-decisions.md` §"Core calculus"). Both languages land on "no full HM" from opposite
+directions — Verse for usability at scale, Lapis for a semantic principle (Meyer). Notably, both use
+unification-like machinery _inside_ rather than on top: Verse in the logic engine, Lapis in the
+type-registry lookups and the prospective microKanren work (#35).
 
 ### 5. Audience and deployment
 

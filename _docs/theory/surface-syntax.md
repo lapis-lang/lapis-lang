@@ -258,9 +258,9 @@ have the same precedence, evaluated left-to-right).
 
 **No application level.** There is no `expr expr` production and no `value:` suffix dedicated to
 application. Applying a function value is a keyword send: a send eliminates its receiver — `fold` on
-data, observation on codata — and applies the arguments to the result. A function value is a `Block`
-(a codata type), so its application is the ordinary observation `b value: x` (§3.1). There is
-nothing to add to this table.
+data, observation on codata, application on a function type — and applies the arguments to the
+result. A function value has type `σ → τ`, so its application is the ordinary send `f value: x`
+(§3.1). There is nothing to add to this table.
 
 **Uniform binary precedence:** ALL binary operators (`+`, `-`, `*`, `/`, `<`, `<=`, `=`, `,`, `&`,
 `|`, etc.) have the same precedence. `1 + 2 * 3` parses as `(1 + 2) * 3 = 9`. Explicit parentheses
@@ -373,18 +373,13 @@ flowchart LR
 There is **no block literal**. `[params | expr]` is not a production of the surface language, and
 nothing in the grammar introduces an anonymous binder.
 
-A function value is a `Block` — an ordinary codata type from the prelude (`overview.md` §12.27):
-
-```
-Block<σ, τ> = ν α. Π value: (σ → τ)
-```
-
-so a block is observed like any other codata value:
+A function value has type `σ → τ` — a function type, not a prelude name. Applying one is an ordinary
+keyword send:
 
 ```lapis
 double                    — the function value (an operation reference)
 Int double                — the same, qualified by its declaring type
-transform value: head     — observe: applies the block to `head`
+transform value: head     — apply: the selector `value:` is a function type's elimination
 ```
 
 **Why the literal goes away.** A block literal is an anonymous binder, and every other binder the
@@ -396,12 +391,12 @@ declared type, a `properties:` law set, membership in `Ω`, and a memoized cost 
 
 **Where blocks used to appear, and what replaces them:**
 
-| Site                                 | Was                       | Now                                       |
-| ------------------------------------ | ------------------------- | ----------------------------------------- |
-| Contract clauses (`demands:` etc.)   | `demands: [guard]`        | `demands:` on its own line, indented body |
-| `map`'s transform                    | `map f <…> [params \| e]` | the same arm form as a `fold`             |
-| A transformed codata observer (§4.4) | `<in: transform Block>`   | a declared operation, referenced by name  |
-| Call-site callback                   | `xs map: [n \| n * 2]`    | `xs map: double`                          |
+| Site                                 | Was                       | Now                                        |
+| ------------------------------------ | ------------------------- | ------------------------------------------ |
+| Contract clauses (`demands:` etc.)   | `demands: [guard]`        | `demands:` on its own line, indented body  |
+| `map`'s transform                    | `map f <…> [params \| e]` | the same arm form as a `fold`              |
+| A transformed codata observer (§4.4) | `<in: transform Block>`   | `<in: (Any -> Any)>`, a declared operation |
+| Call-site callback                   | `xs map: [n \| n * 2]`    | `xs map: double`                           |
 
 **Under-application is an error.** `xs append` where `append` takes an `in:` argument is an arity
 error, never a silent function value — the uniform-access getter/method split (§2.3) is unchanged.
@@ -451,7 +446,7 @@ The spec record appears after a fold/unfold/map name. Entries are either `key: v
 
 ```lapis
 <out: Number>
-<in: Object, out: Boolean>
+<in: Any, out: Boolean>
 <para>
 <histo, out: Number>
 <aux: #length, out: Number>
@@ -478,7 +473,6 @@ flowchart LR
 | `para`       | (flag)                      | Paramorphism — `old field` available   |
 | `histo`      | (flag)                      | Histomorphism — `prev field` available |
 | `aux`        | `#foldName` or `(#f1, #f2)` | Zygomorphism — auxiliary fold result   |
-| `typeParam`  | `Type`                      | Type parameter for map                 |
 | `properties` | `(prop1, prop2, ...)`       | Algebraic property annotations         |
 
 **Elaboration note:** entries in `properties` elaborate to algebraic contract claims — intrinsic

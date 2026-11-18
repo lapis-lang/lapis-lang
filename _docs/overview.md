@@ -327,7 +327,7 @@ declaration set together, so declaration order doesn't matter:
 ```lapis
 data Expr
     Lit value: Nat
-    Block stmt: Stmt body: Family      /* references Stmt — not yet declared */
+    BlockExpr stmt: Stmt body: Family  /* references Stmt — not yet declared */
 
 data Stmt
     Assign name: String value: Nat
@@ -1329,27 +1329,27 @@ is a real finding for the spec:
     subsections with surface spellings decided — the overview's table is the candidate shape. One
     wrinkle this pass surfaced — and the review's ruling now resolves it: **`in:` carries only the
     type.** §3.4's table pinned `in`'s value as `paramName Type` or `Type` (its own example
-    `<in: target Object, out: Boolean>`), but the two-part form is unspellable under the
-    spec-record's own grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable
-    as an expr: a unary send's message must be a camelCase ident, `Nat` is PascalCase) — and the
-    reference DSL never used it: every `in:` site in lapis-js is type-only (`in: Number`,
-    `in: family`, `in: { monoid: Object, f: Function }` — the structured form's names are the input
-    record's fields, not a binding name). The ruling: a fold takes at most one input, so the spec
-    has nothing for a name to disambiguate — the type suffices, and `in: Nat` parses under the
-    existing production exactly as `out: Number` does. The consequence the spec must pin: **where
-    the arms bind the input.** The overview's rule: the arm binds it like a field — folds bind it as
-    an extra trailing binding in the arm's binding list (`Cons head rest v -> ...`; bindings beyond
-    the variant's field count bind the input, optional per arm), and unfold arms — which §5.2 pins
-    without bindings — gain binding lists binding the seed first, then the observer's input
-    (`head n -> n`, `nth n i -> ...`); a structured input binds as one record value, its fields read
-    off it (`pair a`). Alternatives considered and set aside: the record's fields bound directly by
-    name (a second binding mechanism), and a fixed seed binding in arm scope (the `match` precedent
-    — costs a reserved-ish name). Spec impact: §3.4's `in` row (`Type` only; its own example
-    respelled `<in: Object, out: Boolean>`), §5.1's arm shape (the trailing input binding), §5.2's
-    arm shape (binding lists), and the record-input call site (`Stream Fibonacci: (a: 0, b: 1)` —
-    finding 1's use-site territory). Spec gap shared with #86 work item 3 (dispatch) and #25
-    (elaboration pipeline); lapis-js README "Fold Operations" carries the semantics-of-record for
-    each option until pinned.
+    `<in: target Any, out: Boolean>`), but the two-part form is unspellable under the spec-record's
+    own grammar production (`specEntry --> ident ':' ws expr` — `v Nat` is unparseable as an expr: a
+    unary send's message must be a camelCase ident, `Nat` is PascalCase) — and the reference DSL
+    never used it: every `in:` site in lapis-js is type-only (`in: Number`, `in: family`,
+    `in: { monoid: Any, f: Function }` — the structured form's names are the input record's fields,
+    not a binding name). The ruling: a fold takes at most one input, so the spec has nothing for a
+    name to disambiguate — the type suffices, and `in: Nat` parses under the existing production
+    exactly as `out: Number` does. The consequence the spec must pin: **where the arms bind the
+    input.** The overview's rule: the arm binds it like a field — folds bind it as an extra trailing
+    binding in the arm's binding list (`Cons head rest v -> ...`; bindings beyond the variant's
+    field count bind the input, optional per arm), and unfold arms — which §5.2 pins without
+    bindings — gain binding lists binding the seed first, then the observer's input (`head n -> n`,
+    `nth n i -> ...`); a structured input binds as one record value, its fields read off it
+    (`pair a`). Alternatives considered and set aside: the record's fields bound directly by name (a
+    second binding mechanism), and a fixed seed binding in arm scope (the `match` precedent — costs
+    a reserved-ish name). Spec impact: §3.4's `in` row (`Type` only; its own example respelled
+    `<in: Any, out: Boolean>`), §5.1's arm shape (the trailing input binding), §5.2's arm shape
+    (binding lists), and the record-input call site (`Stream Fibonacci: (a: 0, b: 1)` — finding 1's
+    use-site territory). Spec gap shared with #86 work item 3 (dispatch) and #25 (elaboration
+    pipeline); lapis-js README "Fold Operations" carries the semantics-of-record for each option
+    until pinned.
 
 20. **Features taught by this document's new sections are spec-unpinned (surface-syntax.md) — each
     new section traces to reference-implementation semantics (lapis-js README).** The additions this
@@ -1470,9 +1470,9 @@ is a real finding for the spec:
     `grammar.ts`) and `E-App`, but the surface expression grammar (§3.2) has no `expr expr`
     production — and it never will. **Application is derived from the message chain**: a keyword
     send already means "eliminate the receiver, then apply the arguments," and the elimination form
-    is fixed by the receiver's kind — `fold` for data, **observation for codata**. Since a function
-    value is a `Block` (a codata type, §12.27), `transform value: head` is an ordinary keyword send
-    that observes the block's `value` and applies it (`elaboration.md` §2.5). Nothing is added.
+    is fixed by the receiver's kind — `fold` for data, **observation for codata**, **application for
+    a function type**. Since a function value's type _is_ `σ → τ` (§12.27a), `transform value: head`
+    is an ordinary keyword send that applies it (`elaboration.md` §2.5). Nothing is added.
 
     The two corpus spellings resolve differently: `(rest append: v)` was always correct — it is a
     keyword self-send on a continuation, the same shape as `xs append: 3` — and `(tail x)` is
@@ -1498,13 +1498,15 @@ is a real finding for the spec:
     production takes an `ident`). Decide in one place and respell both sides. Spec impact:
     `surface-grammar.md` §3.5 (the `AuxRef` production) and the `aux` rows in `overview.md` §3.1.
 
-27. **A function value is a `Block`; there is no block literal and no apply production.** Three
-    linked decisions, settled together because each was the other's premise.
+27. **A function value is a plain function value; there is no block literal and no apply
+    production.** Two linked decisions, and a correction to a third that was wrongly bundled with
+    them.
 
-    **(a) `Block` is codata.** `Block<σ,τ> = ν α. Π value: (σ → τ)` — an ordinary `behavior`
-    declared in the prelude, so a block is observed like any other codata value. This makes the
-    `Block` name used in `elaboration.md` §4.4 (`transform Block`) a declared type rather than an
-    undeclared one — the same leak class as `Number` (§12.18).
+    **(a) There is no function-value type in the prelude.** A function value's type is the
+    operation's curried signature — a `FunType` chain — and nothing more. A `Block<σ,τ>` codata type
+    was tried and **retracted**: it needed type parameters to be writable, which §12.29 rules out
+    permanently, and it would have been uninhabited regardless — an `unfold` cannot produce a
+    `σ → τ` value, and an operation reference already _is_ one (`elaboration.md` §2.3).
 
     **(b) The block literal is retired.** `[params | expr]` was the surface's last anonymous binder.
     Removing it completes the "names are declared, never bound" rule (§12.6) instead of departing
@@ -1515,13 +1517,14 @@ is a real finding for the spec:
     branches are function values forced by the fold's arm bodies.
 
     **(c) Application is derived, not added.** A keyword send means "eliminate the receiver, then
-    apply the arguments" (`elaboration.md` §2.5). Data eliminates by `fold`; codata eliminates by
-    **observation**. So `b value: x` ⟶ `(b.value) x`, and `transform value: head` — already written
-    in `elaboration.md` and `syntax-design.md` — elaborates correctly with no new production. The
-    surface has no `expr expr` production and no dedicated `value:` form. Parentheses re-open the
-    chain, so multi-argument blocks are curried (`(b value: x) value: y`), matching the core's
-    single-slot `Observer` and adding no product type. Under-application is an arity error, not a
-    silently produced function — uniform access is unchanged.
+    apply the arguments" (`elaboration.md` §2.5). Data eliminates by `fold`, codata by
+    **observation**, and a function type by **application** — its fixed selector is `value:`. So
+    `f value: x` applies `f`, and `transform value: head` — already written in `elaboration.md` and
+    `syntax-design.md` — elaborates correctly with no new production. The surface has no `expr expr`
+    production and no dedicated `value:` form. Parentheses re-open the chain, so multi-argument
+    function values are curried (`(f value: x) value: y`), matching the core's single-slot
+    `Observer` and adding no product type. Under-application is an arity error, not a silently
+    produced function — uniform access is unchanged.
 
     **Still open (a separate item):** partial application — supplying some of an operation's
     arguments and holding the rest (`(NatList append 3)`) — has no production
@@ -1532,8 +1535,9 @@ is a real finding for the spec:
     leftmost", and `OpSig.signature` is already a curried `FunType` chain; only the exact arity
     check stands in the way.
 
-    The retired-literal work and `Block`'s placement in the prelude are tracked in
-    [#110](https://github.com/lapis-lang/lapis-lang/issues/110).
+    The retired-literal work and the contract-clause/`map`-transform sweep are tracked in
+    [#110](https://github.com/lapis-lang/lapis-lang/issues/110). `Block` is not part of that work —
+    see §12.29.
 
     **Ratified: application is call-by-value.** Totality removes call-by-name's classical motive —
     no well-typed argument can diverge — and both surviving pressures point to CBV: the cost algebra
@@ -1567,3 +1571,52 @@ is a real finding for the spec:
     `elaboration.md` §10 (which now states the rule), `language-design.md` §2.6, `syntax-design.md`
     §"Behavior" and its syntax summary, the comparative docs (`why-lapis.md`, `lapis-vs-coal.md`,
     `lapis-vs-verse.md`), and `design-decisions.md` §"No primitive conditional".
+
+29. **There are no type variables and no type parameters — and there will not be.** The surface
+    grammar has no lowercase production in `atomType`, and no declaration form takes a parameter
+    list. That absence is correct, not a gap: subtyping is the language's sole abstraction
+    mechanism, so where a generic type would appear, one of three existing forms does the work — a
+    **subtype** with narrowed fields (`NatList <: List`, covariance-checked per field), the
+    **declaring type itself** (`Self`, which is what lets `Num add <in: Self, out: Self>` return its
+    operand type), or the lattice top **`Any`** where the element type genuinely varies and no
+    relation between element and container is needed.
+
+    This finding exists because the absence was _unstated_ — not because it was undecided — and
+    three separate leaks grew in the space it left:
+
+    - **`Block<σ,τ>`** (§12.27a) was a prelude type invented to make application "derived rather
+      than added." It was unspellable (a type constructor at kind `* → * → *`, which §2.1 forbids)
+      and uninhabited (an `unfold` cannot produce a `σ → τ`; an operation reference already is one).
+      Retracted. Application now states its rule directly: **a send to a receiver of function type
+      applies it**, the third elimination form after `fold` and observation (`elaboration.md` §2.5).
+    - **`typeParam:`** was a spec key with no meaning that the arm bindings do not already carry.
+      Removed from `surface-grammar.md` §3.7 and `surface-syntax.md` §3.4; the map examples now bind
+      their transform argument at the arm, exactly as `scaleEach` always did.
+    - **`Object`** was written across `Stack`, `Stream`, `List`, `Search`, and `append` as an
+      informal stand-in for "whatever the element is." It is not a declared type anywhere. It is the
+      same leak class as `Number` (§12.18) and is replaced by `Any`, the declared top of the lattice
+      (§2.6) — which is what those sites always meant.
+
+    Two adjacent gaps remain, and both have the same shape — a _value_ seed written as a _type_
+    shape. `unfold Search <in: s (start: …, goal: …, graph: …)>` is neither a type nor a spec entry;
+    it is a multi-value seed and is respelled as a declared type (`SearchSeed`), following `take`'s
+    `Slice` (§12.28). The same applies to any future site: **a decision needing more than one value
+    in scope is expressed by a declared seed type**, never by an inline record type.
+
+    **Enforcement gap — verified.** `atomType`'s final fallback is `new TypeVar(name, Any)`, so
+    _any_ unrecognized name in type position is accepted and becomes an opaque type variable:
+    `\x:Natt. x`, `\x:Number. x`, and `\x:Object. x` all parse and type-check when the only intent
+    can have been a typo or a type that was never declared. The minted variable is rigid, not
+    permissive — `isSubtype(Nat, Natt)` and `isSubtype(Natt, Nat)` are both `false` — so the
+    consequence is not silent unsoundness but a _late and confusing_ error: the mistake surfaces
+    where the two variables fail to relate, far from the misspelling that caused it. With no
+    type-variable production in the surface (§12.29), an unknown name can have no legitimate
+    meaning, so the surface checker should reject it at the annotation rather than mint one. That
+    rejection is what would have caught `Object` and `Number` at their first use instead of after a
+    doc sweep ([#116](https://github.com/lapis-lang/lapis-lang/issues/116)).
+
+    Spec impact: `surface-grammar.md` §3.8 (the rule), §3.7 and §4.1 (the corresponding absence of
+    `typeParam:` and of a parameter list), `design-decisions.md` §"Core calculus" (which now states
+    the decision as permanent), `elaboration.md` §2.3/§2.5/§3.5/§4.2/§4.4, `surface-syntax.md`
+    §2.1/§3.1/§3.4, `syntax-design.md` §"Field Transformation"/§"Behavior"/§"Query", and
+    `users/rationale.md` §"Query".

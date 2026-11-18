@@ -111,7 +111,7 @@ data Stack
         Empty -> {}
         Push value rest -> {value} , rest
 
-    fold contains <in: Object, out: Boolean>
+    fold contains <in: Any, out: Boolean>
         Empty target -> false
         Push value rest target -> value = target | (rest contains: target)
 
@@ -133,13 +133,13 @@ operations.
 
 ```lapis
 data Stack
-    Empty  Push value: Object rest: Family
+    Empty  Push value: Any rest: Family
 
     fold pop <para>
         Empty -> nil
         Push value rest -> value , old rest
 
-/* value    — the fold result for the "value" field (raw Object) */
+/* value    — the fold result for the "value" field (raw Any) */
 /* rest     — the fold result for "rest" (already folded) */
 /* old rest — the raw pre-fold "rest" sub-node (the original Push instance) */
 
@@ -169,7 +169,7 @@ the course of values.
 
 ```lapis
 data List
-    Nil  Cons head: Object tail: Family
+    Nil  Cons head: Any tail: Family
 
     fold length <out: Number>
         Nil -> 0
@@ -212,9 +212,9 @@ cases.
 
 ```lapis
 data Box
-    Box contents: Object
+    Box contents: Any
 
-    map double <typeParam: Number>
+    map double <in: Number>
         Box contents -> Family Box contents: (contents * 2)
 
 (Box Box contents: 5) double   /* Box(contents: 10) */
@@ -226,7 +226,7 @@ data Box
 
 ```lapis
 data List
-    Nil  Cons head: Object tail: Family
+    Nil  Cons head: Any tail: Family
 
     fold sum <out: Number>
         Nil -> 0
@@ -246,7 +246,7 @@ data List
 
 ```lapis
 behavior Stream
-    head: <out: Object>
+    head: <out: Any>
     tail: <out: Self>
 
     unfold From <in: Number>
@@ -257,8 +257,8 @@ behavior Stream
         head -> self
         tail -> self
 
-    map map <in: (Object -> Object), typeParam: Object>
-        head -> transform value: head
+    map map <in: (Any -> Any)>
+        head x -> x value: head
 
 (Stream From: 0) head                      /* 0 */
 (Stream From: 0) tail head                /* 1 */
@@ -286,10 +286,7 @@ data Slice
 /* `Array` is the prelude's list; its variants are `Nil` and `Cons`. */
 data Array
     Nil
-    Cons head: Object rest: Family
-
-    unfold Take <in: Slice>
-        Nil slice -> slice remaining = 0
+    Cons head: Any rest: Family
         Cons slice ->
             slice remaining > 0
                 | head: slice source head
@@ -374,7 +371,7 @@ body form as a case arm, no special language forms.
 data Stack
     Empty  Push
         invariant: self | self size >= 0
-        value: Object
+        value: Any
         rest:  Family
 
     fold pop <out: Array>
@@ -384,7 +381,7 @@ data Stack
         Empty -> (Error signal: "Cannot pop empty stack")
         Push value rest -> value , old rest
 
-    fold append <in: Object, out: Family>
+    fold append <in: Any, out: Family>
         demands: self | val notNil
         ensures: self old result | result size = old size + 1
         Empty val -> Family Push value: val rest: Family Empty
@@ -447,7 +444,7 @@ query PathFinder
     accept:  #solved
     done:    #done
 
-    unfold Search <in: s (start: String, goal: String, graph: Object)>
+    unfold Search <in: SearchSeed>
         path -> {s start}
         solved -> s start = s goal
         done -> s exhausted
@@ -455,6 +452,14 @@ query PathFinder
 
 PathFinder explore: (start: "a", goal: "e", graph: myGraph)
 PathFinder explore: (start: "a", goal: "e", graph: myGraph) options: (maxResults: 1)
+```
+
+The seed is a declared type, not an inline record shape — the surface has no record type production
+(`surface-grammar.md` §3.8), and a multi-value seed is spelled the same way `Slice` is:
+
+```lapis
+data SearchSeed
+    SearchSeed start: String goal: String graph: Any
 ```
 
 `[output: #path]`, `[accept: #solved]`, `[done: #done]` are cospan projection declarations — they

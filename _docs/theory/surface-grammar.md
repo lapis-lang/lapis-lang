@@ -183,8 +183,8 @@ primary        ::= literal
 **There is no application production.** The grammar has no `expr expr` form and no `value:` suffix
 of its own: application is _derived_ through the message chain, not spelled. A keyword send
 eliminates its receiver and applies the arguments to the result — `fold` for data, observation for
-codata (§3.3). Since a function value is a `Block` (a codata type, §3.6), applying one is an
-ordinary keyword send.
+codata, and `value:` for a function type (§3.3). A function value is a value of type `σ → τ`, so
+applying one is the ordinary keyword send.
 
 ### 3.3 The message-chain rule
 
@@ -200,15 +200,15 @@ a single `KeywordCall` — they are not nested sends. This is the Smalltalk rule
 `a between:and: lo hi` a two-argument call rather than a call whose argument is a call.
 
 **A keyword send eliminates its receiver, then applies the arguments** (`elaboration.md` §2.5). The
-elimination form is fixed by the receiver's kind: data eliminates by `fold`, codata by observation.
-So `transform value: head` — where `transform` is a function-typed _parameter_ — is a send to a
-`Block` whose `value` observer is observed and then applied to `head`. Application needs no
-production of its own; this is the only rule it has (§3.2).
+elimination form is fixed by the receiver's kind: data eliminates by `fold`, codata by observation,
+and a function type eliminates by **application**. So `transform value: head` — where `transform` is
+a function-typed _parameter_ — is a send whose selector is the function type's fixed application
+keyword, `value:`. Application needs no production of its own; this is the only rule it has (§3.2).
 
 **Parentheses re-open the chain.** A parenthesized expression is a `primary`, so
-`(b value: x)
-value: y` is two sends, not one two-part selector. Blocks are single-parameter (§3.6),
-so a multi-argument block is curried and spelled by nesting.
+`(f value: x)
+value: y` is two sends, not one two-part selector. A function type is
+single-parameter, so a multi-argument function value is curried and spelled by nesting.
 
 > **Open (overview §12.2).** The payload of a generator arm (`| head: n rest: n - 1`) has this
 > _same_ shape as a keyword send, and §2.3's greedy collection would swallow it. The generator-arm
@@ -265,15 +265,14 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 
 ### 3.6.1 Function values
 
-There is no block literal — `[params | expr]` is **not** a production. A function value is a
-`Block`, and `Block` is an ordinary codata type declared in the prelude
-(`Block<σ,τ> = ν α. Π value: (σ → τ)`; `overview.md` §12.27):
+There is no block literal — `[params | expr]` is **not** a production. A function value has type
+`σ → τ` and is a value like any other:
 
 ```lapis
 double                    /* an operation reference — the function value itself */
 Int double                /* qualified: the `double` declared by `Int`, when names collide */
 xs map: double            /* a function-typed argument */
-transform value: head     /* observing a Block applies it — the send rule, §3.3 */
+transform value: head     /* applying one — the send rule, §3.3 */
 ```
 
 **An operation reference is the only way to name a function value.** An unbound camelCase `ident` in
@@ -287,8 +286,8 @@ the declaring type's operations, exactly the rule variant construction uses (§3
 in scope, qualified only to resolve a collision. One rule, both constructor kinds and operations.
 
 **Under-application is an error, not a silent function value.** `xs append` (a typo for
-`xs append: 3`) fails on arity — it never becomes a `Block`. Uniform access (§3.3's getter/method
-split) stays intact.
+`xs append: 3`) fails on arity — it never becomes a function value. Uniform access (§3.3's
+getter/method split) stays intact.
 
 > **Open (overview §12.27, [#109](https://github.com/lapis-lang/lapis-lang/issues/109)).** **Partial
 > application** — supplying some of an operation's arguments and holding the rest — has no
@@ -324,8 +323,11 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 | `para`       | (flag)                     | Paramorphism — `old field` available   |
 | `histo`      | (flag)                     | Histomorphism — `prev field` available |
 | `aux`        | `"#" ident` \| `"(" … ")"` | Zygomorphism — auxiliary fold result   |
-| `typeParam`  | `typeExpr`                 | Type parameter for map                 |
 | `properties` | `recordLiteral`-shaped     | Algebraic property annotations         |
+
+> **Decided (overview §12.29).** There is **no `typeParam` key**. A map's transform takes its
+> argument type from the arm that binds it, so a separate declaration-time type parameter would be a
+> second spelling for something the arm already carries.
 
 > **Decided (overview §12.19).** `in:` carries **only the type** — `in: Nat`, never `in: v Nat`. A
 > fold takes at most one input, so there is nothing for a name to disambiguate; the name would also
@@ -338,7 +340,7 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 
 ### 3.8 Types
 
-Types appear in field declarations, spec entries, and type parameters.
+Types appear in field declarations, spec entries, and operation result positions.
 
 ```
 typeExpr       ::= typeExpr "->" typeExpr      (* function type *)
@@ -349,6 +351,24 @@ atomType       ::= "(" typeExpr ")"
                 | "Family" | "Self"
                 | "Any" | "Nothing"
 ```
+
+> **Decided (overview §12.29).** **There are no type variables and no type parameters anywhere in
+> the surface language — now or in the future.** `atomType` admits no lowercase production, so a
+> name like `σ` or `τ` is not a type; every declaration form (`data`, `behavior`, `protocol`,
+> `relation`, `query`, `io`) takes a bare `pascalIdent` and no parameter list; and there is no
+> type-application form (§4.1). This is not an omission to be filled in later — it is the language's
+> type discipline.
+>
+> Subtyping is the sole abstraction mechanism. Where a generic type would be introduced, one of
+> three existing forms is used instead: a **subtype** with narrowed fields (`NumList <: List`, every
+> field covariance-checked), the **declaring type itself** (`Self` in an operation spec, which is
+> what lets `Num add <in: Self, out: Self>` return its operand type), or the lattice's top **`Any`**
+> where the element type genuinely varies and no relation between the element and the container is
+> needed. `Any` is what the corpus previously misspelled `Object` — see §12.18's leak class.
+>
+> Consequences for the rest of this document: no type-abstraction or type-application surface form
+> exists (the core's `Λα <: σ. t` and `t[τ]` are core-only, reached by elaboration and never
+> written); an operation reference's type is its declared `FunType` chain, never an instantiation.
 
 > **Open (overview §12.4, §12.13).** `Family` and `Self` are the recursive self-references; whether
 > they are _reserved_ type names or shadowable by user declarations is decided in favour of reserved
@@ -399,6 +419,12 @@ variantDecl    ::= pascalIdent ( ␣ ident ":" ␣ typeExpr )*     (* fields, in
 A variant's fields are **positional in declaration order**; the surface spelling
 (`Point2D x: 1 y: 2`) is the named-argument form, and elaboration resolves names to positions
 (elaboration §2.7).
+
+> **Decided (overview §12.29).** A declaration's head is a bare `pascalIdent` — **never a parameter
+> list**. The same holds for §4.2–§4.6: `behavior`, `protocol`, `relation`, `query`, and `io` all
+> take `pascalIdent` and nothing else. There is no `data List<a>`, and adding one would require a
+> type-application production that `atomType` (§3.8) deliberately does not have. Element types vary
+> by **subtyping** (`NatList <: List`, covariance-checked per field) or by `Any`.
 
 > **Open (overview §12.4).** A variant may be re-declared in a child type to **narrow** a field type
 > (covariant re-specification): every re-specified field's type must be a subtype of the parent's,
@@ -544,7 +570,7 @@ rescue:  self err args retry | retry value: 0
 ```
 
 The clause's body is _always_ forced by the fold machinery — before the body, after the body, at
-construction, on failure — and is never held as a value, so it needs no literal and no `Block`
+construction, on failure — and is never held as a value, so it needs no literal and no function
 value. What it does need is the binding head, which is a **clause parameter list**, not an anonymous
 function: the names are supplied by the machinery (`self`, `old`, the result, the error/args/retry
 of `rescue`), exactly as a fold arm's bindings are supplied by its variant. This is the same
@@ -841,11 +867,14 @@ The questions this grammar does _not_ settle, with their owning finding in
   with no discriminating variants belongs in an unfold over a declared seed type — `take` is the
   worked case (`syntax-design.md` §"Behavior"). See also `elaboration.md` §10.
 - **Surface application** (`expr expr` vs. a `value:` send) — there is **no application
-  production**. A function value is a `Block`, a codata type observed through its `value` observer,
-  so applying one is the ordinary keyword send (§3.2, §3.3, §3.6.1).
+  production**. A keyword send eliminates its receiver and applies the arguments; a receiver of
+  function type `σ → τ` applies through the `value:` selector, exactly as μ-types eliminate by
+  `fold` and ν-types by observation (§3.2, §3.3, §3.6.1).
 - **The top-level definition form** (`name = expr`) — there is none; see §4 and overview §12.6.
 - **Arm-level bindings** — there is no `let`/definition/initialised-slot form in any body; see §7.
-- **The block literal** (`[params | expr]`) — retired; see §3.6.1 and overview §12.27.
+- **The block literal** (`[params | expr]`) — retired; see §3.6.1.
+- **Type variables and type parameters** — there are none, by design and permanently; see §3.8 and
+  §4.1, and overview §12.29.
 
 ---
 

@@ -104,7 +104,8 @@ the sense an operating system is.
 
 The real ceiling. `∀n. add(n, e) ≡ n` cannot be _stated_ natively — no identity types, no
 types-that-mention-terms, no universe. Dependent types are excluded by design (F<:, not Fω or MLTT;
-subtyping subsumes generics — see [`design-decisions.md`](../design-decisions.md)).
+subtyping is the sole abstraction mechanism, with no generics or type parameters — see
+[`design-decisions.md`](../design-decisions.md)).
 
 A logic can be **deep-embedded**: `Formula` and `Proof` (natural-deduction derivations) as μ-types,
 `check : Proof → Formula → Bool` as a fold. Because Lapis is total, the checker terminates — a
