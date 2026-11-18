@@ -235,11 +235,23 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   another quotient; interaction of `≈` with `equals`-as-a-fold, hashing, memoization; quotient
   subtyping (`T // ≈` vs `T // ≈'`) — no standard treatment exists; coinductively-defined `≈`.
 
-## No primitive conditional
+## No conditional — branching is structural dispatch
 
-- Boolean is a data type: `Bool = μ α. (True | False)`.
-- `ifTrue:ifFalse:` is a fold over Bool. No primitive `if` in core. "No conditional" claim literally
-  true.
+- Boolean is a data type: `Bool = μ α. (True | False)`, and it appears in **result position only**.
+  A predicate eliminates a meaningful type and produces a verdict (`fold isWarm <out: Boolean>`);
+  `Bool` is never a declaration site.
+- **There is no named eliminator for `Bool`** and no sugar for one. An operation declared on `Bool`
+  that returns its two outcomes takes them as parameters — it discards its eliminated structure and
+  has nothing to dispatch on, inverting the rule that every operation is declared inside the type it
+  eliminates.
+- **Branching takes two forms, both structural.** Fold arms dispatch on a variant, so the arm keying
+  is the decision. Unfold arms decide on a seed — `guard | payload`, first match wins.
+- **A decision with no discriminating variants is a decision on a seed**, so it belongs in an unfold
+  over a declared seed type, never in a fold arm's body (`syntax-design.md` §"Behavior").
+- **Fold arms stay order-free.** Guards on fold arms were considered and rejected: no corpus arm
+  needs one, and they would make arms a first-match chain, spending exhaustiveness checking, the
+  per-variant induction skeleton (`derivation.ts`), and variant-keyed inheritance (#86). `unfold`
+  escapes this because generators are first-match by construction.
 
 ## No base types — everything is μ or ν (pattern-matched data)
 

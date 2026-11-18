@@ -832,10 +832,14 @@ The questions this grammar does _not_ settle, with their owning finding in
 | 10 | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                         | §12.4   |
 | 11 | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                         | §12.26  |
 | 12 | Partial application (sections): supplying some of an operation's arguments — spelling, elaboration, and effect on the cost algebra | §12.27  |
-| 13 | The conditional's branch arity — a fold takes one `in:` value, `ifTrue:ifFalse:` has two                                           | §12.28  |
 
 **Closed (recorded here so the numbering stays stable):**
 
+- **The conditional's branch arity** — there is no conditional. `ifTrue:ifFalse:` is retired: no
+  declaration, no sugar. `Bool` appears in result position only, and branching is structural
+  dispatch (fold arms on variants, `guard | payload` arms on unfold seeds). A decision over a value
+  with no discriminating variants belongs in an unfold over a declared seed type — `take` is the
+  worked case (`syntax-design.md` §"Behavior"). See also `elaboration.md` §10.
 - **Surface application** (`expr expr` vs. a `value:` send) — there is **no application
   production**. A function value is a `Block`, a codata type observed through its `value` observer,
   so applying one is the ordinary keyword send (§3.2, §3.3, §3.6.1).
