@@ -351,14 +351,10 @@ export class TypeAlgebra {
                             this.surroundingsOf(variant, field, type),
                             this,
                         ),
-                    fun: () => undefined,
-                    intersection: () => undefined,
-                    polymorphic: () => undefined,
-                    typeVar: () => undefined,
-                    codata: () => undefined,
-                    token: () => undefined,
-                    any: () => undefined,
-                    nothing: () => undefined,
+                    // Every non-data, non-family kind contributes no context —
+                    // the same answer for all of them, so it is one default
+                    // rather than nine declining arms.
+                    default: () => undefined,
                 })
                 if (spec !== undefined) specs.push(spec)
             }
@@ -499,13 +495,12 @@ export class TypeAlgebra {
                             // counting. The test is the union's truncated
                             // count inside the recursion, not here.
                             t,
-                        fun: () => undefined,
-                        intersection: () => undefined,
-                        polymorphic: () => undefined,
-                        typeVar: () => undefined,
-                        codata: () => undefined,
-                        token: () => undefined,
-                        nothing: () => undefined,
+                        // Every other kind (function, token, intersection,
+                        // polymorphic, typeVar, codata, `Nothing`) has no finite
+                        // sample vocabulary — the same answer for all of them, so
+                        // it is one default rather than seven declining arms.
+                        // The caller reads `undefined` as unbounded.
+                        default: () => undefined,
                     },
                 )
                 if (kind === UNBOUNDED || !(kind instanceof DataType)) {
@@ -723,19 +718,14 @@ export class TypeAlgebra {
                 for (const variant of t.allVariants()) {
                     for (const field of variant.fields) {
                         field.type.dispatch<undefined>({
-                            family: () => undefined, // the μ-bound — never collected
                             data: (inner) => {
                                 collect(inner)
                                 return undefined
                             },
-                            codata: () => undefined,
-                            fun: () => undefined,
-                            intersection: () => undefined,
-                            polymorphic: () => undefined,
-                            typeVar: () => undefined,
-                            token: () => undefined,
-                            any: () => undefined,
-                            nothing: () => undefined,
+                            // Every other kind ends the walk — in particular a
+                            // `Family` field is the μ-bound, never collected
+                            // (the carrier itself is already in the system).
+                            default: () => undefined,
                         })
                     }
                 }

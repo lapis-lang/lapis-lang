@@ -13,14 +13,13 @@
 
 import {
     Any,
-    AnyType,
     CodataType,
     DataType,
     FunType,
     IntersectionType,
     isDeclaredTypeKind,
+    isTypeKind,
     Nothing,
-    NothingType,
     PolymorphicType,
     TokenType,
     type Type,
@@ -62,18 +61,9 @@ export function isTypeValue(t: unknown): t is Type {
     // symbol.
     if (!isDeclaredTypeKind(t)) return false
     try {
-        ;(t as Type).dispatch<boolean>({
-            fun: () => true,
-            intersection: () => true,
-            polymorphic: () => true,
-            typeVar: () => true,
-            family: () => true,
-            data: () => true,
-            codata: () => true,
-            token: () => true,
-            any: () => true,
-            nothing: () => true,
-        })
+        // Every kind is a member, so the arm is one default rather than ten
+        // identical `() => true`s — and it stays correct when a kind is added.
+        ;(t as Type).dispatch<boolean>({ default: isTypeKind })
         return true
     } catch {
         return false
@@ -120,10 +110,10 @@ export function isSubtype(
     requireType(super_, "super", "isSubtype")
 
     // S-Bot: Nothing <: σ (for any σ)
-    if (sub instanceof NothingType) return true
+    if (sub.isUninhabited()) return true
 
     // S-Top: σ <: Any (for any σ)
-    if (super_ instanceof AnyType) return true
+    if (super_.isTop()) return true
 
     // S-Refl: σ <: σ
     if (sub.equals(super_)) return true

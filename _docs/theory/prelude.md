@@ -45,20 +45,24 @@ types").
 
 ### 2.1 `Token` is not a prelude name
 
-The calculus has exactly one non-μ/ν type, `Token` — the raw matched text (`lc.md` §2.1, §2.5). It
+The calculus has exactly one non-μ/ν type, `@Token` — the raw matched text (`lc.md` §2.1, §2.5). It
 is **not** in the prelude and is **not user-spellable**: a program never names it.
 
-A pattern fold's handler binds the matched token under the fixed name `match`, and that binding's
-type is `Token` (`lc.md` §5.2, `surface-grammar.md` §5.1). A program consumes the binding; it never
-writes the type. This is why `Token` is absent from §2's table while `Any` and `Nothing` are
-present: the bounds are admitted by `atomType` as _surface_ type syntax (`surface-grammar.md` §3.8),
-and `Token` is admitted by the same resolution chain only so the core's own terms can be read
-(`src/core/grammar.ts`'s `atomType`, whose built-in branch precedes the registry lookup).
+**The sigil is what makes that total.** `typeName` is `[A-Z][A-Za-z0-9_]*`, so `@Token` is not a
+name in the grammar at all. That is deliberate: it means `Token` is an ordinary identifier, a user
+may declare `data Token`, and the two are _different types_ rather than one contested name. No
+decision reserves `Token`; the spelling settles it structurally.
 
-**Decision.** `Token` belongs to Lapis Core alone. Reflection or metaprogramming would be the first
+A pattern fold's handler binds the matched token under the fixed name `match`, and that binding's
+type is `@Token` (`lc.md` §5.2, `surface-grammar.md` §5.1). A program consumes the binding; it never
+writes the type. This is why `@Token` is absent from §2's table while `Any` and `Nothing` are
+present: the bounds are admitted by `atomType` as _surface_ type syntax (`surface-grammar.md` §3.8),
+and `@Token` is admitted by the same production only so the core's own terms can be written.
+
+**Decision.** `@Token` belongs to Lapis Core alone. Reflection or metaprogramming would be the first
 construct that could give a program a reason to name it; until such a construct exists, the surface
-language has no `Token` in type position. The consequence for the surface checker is stated in §8 —
-an unknown name must be rejected, and `Token` is not an exception to that rule.
+language has no `@Token` in type position. The consequence for the surface checker is stated in §8 —
+an unknown name must be rejected, and `@Token` is not an exception to that rule.
 
 ### 2.2 `Char` and `String`
 

@@ -551,14 +551,18 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
         return or(
             seq(char("("), this.ws, this.typeProd(delta), this.ws, char(")"))
                 .map(([, , t]) => t),
+            // `@Token` — the core-owned raw-text type. The sigil is what makes
+            // the name unspellable as a declaration (`typeName` admits only
+            // `[A-Z][A-Za-z0-9_]*`), so a user's `data Token` is a different
+            // type rather than a capture of this one.
+            seq(char("@"), literal("Token")).map(() => Token),
             this.typeName.map((name) => {
                 // Bound type variable — resolve via Δ, carrying the declared bound
                 const tyVarBound = delta.lookup(name)
                 if (tyVarBound) return new TypeVar(name, tyVarBound)
-                // Built-in types
+                // Built-in lattice bounds
                 if (name === "Any") return Any
                 if (name === "Nothing") return Nothing
-                if (name === "Token") return Token
                 // Resolve type name from registry
                 const resolved = this.registry.lookup(name)
                 if (resolved) return resolved
@@ -677,13 +681,15 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     /**
-     * Check whether `name` is a reserved type name — a built-in (`Any`,
-     * `Nothing`, `Token`) or a registered type. Binding such a name as a type
-     * variable would shadow a real type, which is misleading even with
-     * lexical scoping.
+     * Check whether `name` is a reserved type name — one of the lattice bounds
+     * or a registered type. Binding such a name as a type variable would shadow a
+     * real type, which is misleading even with lexical scoping.
+     *
+     * `@Token` is not listed: it is not a `typeName` at all, so it can never be
+     * bound as a variable in the first place.
      */
     protected isReservedTypeName(name: string): boolean {
-        return name === "Any" || name === "Nothing" || name === "Token" ||
+        return name === "Any" || name === "Nothing" ||
             this.registry.lookup(name) !== undefined
     }
 

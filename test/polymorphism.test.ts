@@ -194,10 +194,23 @@ Deno.test("Polymorphism: binding a builtin type name as type variable is rejecte
         0,
         "binding `Nothing` must be rejected",
     )
+})
+
+Deno.test("Polymorphism: `Token` is an ordinary name, `@Token` is not a name at all", () => {
+    // `@Token` is the core-owned raw-text type, and the sigil is what keeps it
+    // out of `typeName` — so it can never be bound as a type variable.
+    const tc = new LCTypeCheck().setRegistry(registry)
+    assertEquals(
+        tc.parseWith("^@Token <: Any. \\x:@Token. x", new TypeEnv()).size,
+        0,
+        "binding `@Token` must be rejected — it is not a type name",
+    )
+    // A bare `Token` is now an ordinary name: a declaration may take it, and
+    // with nothing registered under it the binding is a legal type variable.
     assertEquals(
         tc.parseWith("^Token <: Any. \\x:Token. x", new TypeEnv()).size,
-        0,
-        "binding `Token` must be rejected",
+        1,
+        "`Token` is no longer reserved",
     )
 })
 

@@ -39,11 +39,18 @@ evaluation rule produces it; it is an axiom of the operational semantics.
        |                      member kinds; the absorbed pattern-only form is
        |                      the degenerate case with an empty variant set)
        | ν α. Πⱼ oⱼ(σⱼ)      corecursive codata type (product of named observers)
-       | Token               raw matched text
+       | @Token              raw matched text
        | Any                 top
        | Nothing             bottom
        | σ ∧ τ              intersection type
 ```
+
+**`@Token` is spelled with a sigil because no declaration can be.** `typeName` is
+`[A-Z][A-Za-z0-9_]*`, so `@Token` is outside the name grammar: a user may declare `data Token`, and
+the two are different types. The sigil marks a _core-owned_ type at the one position where it is
+written, the same role `#name` plays for an operation reference. `Any` and `Nothing` need no sigil —
+they are not μ/ν types either, but their names are reserved by fiat rather than being spellable
+declarations.
 
 ### 2.2 Terms
 

@@ -58,7 +58,6 @@ import {
     FunType,
     isPatternCarrierType,
     Nothing,
-    NothingType,
     PolymorphicType,
     Token,
     type Type,
@@ -412,7 +411,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             const field = variant.fields[i]!
             const argType = args[i]
             if (argType === undefined) return Any
-            if (argType instanceof NothingType) hasNothingArg = true
+            if (argType.isUninhabited()) hasNothingArg = true
             const expected = field.type.resolveFamily(dataType)
             if (!isSubtype(argType, expected)) return Any
         }
@@ -502,7 +501,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Nothing propagation: observing an uninhabited scrutinee yields an
         // uninhabited result (principle of explosion). Checked after the
         // premises so a genuine type error is never masked.
-        if (scrutinee instanceof NothingType) return Nothing
+        if (scrutinee.isUninhabited()) return Nothing
 
         // Result: Gₖ(T)[α:=T]. For continuation observers, the type is T itself.
         if (observer.isContinuation) {
@@ -667,7 +666,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                     first.body,
                 )
                 : patternSigma
-            if (scrutinee instanceof NothingType) return Nothing
+            if (scrutinee.isUninhabited()) return Nothing
             return variantSigma
         }
 
@@ -678,7 +677,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the fold uninhabited (principle of explosion). Checked after
         // the premises so a genuine type error is never masked.
-        if (scrutinee instanceof NothingType) return Nothing
+        if (scrutinee.isUninhabited()) return Nothing
 
         let sigma = handlers[0]!.body
         for (let i = 1; i < handlers.length; i++) {
@@ -909,7 +908,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the fold uninhabited (principle of explosion). Checked after
         // the premises so a genuine type error is never masked.
-        if (scrutineeType instanceof NothingType) return Nothing
+        if (scrutineeType.isUninhabited()) return Nothing
 
         // The PATTERN arms are σ-CONSTANT: their bodies never mention σ
         // (parsed under `match : Token`), so their types enter the join every
@@ -1040,7 +1039,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Nothing propagation: an eagerly-evaluated seed of type Nothing makes
         // the unfold uninhabited (principle of explosion). Checked after the
         // premises so a genuine type error is never masked.
-        if (seed instanceof NothingType) return Nothing
+        if (seed.isUninhabited()) return Nothing
 
         // The result type is T (the codata type from the annotation).
         return codataType
@@ -1210,7 +1209,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // Nothing propagation: an eagerly-evaluated scrutinee of type Nothing
         // makes the cofold uninhabited (principle of explosion). Checked after
         // the premises so a genuine type error is never masked.
-        if (scrutinee instanceof NothingType) return Nothing
+        if (scrutinee.isUninhabited()) return Nothing
 
         // The handler body type is σ.
         return handler.body
@@ -1376,7 +1375,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         for (let i = 0; i < args.length; i++) {
             const argType = args[i]
             if (argType === undefined) return Any
-            if (argType instanceof NothingType) hasNothingArg = true
+            if (argType.isUninhabited()) hasNothingArg = true
             if (!isSubtype(argType, opSig.paramTypes[i]!)) return Any
         }
 
@@ -1434,7 +1433,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         for (let i = 0; i < args.length; i++) {
             const argType = args[i]
             if (argType === undefined) return undefined
-            if (argType instanceof NothingType) hasNothingArg = true
+            if (argType.isUninhabited()) hasNothingArg = true
             if (!isSubtype(argType, opSig.paramTypes[i]!)) return undefined
         }
 

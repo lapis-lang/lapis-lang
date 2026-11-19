@@ -141,14 +141,14 @@ Deno.test("T-FoldMatch: multi-handler fold requires ONE common result type (lc.m
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match, match("[0-9]*[02468]") → \\m:Token. m }',
+            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → match, match("[0-9]*[02468]") → \\m:@Token. m }',
         ),
         undefined,
     )
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:Token. m, match("[0-9]*[02468]") → match }',
+            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:@Token. m, match("[0-9]*[02468]") → match }',
         ),
         undefined,
     )
@@ -160,7 +160,7 @@ Deno.test("T-FoldMatch: exhaustiveness — a missing declared pattern rejects", 
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:Token. m }',
+            'fold [NatPat] match("[0-9]+") { match("[0-9]+") → \\m:@Token. m }',
         ),
         undefined,
     )
@@ -172,7 +172,7 @@ Deno.test("T-FoldMatch: canonical equivalence satisfies exhaustiveness", () => {
     // to ONE canonical source — the handler satisfies the declared pattern.
     const result = typeOfOne(
         h,
-        'fold [NatPat] match("[0-9]+") { match("[0123456789]+") → \\m:Token. m }',
+        'fold [NatPat] match("[0-9]+") { match("[0123456789]+") → \\m:@Token. m }',
     )
     assert(result instanceof FunType)
 })
@@ -182,7 +182,7 @@ Deno.test("T-FoldMatch: an undeclared pattern in a handler head rejects", () => 
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:Token. m }',
+            'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:@Token. m }',
         ),
         undefined,
     )
@@ -198,7 +198,7 @@ Deno.test("T-FoldMatch: a pattern owned by a different type rejects", () => {
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:Token. m }',
+            'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:@Token. m }',
         ),
         undefined,
     )
@@ -215,7 +215,7 @@ Deno.test("T-FoldMatch: wrong-kind annotation rejects (branch-reject, not a cras
     assertEquals(
         typeOfOne(
             h,
-            'fold [Stream] match("[0-9]+") { match("[0-9]+") → \\m:Token. m }',
+            'fold [Stream] match("[0-9]+") { match("[0-9]+") → \\m:@Token. m }',
         ),
         undefined,
     )
@@ -227,7 +227,7 @@ Deno.test("T-FoldMatch: a scrutinee of the wrong type rejects", () => {
     assertEquals(
         typeOfOne(
             h,
-            'fold [NatPat] \\x:Token. x { match("[0-9]+") → \\m:Token. m }',
+            'fold [NatPat] \\x:@Token. x { match("[0-9]+") → \\m:@Token. m }',
         ),
         undefined,
     )
@@ -244,7 +244,7 @@ Deno.test("T-FoldMatch: a Nothing-typed scrutinee propagates Nothing (let-bound)
     const gamma = new TypeEnv().extend("x", Nothing)
     const result = typeOfOne(
         h,
-        'fold [NatPat] x { match("[0-9]+") → \\m:Token. m }',
+        'fold [NatPat] x { match("[0-9]+") → \\m:@Token. m }',
         gamma,
     )
     assert(result instanceof NothingType)
@@ -260,7 +260,7 @@ Deno.test("T-FoldMatch: scrutinee of type Nothing propagates Nothing (annotation
     // of the body types would be Token (the body is `match`), never Nothing.
     const result = typeOfOne(
         h,
-        'λx:Nothing. fold [NatPat] x { match("[0-9]+") → \\m:Token. m }',
+        'λx:Nothing. fold [NatPat] x { match("[0-9]+") → \\m:@Token. m }',
     )
     assert(result instanceof FunType)
     // The codomain IS Nothing (the propagation arm), not the body type Token
@@ -355,7 +355,7 @@ Deno.test("E-FoldMatch: canonical spellings dispatch equally", () => {
     // both canonicalize to one source; the dispatch succeeds.
     const result = evalOne(
         h,
-        'fold [NatPat] match("[0123456789]+") { match("[0-9]+") → \\m:Token. m }',
+        'fold [NatPat] match("[0123456789]+") { match("[0-9]+") → \\m:@Token. m }',
     )
     assert(result !== undefined)
     assert(!(result instanceof EvalErrorValue))
@@ -365,7 +365,7 @@ Deno.test("E-Fold: a non-token scrutinee errors on the pattern arm (not a crash)
     const h = patternHarness()
     const result = evalOne(
         h,
-        'fold [NatPat] \\x:Token. x { match("[0-9]+") → \\m:Token. m }',
+        'fold [NatPat] \\x:@Token. x { match("[0-9]+") → \\m:@Token. m }',
     )
     assert(result instanceof EvalErrorValue)
     const err = result as EvalErrorValue
@@ -388,7 +388,7 @@ Deno.test("E-FoldMatch: a token of a different type rejects the handler head", (
     // on BOTH sides, not a value.
     const result = evalOne(
         h,
-        'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:Token. m }',
+        'fold [NatPat] match("[0-9]+") { match("[a-z]+") → \\m:@Token. m }',
     )
     assertEquals(result, undefined)
 })
@@ -401,7 +401,7 @@ Deno.test("E-FoldMatch: a bare-atom token scrutinee misses the dispatch (documen
     // PATTERNS; the bare atom remains the type's value, not a constructor).
     const result = evalOne(
         h,
-        'fold [NatPat] NatPat { match("[0-9]+") → \\m:Token. m }',
+        'fold [NatPat] NatPat { match("[0-9]+") → \\m:@Token. m }',
     )
     assert(result instanceof EvalErrorValue)
     const err = result as EvalErrorValue
@@ -416,7 +416,7 @@ Deno.test("E-FoldMatch: a nested fold's span replays under the ambient scope", (
     // span).
     const result = evalOne(
         h,
-        'fold [NatPat] (fold [NatPat] match("[0-9]+") { match("[0-9]+") → match("[0-9]+") }) { match("[0-9]+") → \\m:Token. m }',
+        'fold [NatPat] (fold [NatPat] match("[0-9]+") { match("[0-9]+") → match("[0-9]+") }) { match("[0-9]+") → \\m:@Token. m }',
     )
     assert(result !== undefined)
     assert(!(result instanceof EvalErrorValue))

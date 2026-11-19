@@ -255,8 +255,8 @@ behavior Stream
         head -> self
         tail -> self
 
-    map map <in: (Any -> Any)>
-        head x -> x value: head
+    map map
+        head x -> (x * 2)
 
 (Stream From: 0) head                      /* 0 */
 (Stream From: 0) tail head                /* 1 */
