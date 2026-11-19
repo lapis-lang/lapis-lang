@@ -267,11 +267,9 @@ have the same precedence, evaluated left-to-right).
 | 3 (highest) | `unaryExpr`   | Unary calls                             | Left               | `UnaryCall`   |
 | —           | `primary`     | literals, refs, arrays, records, parens | —                  | various       |
 
-**No application level.** There is no `expr expr` production and no `value:` suffix dedicated to
-application. Applying a function value is a keyword send: a send eliminates its receiver — `fold` on
-data, observation on codata, application on a function type — and applies the arguments to the
-result. A function value has type `σ → τ`, so its application is the ordinary send `f value: x`
-(§3.1). There is nothing to add to this table.
+**No application level.** There is no `expr expr` production. A surface type is `atomType` — a name,
+never a shape — so the surface has no receiver of function type and application never appears as a
+surface send; it is a **core** rule reached by elaboration (§3.1).
 
 **Uniform binary precedence:** ALL binary operators (`+`, `-`, `*`, `/`, `<`, `<=`, `=`, `,`, `&`,
 `|`, etc.) have the same precedence. `1 + 2 * 3` parses as `(1 + 2) * 3 = 9`. Explicit parentheses
@@ -386,14 +384,18 @@ flowchart LR
 There is **no block literal**. `[params | expr]` is not a production of the surface language, and
 nothing in the grammar introduces an anonymous binder.
 
-A function value has type `σ → τ` — a function type, not a prelude name. Applying one is an ordinary
-keyword send:
+A function value has type `σ → τ` — the operation's curried `FunType` chain, not a prelude name —
+but that type is read from `Ω` rather than written, since `typeExpr` is `atomType`:
 
 ```lapis
 double                    — the function value (an operation reference)
 Int double                — the same, qualified by its declaring type
-transform value: head     — apply: the selector `value:` is a function type's elimination
 ```
+
+**A function value cannot be passed.** Because no declaration can state a function type, there is no
+surface position that receives one: an operation reference names a function value, and the core
+applies it by juxtaposition, but no `in:`, field, or result can be of function type. See
+`surface-grammar.md` §3.6.1.
 
 **Why the literal goes away.** A block literal is an anonymous binder, and every other binder the
 language had was already removed (no top-level definition form, no `let … in`, no arm-level binding
@@ -404,12 +406,12 @@ declared type, a `properties:` law set, membership in `Ω`, and a memoized cost 
 
 **Where blocks used to appear, and what replaces them:**
 
-| Site                                 | Was                       | Now                                        |
-| ------------------------------------ | ------------------------- | ------------------------------------------ |
-| Contract clauses (`demands:` etc.)   | `demands: [guard]`        | `demands:` on its own line, indented body  |
-| `map`'s transform                    | `map f <…> [params \| e]` | the same arm form as a `fold`              |
-| A transformed codata observer (§4.4) | `<in: transform Block>`   | `<in: (Any -> Any)>`, a declared operation |
-| Call-site callback                   | `xs map: [n \| n * 2]`    | `xs map: double`                           |
+| Site                                 | Was                       | Now                                       |
+| ------------------------------------ | ------------------------- | ----------------------------------------- |
+| Contract clauses (`demands:` etc.)   | `demands: [guard]`        | `demands:` on its own line, indented body |
+| `map`'s transform                    | `map f <…> [params \| e]` | the same arm form as a `fold`             |
+| A transformed codata observer (§4.4) | `<in: transform Block>`   | a field-keyed `map` transform             |
+| Call-site callback                   | `xs map: [n \| n * 2]`    | the same arm form as a `fold`             |
 
 **Under-application is an error.** `xs append` where `append` takes an `in:` argument is an arity
 error, never a silent function value — the uniform-access getter/method split (§2.3) is unchanged.

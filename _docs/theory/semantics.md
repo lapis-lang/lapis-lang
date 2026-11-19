@@ -556,6 +556,26 @@ condition checked once per declaration (the same family as Datalog's negation st
 a Charity-style per-program semantic termination checker. It buys termination by induction on
 declaration order; it does **not** buy cost.
 
+**Corollary: a fold recurses structurally, never by name.** `Ω`'s rule is what makes the fold the
+language's only recursive form, and it settles how a _parameterized_ fold is written. A fold's
+handler receives each `Family` field already folded — the recursive call has happened — so a handler
+that needs to combine that result with the fold's own `in:` value does so directly:
+
+```
+add = \x:Nat. \y:Nat. fold [Nat] x { Zero() -> y, Succ(p) -> Succ(p) }
+```
+
+Here `p` **is** `add(pred(x), y)`: the recursion is the fold itself. The parameter `y` is bound by a
+lambda _outside_ the fold, so the fold's recursive positions are already applied. A handler that
+instead re-sent the operation by name (`rest append: v`) would need `append` to reference itself —
+exactly what this rule forbids — and would reintroduce a termination obligation with no syntactic
+witness.
+
+The consequence for the corpus: `prelude.md` §2.5's claim that a recursive field "arrives as a
+partially applied continuation" is **wrong for the core**, which binds it to the fold's result type.
+`Nat`'s `add` works because the second parameter sits outside the fold, not because `pred` is
+callable.
+
 **The feedback flag.** Within the anonymous calculus (no op references, no recursive `let`), the
 criterion for hyper-growth is nearly exact: **value-size feedback** — a fold's result flowing back
 as another fold's input without a static size bound on the intermediate. Without feedback, the cost

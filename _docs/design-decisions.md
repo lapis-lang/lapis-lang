@@ -387,14 +387,15 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   reference already _is_ one.
 - **Applying a function value needs no production.** A keyword send already means "eliminate the
   receiver, then apply the arguments" (`elaboration.md` §2.5): `fold` eliminates data, **observation
-  eliminates codata**, and **application eliminates a function type**. So `f value: x` applies `f`.
-  There is no `expr expr` production and no dedicated `value:` suffix; application falls out of the
-  send rule that already exists. Making application _derived_ rather than _added_ is what keeps the
-  surface free of both an application production and a function-value type.
-- **Parentheses re-open the message chain.** `(f value: x) value: y` is two sends, not one two-part
-  selector — the same mechanism that keeps uniform binary precedence unambiguous. A function type is
-  single-parameter; multi-argument function values are curried and spelled by nesting, matching the
-  core's `Observer` (one type slot). No tuple/product type is introduced.
+  eliminates codata**, and **application eliminates a function type**. Application is therefore
+  _derived_ rather than _added_ — there is no `expr expr` production and no `value:` suffix. **The
+  surface cannot in fact reach it:** a surface type is `atomType` (§2.1 of `surface-grammar.md`), so
+  no declaration can state a function type and no expression can acquire a receiver of one.
+  Application stays a core rule, reached by elaboration and never written.
+- **Parentheses re-open the message chain.** `(f k: x) k: y` is two sends, not one two-part selector
+  — the same mechanism that keeps uniform binary precedence unambiguous. The core's application is
+  single-argument, so multi-argument function values are curried by nesting, matching the core's
+  `Observer` (one type slot). No tuple/product type is introduced.
 - **Under-application is an error.** `xs append` where `append` has an `<in: …>` parameter is an
   arity error, never a silently produced function value. The uniform-access getter/method split is
   unchanged. Partial application (a section) is a separate open item — `overview.md` §12.27,

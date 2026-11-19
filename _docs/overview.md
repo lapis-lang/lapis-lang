@@ -1504,8 +1504,9 @@ is a real finding for the spec:
     production — and it never will. **Application is derived from the message chain**: a keyword
     send already means "eliminate the receiver, then apply the arguments," and the elimination form
     is fixed by the receiver's kind — `fold` for data, **observation for codata**, **application for
-    a function type**. Since a function value's type _is_ `σ → τ` (§12.27a), `transform value: head`
-    is an ordinary keyword send that applies it (`elaboration.md` §2.5). Nothing is added.
+    a function type**. A function value's type _is_ `σ → τ` (§12.27a), but that type is reached by
+    the core rather than written in a declaration: the surface has **no receiver of function type**
+    (§12.34), so application is a core rule that elaboration reaches and no surface send spells.
 
     The two corpus spellings resolve differently: `(rest append: v)` was always correct — it is a
     keyword self-send on a continuation, the same shape as `xs append: 3` — and `(tail x)` is
@@ -1551,13 +1552,14 @@ is a real finding for the spec:
 
     **(c) Application is derived, not added.** A keyword send means "eliminate the receiver, then
     apply the arguments" (`elaboration.md` §2.5). Data eliminates by `fold`, codata by
-    **observation**, and a function type by **application** — its fixed selector is `value:`. So
-    `f value: x` applies `f`, and `transform value: head` — already written in `elaboration.md` and
-    `syntax-design.md` — elaborates correctly with no new production. The surface has no `expr expr`
-    production and no dedicated `value:` form. Parentheses re-open the chain, so multi-argument
-    function values are curried (`(f value: x) value: y`), matching the core's single-slot
-    `Observer` and adding no product type. Under-application is an arity error, not a silently
-    produced function — uniform access is unchanged.
+    **observation**, and a function type by **application** — its fixed selector is `value:`. The
+    surface has no `expr expr` production and no dedicated `value:` form; the derivation is the
+    core's, reached by elaboration. **The surface cannot reach it from a written position**: a type
+    is `atomType` (§12.34), so no declaration states `σ → τ` and no expression acquires a receiver
+    of one. The core stays single-argument, and multi-argument function values are curried by
+    nesting, matching the core's single-slot `Observer` and adding no product type.
+    Under-application is an arity error, not a silently produced function — uniform access is
+    unchanged.
 
     **Still open (a separate item):** partial application — supplying some of an operation's
     arguments and holding the rest (`(NatList append 3)`) — has no production
@@ -1744,14 +1746,19 @@ is a real finding for the spec:
       it. Closer to `distributive: #add`'s look, but it breaks §12.23's rule that a `#name` never
       becomes a value, and would need an explicit exception.
     - **Keep the argument a term** and require the conformer to spell the value
-      (`identity: (Num N: 0)`), which works today and is what `Num`'s own example does — but it
-      makes a protocol's member spec unable to state its own law, since a protocol cannot name its
-      conformers' constructors.
+      (`identity: (Num N: 0)`), which is what `Num`'s own example does — but it makes a protocol's
+      member spec unable to state its own law, since a protocol cannot name its conformers'
+      constructors.
 
     The third is the status quo and the cheapest; the first is the only one that lets a protocol
-    state the law at all. Spec impact: `surface-grammar.md` §3.7's `properties` row, `lc.md` §7.2's
-    `identity:e` notation, `elaboration.md` §6.1, and `design-decisions.md`'s `identity:Zero`
-    example (which already spells a bare PascalCase name — the operation-reference reading).
+    state the law at all. **None of the three is writable today** — §12.35 records that
+    `properties:` has no record-literal production, so both the term spelling this option depends on
+    and the `#name` spelling in the second option are current parse failures. The choice below is a
+    choice about what to _build_ ([#122](https://github.com/lapis-lang/lapis-lang/issues/122)), not
+    a comparison of working forms. Spec impact: `surface-grammar.md` §3.7's `properties` row,
+    `lc.md` §7.2's `identity:e` notation, `elaboration.md` §6.1, and `design-decisions.md`'s
+    `identity:Zero` example (which already spells a bare PascalCase name — the operation-reference
+    reading).
 
 33. **Operation aliasing (`.as('Identity')`) has no surface spelling.** The prototype aliases an
     operation with a second name — `add.as('combine')`, `Zero.as('Identity')` — and its std library
@@ -1781,3 +1788,152 @@ is a real finding for the spec:
     all. The former keeps `Ω`'s declarations honest; the latter keeps `Ω` acyclic without a special
     case. Spec impact: `surface-grammar.md` §5.1 (the clause), `Ω`'s declaration rules in `ops.ts`,
     and `elaboration.md` §6.1's law attachment.
+
+34. **The surface has no function type — `typeExpr` is `atomType`, and a `->` production built a
+    type nothing could inhabit.** §3.8 defined `typeExpr ::= typeExpr "->" typeExpr | atomType`, so
+    the parser could build a function type in both positions the grammar allows — a variant field
+    and a spec entry. Neither position could _hold_ one. A variant argument in the core's syntax is
+    an `atomProd`, which has no lambda production (`Wrap(\x:Any. x)` does not parse), and a function
+    value has no surface spelling other than an operation reference (§3.6.1), which the core reads
+    as a bare variable there. The result was a type that was **accepted by the parser and rejected
+    by every later pass**: resolution carried two rules, `function-typed-field` and
+    `function-typed-spec`, that existed only to reject what the grammar had just built.
+
+    The repair is to remove the production rather than add another rejection. `typeExpr` _is_
+    `atomType`; there is no `->` in a type, so a function type is unbuildable and both rejection
+    reasons disappear (with them, the dead `case "fun"` in elaboration and an unsound `as AtomType`
+    cast in the parenthesised branch — the parenthesised production now re-enters `atomType` and
+    returns an `AtomType` by construction).
+
+    This is the same class as §12.31's `Boolean` and §12.29's `Block`: a name or shape taught by the
+    corpus with nothing to declare it. A function value remains a first-class _core_ notion — an
+    operation reference carries a declared `FunType` chain in `Ω` — but the surface can neither
+    state a function type nor pass one. That limitation is real and currently unaddressed: **any
+    higher-order operation (a `map` taking its transform as an argument) cannot be declared**,
+    because its parameter's type is unwritable. The corpus's `map` takes its transform as an arm
+    body bound to a field (§5.3), which is why it does not need one; a genuinely higher-order
+    surface form would.
+
+    Spec impact: `surface-grammar.md` §3.2/§3.3/§3.6.1/§3.8/§4.1/§9, `surface-syntax.md` §3.1/§3.6,
+    `elaboration.md` §2.3/§2.5, `design-decisions.md` §"Function values", and this finding.
+
+35. **`properties:` cannot be written: every documented spelling fails to parse, and the one form
+    that parses means nothing.** §3.7 assigns `properties` the value shape "`recordLiteral`-shaped",
+    and §3.6 defines `recordLiteral ::= "(" ( ident ":" expr ( "," ident ":" expr )* )? ")"` plus
+    `arrayLiteral ::= "{" … "}"`. **Neither production exists in `src/surface/grammar.ts`.**
+    `parenOrRecord` is `"(" expr ")"` only. Verified against the corpus's own spellings:
+
+    | Spelling                                                  | Result                                                                                                                   |
+    | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+    | `properties: (commutative, associative)`                  | **parse failure** — `binaryTail` is `hws1 op hws1`, so a comma needs space on both sides                                 |
+    | `properties: (commutative , associative)`                 | parses, but as **`paren` over `binop ","`** — two op references, not a flag list                                         |
+    | `properties: (identity: (Num N: 0))` (§6.1's own example) | **parse failure** — no keyword parts inside parens                                                                       |
+    | `properties: (x: 3)`                                      | **parse failure** — same                                                                                                 |
+    | `properties: {1, 2}`                                      | **parse failure** — no array production                                                                                  |
+    | `properties: ()`                                          | **parse failure** — `expr` is mandatory                                                                                  |
+    | `properties: (distributive: #add)`                        | **parse failure** — `#` is not a `primary` (correctly: §7.4/§12.23 make `#name` a keyword-part reference, never a value) |
+    | `properties: (commutative)`                               | parses — as a `paren` over an **op reference**, which is not a flag                                                      |
+
+    Four consequences, in increasing severity:
+
+    - **The AST is wrong when it parses.** A flag list and a comma expression both become `Expr`
+      nodes; nothing distinguishes `(commutative)` as a _claim_ from `commutative` as a _value_.
+    - **No pass validates `properties` at all.** `validateSpec` touches only `kind === "type"` and
+      defers to "the law machinery"; `elaborateFold` reads only `in`/`out`; the entry survives to
+      the AST and is dropped. So the one spelling that parses resolves with `errors: []` and
+      elaborates clean.
+    - **What it elaborates to, the core cannot parse.** `renderExpr`'s `binop` case emits the
+      operator verbatim, so `Wrap x -> (x , x)` becomes
+      `\e:Box. fold [Box] e { Wrap(x) -> ((x , x)) }`, whose parse forest is **empty** — the core
+      has no `,` expression operator. `+` fails identically, which exposes the cause: **operator
+      names are never resolved.** `lexemes.ts`'s `symbolicOp` comment claims "the resolver reports
+      an undeclared operator"; `resolve.ts` has no `binop` case and no such reason.
+    - **§12.32's "works today" is false.** It says the status-quo option — keeping `identity:`'s
+      argument a term — "works today". Every spelling it names is a parse failure (table above).
+
+    None of this is a defect in #25's _architecture_, which is why it is recorded rather than
+    repaired here: the missing `recordLiteral`/`arrayLiteral` productions are §3.6's, `0` is #119's
+    (`Int` literals), and law _semantics_ is #110's. What #25 can state is the gap itself, so that
+    the corpus's `properties:` examples stop reading as working syntax. Two sub-items are separable
+    and cheap once the productions land: validating the closed law vocabulary (`associative`,
+    `commutative`, `identity:e`, `distributive:g`, `involutory`, `idempotent`, `absorbing:z` —
+    `elaboration.md` §6.1), and resolving operator names so an undeclared `,` or `+` is rejected
+    rather than emitted into core text.
+
+    **Owned by [#122](https://github.com/lapis-lang/lapis-lang/issues/122).** That issue carries the
+    missing productions, the law-set AST node, the vocabulary check, and the operator-resolution
+    item, with this finding as its record.
+
+    Spec impact: `surface-grammar.md` §3.6/§3.7/§9, `elaboration.md` §6.1, `src/surface/resolve.ts`
+    (operator resolution), `src/surface/lexemes.ts` (the false comment), and §12.32's status-quo
+    claim.
+
+36. **Branching over the `Type` universe is opt-in, and the case protocol defaults.** `Type` carries
+    a classification fold (`dispatch`) and a bottom-up transformation (`map`), both implemented per
+    subclass so a kind answers for itself. The original `dispatch` demanded a **`RequiredCases<T>`**
+    table — every arm present, enforced at compile time.
+
+    That form is the maze the language is otherwise careful to avoid, in typed clothing. Because
+    `RequiredCases` mapped every arm to `(t: any, ...rest: any[]) => T`, a consumer naming one kind
+    was forced to name the other nine, and the _zero_ answers (`() => undefined`, `() => "unknown"`)
+    outnumbered the meaningful ones. `type_algebra`'s context-spec table spent eight of ten arms
+    declining; `cost.ts`'s kind classifier spent seven of ten. Adding a tenth kind would have edited
+    every such table even though none of them would answer differently. The same `any` mapping also
+    **erased the composite arms' narrowing**: `fun`/`intersection`/ `polymorphic` declared
+    `(t, ...rest: any[])` while `TypeCases` claimed their children were `T`, so the real call sites
+    received raw sub-`Type`s through a type that promised case results.
+
+    Resolved in favour of `map`'s existing design, which was already right:
+
+    - **Every arm is optional and every arm defaults.** An unnamed kind falls to `cases.default`,
+      which receives the type at the root's declared form. That is what lets an analysis state only
+      the kinds it distinguishes — and what keeps a new kind from forcing an edit in any consumer.
+    - **Presence, not result, decides.** `dispatch`'s arms return `T | undefined` and `T` may itself
+      include `undefined` (`dispatch<Ctx | undefined>`), so an arm that is _present_ and yields
+      `undefined` has answered "nothing here" while an _absent_ arm was never asked. The root's
+      `resolveCase` tests the handler's presence, never `??` on its result. With no arm and no
+      default the call throws — a table that answers nothing is a caller bug, not a silent
+      `undefined`.
+    - **Exhaustiveness is available, not imposed.** `ExhaustiveCases<T>` is `TypeCases<T>` with
+      `default` removed and every arm required; it is assignable to `TypeCases`, so it passes
+      anywhere a table is accepted, and annotating a table with it makes a missing kind a compile
+      error for exactly the analyses that asked. `RequiredCases` is deleted — it had no remaining
+      users and its `any` mapping was the defect.
+    - **Unary properties live on the type.** `isUninhabited()` (`Nothing` alone) and `isTop()`
+      (`Any` alone) answer a fact about one type, so consumers ask the type rather than compare
+      against a class. Seven `scrutinee instanceof NothingType` checks in `typing_grammar.ts` and
+      the `S-Bot`/`S-Top` tests in `subtyping.ts` now call the predicate; `isTypeKind` is the
+      one-line `default` a membership test uses.
+
+    **What stays a `switch`-free branch.** `isSubtype` remains a cascade of `instanceof` tests, and
+    correctly so: a _binary relation_ inspects both operands jointly
+    (`s instanceof FunType && t
+    instanceof FunType`), which single dispatch cannot express
+    without nesting one table inside another. That is a judgment from `lc.md` §4 — one total
+    function over a closed universe, stated once beside the rules it implements — not ad-hoc
+    polymorphism faked with guards.
+
+    Verified: a hypothetical eleventh `Type` subclass compiles with **no** consumer edited, and an
+    incomplete `ExhaustiveCases` table is rejected at compile time. Spec impact: `lc.md`'s type form
+    (the protocol is implementation, not calculus), and this finding.
+
+    **Follow-on cleanup (same principle, smaller scope).** Two further duplications were removed
+    under the same rule, and one was declined:
+
+    - **`Field.isRecursive` / `Variant.isRecursive` / `Variant.recursiveFields`.** Five sites wrote
+      `fields.some(f => f.type instanceof FamilyType)` or `fields.filter(…)`, each taking
+      responsibility for the `Family` kind test. The recursion question is a fact about the field or
+      the variant, so it is answered there; a field typed as the carrier's own `DataType` (not
+      `Family`) is correctly _not_ recursive, which the unary predicate keeps distinct.
+    - **One implementation of "is this member?"** — `isTypeValue`'s ten identical `() => true` arms
+      became `default: isTypeKind`, which also stays correct for a kind added later.
+    - **Declined: an `AtomType` base class for the seven leaf kinds.** After the protocol change the
+      seven `dispatch`/`map` pairs are identical modulo the arm name, so an extraction looks
+      tempting. It is a net loss: routing the arm key through an instance field and narrowing `self`
+      to the arm's parameter type needs either a cast (the `any` laundering this finding deleted) or
+      a second abstract getter per kind, so seven two-line overrides become roughly sixteen lines
+      plus a class between `Type` and its leaves. The duplication is real but mechanical, greppable,
+      and does not diverge; the abstraction would trade it for indirection.
+
+    Spec impact: `lc.md`'s type form (the protocol is implementation, not calculus), and this
+    finding.

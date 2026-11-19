@@ -1,4 +1,5 @@
-# Lapis Surface Grammar (EBNF)
+]633;E;head -n 888 _docs/theory/surface-grammar.md;2da1cbd7-bc47-4b3c-976d-d11a10295357]633;C#
+Lapis Surface Grammar (EBNF)
 
 > **Status:** Draft v0.1. This document is the **single consolidated grammar** for the Lapis surface
 > language — every production, in one place, in EBNF. It is the surface counterpart of
@@ -10,11 +11,13 @@
 > disagree, **this document wins** for the shape of the syntax.
 >
 > **Status of the surface grammar in the implementation:** the core calculus is implemented
-> (`src/core/grammar.ts`); the surface declaration productions are **not** (the implemented keywords
-> are `<:`, `cofold`, `fold`, `in`, `let`, `match`, `unfold` — no `data`, `behavior`, `protocol`,
-> `relation`, `query`, or `io`). This document is the target that Stage 1 of
-> [`language-design.md`](./language-design.md) is written against. See §9 for the per-production
-> implementation status.
+> (`src/core/grammar.ts`) and the surface pipeline is under `src/surface/` — parse to an AST,
+> resolve names, then elaborate to the core's concrete syntax. Implemented today: layout (§7),
+> `data` with named variants, an in-body `fold`, and the expression forms an arm body needs. The
+> other five declaration kinds (`behavior`, `protocol`, `relation`, `query`, `io`), variant
+> inheritance, pattern members, and `merge`/`scan`/`map` are not. See §9 for the per-production
+> status and for why the surface is a two-phase pipeline while the core is a one-pass executable
+> grammar.
 
 ---
 
@@ -132,6 +135,27 @@ Nesting is permitted; there are no escapes, so prose may not contain an unbalanc
 are **metasyntax** — consumed at statement boundaries before any token phase, and present in no
 production below.
 
+A comment's content is **free text**: it may contain tabs, and any other character except an
+unbalanced `*/`. The whitespace rules below apply to code only.
+
+### 2.7 Whitespace
+
+```
+hws        ::= " "*
+hws1       ::= " "+
+```
+
+**Whitespace is spaces, never tabs.** A tab is not a whitespace character in any code position, so a
+file that mixes the two is rejected rather than silently re-indented. The rule follows from L1 (§7):
+the indent unit is exactly four spaces, so a tab would make a line's column depend on the reader's
+tab width — and a mix of the two makes the nesting a matter of editor configuration rather than of
+the source.
+
+This is enforced at the lexical level, which is what makes it total: `hws` and `hws1` admit the
+space character only, so a tab between tokens, after a line's code, or on an otherwise blank line is
+a rejected character rather than a tolerated separator. Comments (§2.6) are the sole exception,
+because their content is prose.
+
 ---
 
 ## 3. Expressions
@@ -181,10 +205,10 @@ primary        ::= literal
 ```
 
 **There is no application production.** The grammar has no `expr expr` form and no `value:` suffix
-of its own: application is _derived_ through the message chain, not spelled. A keyword send
-eliminates its receiver and applies the arguments to the result — `fold` for data, observation for
-codata, and `value:` for a function type (§3.3). A function value is a value of type `σ → τ`, so
-applying one is the ordinary keyword send.
+of its own. The core derives application from the message chain — a send to a function-typed
+receiver applies it — but **the surface never produces such a receiver**: a type is `atomType`
+(§3.8), so no declaration can state a function type and no expression can acquire one. Application
+is therefore a core rule reached by elaboration, not a surface form.
 
 ### 3.3 The message-chain rule
 
@@ -207,14 +231,13 @@ it just has no satisfiable case.
 
 **A keyword send eliminates its receiver, then applies the arguments** (`elaboration.md` §2.5). The
 elimination form is fixed by the receiver's kind: data eliminates by `fold`, codata by observation,
-and a function type eliminates by **application**. So `transform value: head` — where `transform` is
-a function-typed _parameter_ — is a send whose selector is the function type's fixed application
-keyword, `value:`. Application needs no production of its own; this is the only rule it has (§3.2).
+and a function type eliminates by **application**, through its fixed `value:` selector. The surface
+never produces a receiver of function type — `typeExpr` is `atomType` (§3.8), never a shape — so
+`value:` names no surface declaration and application stays a **core** rule, reached by elaboration
+rather than written (§3.6.1).
 
-**Parentheses re-open the chain.** A parenthesized expression is a `primary`, so
-`(f value: x)
-value: y` is two sends, not one two-part selector. A function type is
-single-parameter, so a multi-argument function value is curried and spelled by nesting.
+**Parentheses re-open the chain.** A parenthesized expression is a `primary`, so `(f k: x) k: y` is
+two sends, not one two-part selector.
 
 > **Open (overview §12.2).** The payload of a generator arm (`| head: n rest: n - 1`) has this
 > _same_ shape as a keyword send, and §2.3's greedy collection would swallow it. The generator-arm
@@ -271,21 +294,27 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 
 ### 3.6.1 Function values
 
-There is no block literal — `[params | expr]` is **not** a production. A function value has type
-`σ → τ` and is a value like any other:
+There is no block literal — `[params | expr]` is **not** a production. A function value is an
+operation reference:
 
 ```lapis
 double                    /* an operation reference — the function value itself */
 Int double                /* qualified: the `double` declared by `Int`, when names collide */
-xs map: double            /* a function-typed argument */
-transform value: head     /* applying one — the send rule, §3.3 */
 ```
 
 **An operation reference is the only way to name a function value.** An unbound camelCase `ident` in
 `primary` position resolves through ρ (an arm binding) and then through `Ω` (§7.4): since no surface
 form binds a name at top level or inside a body (overview §12.6), an operation is the only thing
-such a name can denote. The reference therefore carries the operation's declared type, its law set,
-and its cost summary — which an anonymous lambda could not.
+such a name can denote. The reference carries the operation's declared type, its law set, and its
+cost summary — which an anonymous lambda could not.
+
+**A function value has a type, but not a writable one.** The reference's type is the operation's
+curried `FunType` chain in `Ω` (`ops.ts`'s `OpSig.signature`), and that is read from `Ω` rather than
+spelled. `typeExpr` is `atomType` (§3.8), so a declaration cannot write `σ -> τ` and cannot declare
+a parameter, field, or result of function type. Consequently a function value can be _named_ and
+_applied in the core_, but it cannot be **passed** between surface operations — the position that
+would receive it has no spellable type. That is a known limitation of the current surface, not a
+rejection rule: there is nothing to reject.
 
 **Qualification is disambiguation.** `Type op` is a unary send whose selector is resolved against
 the declaring type's operations, exactly the rule variant construction uses (§3.4): bare when unique
@@ -331,6 +360,16 @@ specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
 | `aux`        | `"#" ident` \| `"(" … ")"` | Zygomorphism — auxiliary fold result   |
 | `properties` | `recordLiteral`-shaped     | Algebraic property annotations         |
 
+> **Not implemented (overview §12.35,
+> [#122](https://github.com/lapis-lang/lapis-lang/issues/122)).** `properties`'s value is a record
+> literal (§3.6), and **neither `recordLiteral` nor `arrayLiteral` has a production** —
+> `parenOrRecord` accepts `"(" expr ")"` only. Every spelling the corpus writes
+> (`(commutative, associative)`, `(distributive: #add)`, `(identity: (Num N: 0))`, `()`) is
+> therefore a parse failure, and the one form that parses — `(commutative)` — yields a parenthesised
+> _ordinary expression_, not a flag list. Nothing validates the key either: resolution inspects only
+> the `type`-shaped entries, so a surviving `properties` entry is carried to the AST and dropped.
+> Treat the corpus's law examples as syntax still to be built, not as working syntax.
+
 > **Decided (overview §12.29).** There is **no `typeParam` key**. A map's transform takes its
 > argument type from the arm that binds it, so a separate declaration-time type parameter would be a
 > second spelling for something the arm already carries.
@@ -362,14 +401,21 @@ binding, no field name.
 Types appear in field declarations, spec entries, and operation result positions.
 
 ```
-typeExpr       ::= typeExpr "->" typeExpr      (* function type *)
-                | atomType
+typeExpr       ::= atomType
 
 atomType       ::= "(" typeExpr ")"
                 | pascalIdent                  (* a declared type *)
                 | "Family" | "Self"
                 | "Any" | "Nothing"
 ```
+
+**There is no function-type production.** A surface type is always a name, so a declaration cannot
+state `σ -> τ` anywhere — not in a field (§4.1), not in a spec's `in:`/`out:` (§3.7). This is not an
+omission: a function value is _only_ an operation reference (§3.6.1), and an operation's type is its
+declared `FunType` chain in `Ω`, which is read from `Ω` rather than written in a declaration. A `->`
+production would therefore build a type that **no position could inhabit** — accepted by the parser
+and rejected by every pass after it, which is how `function-typed-field` and `function-typed-spec`
+came to exist as repairs for a grammar defect rather than as rules.
 
 > **Decided (overview §12.29).** **There are no type variables and no type parameters anywhere in
 > the surface language — now or in the future.** `atomType` admits no lowercase production, so a
@@ -438,6 +484,14 @@ variantDecl    ::= pascalIdent ( ␣ ident ":" ␣ typeExpr )*     (* fields, in
 A variant's fields are **positional in declaration order**; the surface spelling
 (`Point2D x: 1 y: 2`) is the named-argument form, and elaboration resolves names to positions
 (elaboration §2.7).
+
+> **Decided.** A variant field's type and a spec entry's type are `typeExpr`, and `typeExpr` **is**
+> `atomType` (§3.8) — a name, never a shape. There is therefore no function type to reject:
+> `Wrap f: Any -> Any` and `<in: (Any -> Any)>` are _parse_ failures, because no production builds a
+> type from `->`. A function value is still a value (§3.6.1) — an operation reference, typed by its
+> declared `FunType` chain in `Ω` — but nothing can declare a position of function type, so one
+> cannot be passed as an argument and a variant field cannot carry one (a core variant field is an
+> `atomProd`, so `Wrap(\x:Any. x)` has no parse either).
 
 > **Decided (overview §12.29).** A declaration's head is a bare `pascalIdent` — **never a parameter
 > list**. The same holds for §4.2–§4.6: `behavior`, `protocol`, `relation`, `query`, and `io` all
@@ -691,21 +745,43 @@ the seed for the recursive unfolding: `rest: n - 1` says "the rest is whatever u
 ### 5.3 `map` — field transformation
 
 ```
-mapDecl        ::= "map" ident specRecord? ⏎ mapBody
+mapDecl         ::= "map" ident specRecord? ⏎ mapBody
 
-mapBody        ::= ␣(8) foldItem+
+mapBody         ::= ␣(8) fieldTransform+
+fieldTransform  ::= ident ␣ binding "->" ␣ expr
 ```
 
-A map is declared in the **same body form as a fold** — one arm per variant, indented at the fold
-body's column — because that is what it elaborates to: a fold (data) or an unfold (codata) whose arm
-bodies transform each field. There is no separate single-line transform form; a transform is not a
-literal, it is the operation's own body.
+A map's body is **field-keyed, not variant-keyed**: each transform names a _field_ and binds its own
+parameter. That is the whole difference from a fold, and it is what makes a map a map.
+
+- **Recursion is automatic.** A field typed `Family` (or `Self` in a codata declaration) is
+  descended into under the same map — a transform never names it and never recurses itself. A fold
+  cannot do this: it must name every variant and thread the recursion through its own operation
+  name, which `Ω`'s acyclicity then forbids.
+- **Only a map is eligible for fusion.** `merge` composes a pipeline of `unfold`, `map`, `fold`
+  stages (`elaboration.md` §4.5). A map is a transform stage — `map`∘`map` composes into one
+  traversal, and a map before a fold is fused into the fold's field access. A fold written to
+  rebuild its own structure is not a pipeline stage and fuses with nothing.
+
+A transform therefore needs **no lambda form**: `head x -> (x + 1)` binds the field's current value
+to `x`, reusing the same `ident ␣ binding "->" ␣ expr` shape a fold arm uses with a field name in
+place of the variant name.
 
 ```lapis
-map double <in: Int, out: Family>
-    Nil x -> Family Nil
-    Cons head tail x -> Family Cons head: (head * x) tail: (tail double: x)
+map double <out: Family>
+    head x -> (x + 1)
+    value v -> (v * 2)
 ```
+
+The structural rule: a transform names a **field of every variant that declares it**. A field the
+map does not name is carried through unchanged, and `Family` fields are mapped recursively without
+being named.
+
+The counterpart form in a `behavior` declaration is the **lazy** map — the same field-keyed
+production over observers, applied at observation time rather than at construction time
+(`elaboration.md` §4.4's codata map).
+
+### 5.4 `merge` — deforestation
 
 ### 5.4 `merge` — deforestation
 
@@ -780,6 +856,10 @@ The declaration/body/case-arm/body nesting is:
 The implementation uses **P4P-style column-parameterised productions** (spec §6.2): no pre-pass, no
 token rewriting. Every block-introducing production takes the child column as a parameter, and
 `spaces(n)` matches exactly `n` spaces.
+
+Because the column is measured in spaces, **a tab is not whitespace in code position** (§2.7): a
+file that mixes the two has no well-defined column, so the mix is rejected rather than resolved by
+an assumed tab width.
 
 ### L2 — Newline
 
@@ -888,25 +968,53 @@ intermediate it needs twice, except the two-root case above, which `<aux: …>` 
 
 ## 9. Implementation Status
 
-Per-production, against the core in `src/core/`. The core grammar is the abstract base `AbstractLC`
-(`grammar.ts`); the semantic passes are its subclasses `LCTypeCheck` (`typing_grammar.ts`) and
-`LCEval` (`eval_grammar.ts`).
+Per-production, against the core in `src/core/` and the surface pipeline in `src/surface/`. The core
+grammar is the abstract base `AbstractLC` (`grammar.ts`); the semantic passes are its subclasses
+`LCTypeCheck` (`typing_grammar.ts`) and `LCEval` (`eval_grammar.ts`). The surface language uses a
+_different_ shape, explained below the table.
 
-| Production group              | Status                                                                                                                                                                                                                                                                                                      |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Core terms (`lc.md` §2.2)     | **Implemented** — `lambdaProd`, `foldProd`, `unfoldProd`, `cofoldProd`, `letProd`, `variantProd`, `patternTokenProd`, `patternMatchProd`, `obsProd`, `appProd`, `opProd`, `typeAbsProd`, `typeAppProd`                                                                                                      |
-| Types (`lc.md` §2.1)          | **Implemented** — `typeProd`, `atomType`                                                                                                                                                                                                                                                                    |
-| Surface expressions (§3)      | **Partial** — the core's expression productions cover the LC core's term forms, not the surface's message chain. `appProd` is the **core's** juxtaposition, which the surface grammar does not expose: the surface has no application production at all, and applies through the keyword send (§3.2, §3.3). |
-| Surface declarations (§4, §5) | **Not implemented** — no `data`, `behavior`, `protocol`, `relation`, `query`, or `io` production; the registered types in the test fixtures are built through the `DataTypeBuilder` API, never parsed from a declaration                                                                                    |
-| Modules (§6)                  | **Not implemented** — Stage 7                                                                                                                                                                                                                                                                               |
+| Production group              | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Core terms (`lc.md` §2.2)     | **Implemented** — `lambdaProd`, `foldProd`, `unfoldProd`, `cofoldProd`, `letProd`, `variantProd`, `patternTokenProd`, `patternMatchProd`, `obsProd`, `appProd`, `opProd`, `typeAbsProd`, `typeAppProd`                                                                                                                                                                                                                                                                                                                                                                               |
+| Types (`lc.md` §2.1)          | **Implemented** — `typeProd`, `atomType`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Surface layout (§7)           | **Implemented** — `src/surface/layout.ts`: exact-column `spaces(n)`, newline-excluding `hws`/`hws1`, `lineEnd`, nestable block comments, and `trivia`. Column threading is a `@rule` method parameter, the engine's documented answer for context-sensitive grammars.                                                                                                                                                                                                                                                                                                                |
+| Surface expressions (§3)      | **Partial** — `primary`, the three call forms, references, literals, spec records, and types are implemented in `src/surface/grammar.ts`. Not yet: array and record literals (§3.6), contract-clause semantics (#110), and pattern-driven literals beyond the numeric subset (§2.4). **Consequence:** `properties`'s `recordLiteral` value shape has no production, so every law spelling in the corpus is a parse failure (overview §12.35). Also not yet: operator resolution — an undeclared symbolic operator is passed through into the emitted core text rather than reported. |
+| Surface declarations (§4, §5) | **Partial** — `data` with named variants and an in-body `fold` (declarations and case arms) are implemented. Not yet: `behavior`, `protocol`, `relation`, `query`, `io`; variant inheritance (§4.1's `<:` open question); pattern members; `merge`/`scan`; `map`; `satisfies`.                                                                                                                                                                                                                                                                                                       |
+| Modules (§6)                  | **Not implemented** — Stage 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
-The implemented keyword set is exactly `<:`, `cofold`, `fold`, `in`, `let`, `match`, `unfold` — the
-core's own vocabulary. `in` and `let` are the core's `let x:σ = t in u` terminator and former; they
-are **not** surface keywords, and the surface grammar has no `let` production (§4, §7). Every
-surface declaration keyword above is still a production to write.
+### The hybrid architecture
 
-The surface declaration productions are the target of Stage 1 in
-[`language-design.md`](./language-design.md) ("surface `data`/`fold` → core μ/fold").
+The surface language is **parse-to-AST plus tree-consuming passes**, while the core stays a one-pass
+executable grammar. Two requirements force the difference:
+
+1. **Whole-program knowledge before elaboration.** A declaration's meaning depends on every other
+   declaration — which variants exist, which operations are in scope — and the surface has no
+   declaration ordering rule. A one-pass production cannot know a later declaration.
+2. **A representation to elaborate _from_.** The message chain has no core counterpart, so the
+   parsed form must be held while the target is constructed. The core's terms are themselves
+   concrete syntax (`OpSig.definition`), so elaboration emits LC source text and the core parses it.
+
+The pipeline (`src/surface/index.ts`):
+
+```
+surface source
+     │  SurfaceParse              (executable grammar → surface AST)
+     ├─ resolveProgram            (declaration table, reserved names, name resolution)
+     ├─ elaborateProgram          (AST → DataType + Ω operations, as LC source)
+     └─ LCTypeCheck / LCEval      (the core's one-pass grammar)
+```
+
+**Why the AST and not the `DerivationTree`.** `parseToTree` retains _where a `@rule` matched_, not
+the shape of a production: a repeated production yields nested same-label nodes carrying partial
+values (`many()` over a rule produces `[as] → [as] → [as] → [one]`), and a fixed-arity `seq` yields
+one node with no children. A pass dispatching on those labels fires once per repetition and cannot
+distinguish a partial value from a complete one. The AST is built by the productions' own semantic
+actions, which see each production exactly once. `parseToTree` remains available — and is the right
+vehicle — for spans, diagnostics, and unparsing (#34).
+
+**The implemented keyword set** for the core is `<:`, `cofold`, `fold`, `in`, `let`, `match`,
+`unfold`; the surface adds `data` and `fold`. `in` and `let` are the core's terminator and former,
+**not** surface keywords: the surface grammar has no `let` production (§4, §7).
 
 ---
 
@@ -939,9 +1047,10 @@ The questions this grammar does _not_ settle, with their owning finding in
   with no discriminating variants belongs in an unfold over a declared seed type — `take` is the
   worked case (`syntax-design.md` §"Behavior"). See also `elaboration.md` §10.
 - **Surface application** (`expr expr` vs. a `value:` send) — there is **no application
-  production**. A keyword send eliminates its receiver and applies the arguments; a receiver of
-  function type `σ → τ` applies through the `value:` selector, exactly as μ-types eliminate by
-  `fold` and ν-types by observation (§3.2, §3.3, §3.6.1).
+  production**, and no surface receiver of function type either: a type is `atomType` (§3.8), so no
+  declaration can state one. Application is a **core** rule (a send to a function-typed receiver
+  applies it, exactly as μ-types eliminate by `fold` and ν-types by observation), reached by
+  elaboration rather than written (§3.2, §3.3, §3.6.1).
 - **The top-level definition form** (`name = expr`) — there is none; see §4 and overview §12.6.
 - **Arm-level bindings** — there is no `let`/definition/initialised-slot form in any body; see §7.
 - **The block literal** (`[params | expr]`) — retired; see §3.6.1.

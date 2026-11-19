@@ -87,46 +87,46 @@ export abstract class Type {
     abstract toString(): string
 
     /**
-     * Dispatch this type's shape to a case table WITHOUT structural
-     * recursion — the classification-style fold: the narrowed `this` and,
-     * for composite kinds, the immediate sub-types are handed to the
-     * matching case, and whatever the analysis computes (a tag, a summary,
-     * a count) comes back.
+     * Dispatch this type's shape to a case table WITHOUT structural recursion —
+     * the classification-style fold: the narrowed `this` and, for the composite
+     * kinds, the immediate sub-types are handed to the matching case, and
+     * whatever the analysis computes (a tag, a summary, a count) comes back.
      *
      * Implemented per subclass (each kind knows its own arm — the same
-     * polymorphism `equals`/`toString` already exercise); the closed
-     * universe is the class hierarchy itself, so an undeclared subclass
-     * reaching a generic consumer throws loudly from the root default.
+     * polymorphism `equals`/`toString` already exercise); the closed universe is
+     * the class hierarchy itself, so an undeclared subclass reaching a generic
+     * consumer throws loudly from the root default.
      *
-     * The REQUIRED-case form: a table that omits a kind is a compile error
-     * (`RequiredCases<T>`), and an omitted arm reaching the root default
-     * throws at runtime — a caller bug surfaced loudly, never a silent
-     * `undefined`.
+     * **A kind the table does not name falls to `cases.default`**, and an absent
+     * `default` yields `undefined`. Every arm is optional on purpose: naming one
+     * kind must not oblige an analysis to name the other nine. A table that must
+     * answer for every kind passes `ExhaustiveCases<T>`, which makes omission a
+     * compile error at the call site — the check is opt-in, not imposed.
      *
      * Contrast with `map` (bottom-up, defaultable cases, rebuilds types):
-     * `dispatch` is for consumers that reduce a type to a value; `map` is
-     * for consumers that transform it.
+     * `dispatch` is for consumers that reduce a type to a value; `map` is for
+     * consumers that transform it.
      */
-    abstract dispatch<T>(cases: RequiredCases<T>): T
+    abstract dispatch<T>(cases: TypeCases<T>): T
 
     /**
-     * Map this type bottom-up: every sub-type is mapped first, then the
-     * node's case handler sees the mapped children. A handler returning
-     * `undefined` keeps the structurally-defaulted node (children
-     * substituted, shape rebuilt, unchanged when no child moved) — so a
-     * substitution only spells the kinds it transforms.
+     * Map this type bottom-up: every sub-type is mapped first, then the node's
+     * case handler sees the mapped children. A handler returning `undefined`
+     * keeps the structurally-defaulted node (children substituted, shape
+     * rebuilt, unchanged when no child moved) — so a substitution only spells
+     * the kinds it transforms.
      *
-     * Implemented per subclass, like `dispatch`: atom kinds have no
-     * traversable sub-types (their arm runs the optional handler, keeping
-     * the node unchanged when it yields `undefined`); the composite kinds
-     * (`FunType`, `IntersectionType`, `PolymorphicType`) override to map
-     * their children first. A pass-local marker outside the universe
-     * throws from both virtuals — there is no structural reading of it.
+     * Implemented per subclass, like `dispatch`: atom kinds have no traversable
+     * sub-types (their arm runs the optional handler, keeping the node unchanged
+     * when it yields `undefined`); the composite kinds (`FunType`,
+     * `IntersectionType`, `PolymorphicType`) override to map their children
+     * first. A pass-local marker outside the universe throws from both virtuals
+     * — there is no structural reading of it.
      *
-     * Shadowing note: at a `PolymorphicType` node the handler runs AFTER
-     * the children are mapped; a shadowing handler returns the ORIGINAL
-     * node (discarding the mapped children), so a substitution's
-     * no-descend rule is expressed by returning the original binder.
+     * Shadowing note: at a `PolymorphicType` node the handler runs AFTER the
+     * children are mapped; a shadowing handler returns the ORIGINAL node
+     * (discarding the mapped children), so a substitution's no-descend rule is
+     * expressed by returning the original binder.
      */
     abstract map(cases: TypeCases<Type>): Type
 
@@ -142,6 +142,33 @@ export abstract class Type {
      * context, not the singleton, makes it that carrier) — exactly as a
      * bound variable resolves against its context.
      */
+    /**
+     * Whether this type is uninhabited — `Nothing` alone.
+     *
+     * An intrinsic, unary property: a type knows whether it has no values, and
+     * no consumer needs the kind list to ask. Every other kind answers `false`
+     * by inheriting this, so a new kind is uninhabited only if it says so.
+     *
+     * The typing rules read this once per elimination site. Spelling it as
+     * `t instanceof NothingType` instead would restate the same rule at every
+     * call site and make each one responsible for the whole kind list — the
+     * duplication this method removes.
+     */
+    isUninhabited(): boolean {
+        return false
+    }
+
+    /**
+     * Whether this type is the lattice top — `Any` alone, the type every type
+     * is a subtype of (`S-Top`).
+     *
+     * Intrinsic and unary for the same reason `isUninhabited` is: the answer is
+     * a fact about this type, not a comparison between two.
+     */
+    isTop(): boolean {
+        return false
+    }
+
     /**
      * Resolve the μ-bound occurrence against a carrier: a `Family`-typed
      * field IS the recursion, so its type is the carrier it recurses
@@ -185,8 +212,8 @@ export class TypeVar extends Type {
         return this.name
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.typeVar(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("typeVar", this, cases.typeVar, cases.default)
     }
 
     /** An atom: no traversable sub-types; the base `map` default applies. */
@@ -220,8 +247,8 @@ export class FamilyType extends Type {
         return "Family"
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.family(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("family", this, cases.family, cases.default)
     }
 
     /** An atom: no traversable sub-types; the base `map` default applies. */
@@ -263,8 +290,15 @@ export class FunType extends Type {
         return `(${this.param} → ${this.result})`
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.fun(this, this.param, this.result)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase(
+            "fun",
+            this,
+            cases.fun === undefined
+                ? undefined
+                : (t: FunType) => cases.fun!(t, this.param, this.result),
+            cases.default,
+        )
     }
 
     /**
@@ -304,6 +338,23 @@ export class Variant {
 
     findField(name: string): Field | undefined {
         return this.fields.find((f) => f.name === name)
+    }
+
+    /**
+     * Whether any field recurses — i.e. is typed at the μ-bound (`Family`).
+     *
+     * A variant knows this about itself; every consumer asking it otherwise has
+     * to restate `fields.some(f => f.type instanceof FamilyType)` and take
+     * responsibility for the `Family` kind test. This is the variant-level
+     * counterpart of `Type.isUninhabited`.
+     */
+    isRecursive(): boolean {
+        return this.fields.some((f) => f.isRecursive())
+    }
+
+    /** The recursive fields, in declaration order. */
+    recursiveFields(): Field[] {
+        return this.fields.filter((f) => f.isRecursive())
     }
 }
 
@@ -349,6 +400,17 @@ export class Field {
     /** The field's type — always a resolved `Type` on a published definition. */
     get type(): Type {
         return resolvedSlotType(this.#slot, `field "${this.name}"`)
+    }
+
+    /**
+     * Whether this field is typed at the μ-bound (`Family`) — the recursion.
+     *
+     * The unary, intrinsic form of "is this a recursive field": the field asks
+     * its own type rather than each consumer naming `FamilyType`. A slot still
+     * held as a builder reference is unresolved and not a μ-bound occurrence.
+     */
+    isRecursive(): boolean {
+        return this.#slot instanceof FamilyType
     }
 
     /**
@@ -496,8 +558,8 @@ export class DataType extends Type {
         return this.name
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.data(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("data", this, cases.data, cases.default)
     }
 
     /** An atom: the base `map` default applies (no traversable sub-types). */
@@ -746,8 +808,8 @@ export class CodataType extends Type {
         return this.name
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.codata(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("codata", this, cases.codata, cases.default)
     }
 
     /** An atom: the base `map` default applies (no traversable sub-types). */
@@ -855,17 +917,30 @@ export class Observer {
 // ── Token type ────────────────────────────────────────────────────────────────
 
 /** `Token` — raw matched text from the lexer. The one non-μ/ν primitive. */
+/**
+ * `@Token` — the raw matched text (`lc.md` §2.1).
+ *
+ * The type belongs to Lapis Core alone: a pattern fold's handler binds the
+ * matched token under the fixed name `match`, and a program consumes that
+ * binding rather than writing the type.
+ *
+ * **The `@` is load-bearing.** `typeName` is `[A-Z][A-Za-z0-9_]*`, so no
+ * declaration can be spelled `@Token` — which means the type and a user's `data
+ * Token` are now two different names rather than one contested one. The
+ * sigil marks a *core-owned* type at the site where the name is written, the
+ * same role `#name` plays for an operation reference.
+ */
 export class TokenType extends Type {
     equals(other: Type): boolean {
         return other instanceof TokenType
     }
 
     toString(): string {
-        return "Token"
+        return "@Token"
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.token(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("token", this, cases.token, cases.default)
     }
 
     /** An atom: the base `map` default applies (no traversable sub-types). */
@@ -885,12 +960,17 @@ export class AnyType extends Type {
         return other instanceof AnyType
     }
 
+    /** `Any` is the lattice top (`S-Top`). */
+    override isTop(): boolean {
+        return true
+    }
+
     toString(): string {
         return "Any"
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.any(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("any", this, cases.any, cases.default)
     }
 
     /** An atom: the base `map` default applies (no traversable sub-types). */
@@ -905,12 +985,17 @@ export class NothingType extends Type {
         return other instanceof NothingType
     }
 
+    /** `Nothing` is the uninhabited type (`S-Bot`). */
+    override isUninhabited(): boolean {
+        return true
+    }
+
     toString(): string {
         return "Nothing"
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.nothing(this)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase("nothing", this, cases.nothing, cases.default)
     }
 
     /** An atom: the base `map` default applies (no traversable sub-types). */
@@ -944,8 +1029,15 @@ export class IntersectionType extends Type {
         return `(${this.left} ∧ ${this.right})`
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.intersection(this, this.left, this.right)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase(
+            "intersection",
+            this,
+            cases.intersection === undefined
+                ? undefined
+                : (t: IntersectionType) => cases.intersection!(t, this.left, this.right),
+            cases.default,
+        )
     }
 
     /**
@@ -990,8 +1082,15 @@ export class PolymorphicType extends Type {
         return `∀${this.typeVarName} <: ${this.bound}. ${this.body}`
     }
 
-    override dispatch<T>(cases: RequiredCases<T>): T {
-        return cases.polymorphic(this, this.bound, this.body)
+    override dispatch<T>(cases: TypeCases<T>): T {
+        return resolveCase(
+            "polymorphic",
+            this,
+            cases.polymorphic === undefined
+                ? undefined
+                : (t: PolymorphicType) => cases.polymorphic!(t, this.bound, this.body),
+            cases.default,
+        )
     }
 
     /**
@@ -1075,45 +1174,108 @@ export class TypeEnv {
  * composite kinds, its recursive sub-types.
  *
  * Consumers invoke the dispatch polymorphically: `t.dispatch(cases)` (the
- * required-case classification fold) and `t.map(cases)` (the bottom-up
- * transformation) are virtual methods on `Type`, implemented per subclass —
- * a new Type subclass implements its own dispatch arm, so the closed
- * universe is enforced by the class hierarchy itself. The case tables stay
- * external: per-judgment actions are supplied per call.
+ * classification fold) and `t.map(cases)` (the bottom-up transformation) are
+ * virtual methods on `Type`, implemented per subclass — a new Type subclass
+ * implements its own arm, so the closed universe is enforced by the class
+ * hierarchy itself. The case tables stay external: per-judgment actions are
+ * supplied per call.
  *
- * The handler returns are deliberately optional-result (`T | undefined`):
- * `map` reads `undefined` as "keep the structural default" (the node
- * unchanged for atoms, rebuilt from mapped children for composites), and
- * `dispatch` treats it as an omitted arm (the required-case compile
- * contract `RequiredCases<T>` makes omission a caller bug — the runtime
- * then surfaces a missing arm as a loud TypeError from the caller's `!`).
+ * **Every arm is optional, and every arm defaults.** Omitting a kind is not a
+ * caller bug but the normal case: an analysis states the kinds it distinguishes
+ * and says nothing about the rest. `dispatch` defaults an unmatched kind to
+ * `cases.default(this)`; `map` defaults to the identity (the node unchanged for
+ * atoms, rebuilt from mapped children for composites). This is what keeps a new
+ * Type subclass from forcing an edit in every consumer — the defect the
+ * all-required table carried. A consumer that genuinely must see every kind
+ * asks for that explicitly with `exhaustive`.
+ *
+ * The handler returns are optional-result (`T | undefined`) so an arm can
+ * decline for a *value* reason (e.g. "this field carrier contributes no
+ * context"), which `map` reads as "keep the structural default".
+ *
+ * Composite arms receive the children as **`Type`, not `T`**: dispatch does not
+ * recurse, so the sub-types handed to `fun`/`intersection`/`polymorphic` are the
+ * node's own children, not case results. Typing them `T` would be a lie the old
+ * `RequiredCases` laundered through `any`; a consumer that wants case results at
+ * the children calls `child.dispatch(cases)` itself (which is what `map` does).
  */
 export interface TypeCases<T> {
     typeVar?: (t: TypeVar) => T | undefined
     family?: (t: FamilyType) => T | undefined
-    fun?: (t: FunType, param: T, result: T) => T | undefined
+    fun?: (t: FunType, param: Type, result: Type) => T | undefined
     data?: (t: DataType) => T | undefined
     codata?: (t: CodataType) => T | undefined
     token?: (t: TokenType) => T | undefined
     any?: (t: AnyType) => T | undefined
     nothing?: (t: NothingType) => T | undefined
-    intersection?: (t: IntersectionType, left: T, right: T) => T | undefined
-    polymorphic?: (t: PolymorphicType, bound: T, body: T) => T | undefined
+    intersection?: (t: IntersectionType, left: Type, right: Type) => T | undefined
+    polymorphic?: (t: PolymorphicType, bound: Type, body: Type) => T | undefined
+    /**
+     * The fallback: every kind this table does not name. Receives the type at
+     * the root's narrowest declared form (`Type`), which is what an analysis
+     * lumping kinds together actually uses.
+     */
+    default?: (t: Type) => T | undefined
 }
 
 /**
- * The case protocol, REQUIRED-case form: a table that omits a kind is a
- * compile error — the classification-style fold's contract (a new Type
- * subclass forces every case table to answer for it). `dispatch` requires
- * this form; an arm that yields `undefined` is a caller bug, not a case to
- * default (the classification fold must never silently produce one). The
- * `-?` strips the optionality the `TypeCases` mapping would otherwise
- * preserve. The parameter types stay loose (`any` + rest) because the
- * per-kind signatures vary — `dispatch`'s implementors narrow internally.
+ * A case table that must name every kind — the opt-in exhaustive form.
+ *
+ * `TypeCases` with `default` removed and every remaining arm required. It is
+ * assignable to `TypeCases`, so it passes anywhere a case table is accepted;
+ * the value of the alias is at the *declaration* site — annotate a local as
+ * `ExhaustiveCases<T>` and a missing kind becomes a compile error, so adding a
+ * Type subclass breaks exactly the tables that asked to be broken.
  */
-export type RequiredCases<T> = {
+export type ExhaustiveCases<T> = {
     // deno-lint-ignore no-explicit-any
-    [K in keyof TypeCases<T>]-?: (t: any, ...rest: any[]) => T
+    [K in Exclude<keyof TypeCases<T>, "default">]-?: (t: any, ...rest: any[]) => T
+}
+
+/**
+ * A `default` arm that accepts every kind — the "yes, this is a Type" answer.
+ *
+ * A consumer that does not care which kind it received (a membership test, a
+ * tag that lumps kinds together) uses this as its `default:` instead of
+ * enumerating all ten arms. It cannot go stale: a kind added later falls here
+ * too. The name is the semantic one, so the call site reads as what it means.
+ *
+ * The parameter is deliberately unused — the answer is the same for every kind,
+ * which is precisely why no arm is needed.
+ */
+export function isTypeKind(): true {
+    return true
+}
+
+/**
+ * The shared tail of every `dispatch` arm: the named arm, else the table's
+ * `default`, else a loud caller bug.
+ *
+ * Presence of the handler decides, not its result. That distinction matters
+ * because `T` may itself include `undefined` (`dispatch<Ctx | undefined>`): an
+ * arm that is *present* and yields `undefined` has answered "nothing here",
+ * whereas an *absent* arm has not been asked at all. Testing `!== undefined`
+ * on the function rather than on its return is what keeps those two apart, and
+ * it is why `??` on the results would be wrong.
+ *
+ * The `as T` asserts only that a present handler's result conforms to the table's
+ * declared `T | undefined`; when `T` excludes `undefined` a handler yielding it
+ * is a caller bug, which `ExhaustiveCases` rules out at the declaration site.
+ */
+function resolveCase<T>(
+    kind: string,
+    self: Type,
+    arm: ((t: never) => T | undefined) | undefined,
+    fallback: ((t: Type) => T | undefined) | undefined,
+): T {
+    const handler = arm ?? fallback
+    if (handler === undefined) {
+        throw new TypeError(
+            `Type.dispatch: no "${kind}" arm and no default — a case table must ` +
+                `answer for every kind it is asked about`,
+        )
+    }
+    return handler(self as never) as T
 }
 
 /**
@@ -1128,8 +1290,7 @@ export type RequiredCases<T> = {
  * The classification-style fold — the virtual `Type.dispatch`. Free-function
  * surface.
  */
-// deno-lint-ignore no-explicit-any
-export function foldType<T>(t: Type, cases: TypeCases<T> & Record<keyof TypeCases<never>, any>): T {
+export function foldType<T>(t: Type, cases: TypeCases<T>): T {
     return t.dispatch(cases)
 }
 

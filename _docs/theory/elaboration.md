@@ -86,21 +86,22 @@ carried as the implicit `match` field, accessible in fold handlers.
 ### 2.3 Function Values
 
 There is no block literal. A function value is an operation reference, and its type is the
-operation's curried signature (`FunType` chain, `ops.ts`'s `OpSig.signature`). Since nothing in the
-surface binds a name at top level or in a body (`overview.md` §12.6), an unbound camelCase `ident`
-in `primary` position can only denote an operation, so no new resolution rule is needed.
+operation's curried signature (`FunType` chain, `ops.ts`'s `OpSig.signature`). That type is read
+from `Ω`, not written: `typeExpr` is `atomType` (`surface-grammar.md` §3.8), so a declaration cannot
+state `σ -> τ` and cannot declare a parameter, field, or result of function type. Since nothing in
+the surface binds a name at top level or in a body (`overview.md` §12.6), an unbound camelCase
+`ident` in `primary` position can only denote an operation, so no new resolution rule is needed.
 
-| Surface                 | Core                            | Notes                                                  |
-| ----------------------- | ------------------------------- | ------------------------------------------------------ |
-| `double`                | the operation's definition term | Function value; resolved through `Ω` when unbound in ρ |
-| `Int double`            | the same                        | Qualified: disambiguates a colliding name (§2.5)       |
-| `transform value: head` | `(g(seed)) head`                | Apply the function-typed parameter — see §2.5          |
+| Surface      | Core                            | Notes                                                  |
+| ------------ | ------------------------------- | ------------------------------------------------------ |
+| `double`     | the operation's definition term | Function value; resolved through `Ω` when unbound in ρ |
+| `Int double` | the same                        | Qualified: disambiguates a colliding name (§2.5)       |
 
 A function value has type `σ → τ` — the operation's curried signature (`ops.ts`'s
 `OpSig.signature`). There is no separate function-value type in the prelude: a function value is the
 `FunType` it declares, and an operation reference is not an instance of some wrapper type — it is
-the operation's definition, which _has_ type `σ → τ` directly. Both apply through the keyword send
-(§2.5).
+the operation's definition, which _has_ type `σ → τ` directly. The core applies it by juxtaposition;
+the surface does not, because no surface position can be of function type.
 
 **Contract clauses are not function values.** `demands:`, `ensures:`, `invariant:`, and `rescue:`
 take an indented body (`surface-grammar.md` §5.1) whose expression the fold machinery forces at its
@@ -162,23 +163,23 @@ it's a method.
 
 **The elimination form is fixed by the receiver's kind.** `fold_T` is data's elimination; the codata
 dual is **observation** (`E-Obs`); a function type's elimination is **application**, and its
-selector is the fixed keyword `value:`. So a send to a function-typed receiver applies it:
+selector is the fixed keyword `value:`.
 
-| Surface                 | Core             | Notes                                               |
-| ----------------------- | ---------------- | --------------------------------------------------- |
-| `f`                     | `f`              | The function value itself                           |
-| `f value: x`            | `f x`            | Apply — the surface's only application              |
-| `transform value: head` | `transform head` | Applies a function-typed _parameter_; no production |
+| Surface | Core  | Notes                                                                                             |
+| ------- | ----- | ------------------------------------------------------------------------------------------------- |
+| `f`     | `f`   | The function value itself                                                                         |
+| `f x`   | `f x` | Core application — reached by elaboration, not by a surface send (§3.6.1 of `surface-grammar.md`) |
 
-**This is the whole of surface application.** There is no `expr expr` production and no dedicated
-`value:` form: the keyword send already means "eliminate the receiver, then apply the arguments" —
-`fold` for data, observation for codata, application for a function type — so application is derived
-rather than added.
+**The surface has no receiver of function type.** A surface type is `atomType` (`surface-grammar.md`
+§3.8) — a name, never a shape — so no declaration can state `σ -> τ` and no expression can acquire
+one. An operation reference still _has_ a function type (`Ω`'s declared `FunType` chain), and the
+core applies it by juxtaposition; but there is no surface position that receives a function value,
+so `value:` names no surface declaration. Application is a core rule, derived from the elimination
+principle, not a surface form.
 
-**Parentheses re-open the chain.** A parenthesised expression is a `primary`, so
-`(f value: x)
-value: y` is two sends. A function type is single-parameter, so a multi-argument
-function value is curried and spelled by nesting — the same shape `Observer`'s single type slot
+**Parentheses re-open the chain.** A parenthesised expression is a `primary`, so `(f k: x) k: y` is
+two sends. The core's application is single-argument (a curried `FunType` chain), so a
+multi-argument function value is curried by nesting — the same shape `Observer`'s single type slot
 supports.
 
 ### 2.6 Arrays and Records
@@ -616,8 +617,8 @@ For recursive fields, the fold recurses automatically (the field is already fold
 **Codata map (lazy, O(1)):**
 
 ```lapis
-map map <in: (Any -> Any)>
-    head x -> x value: head
+map map
+    head x -> (x * 2)
 ```
 
 Elaborates to an unfold that wraps each observation with the transform:

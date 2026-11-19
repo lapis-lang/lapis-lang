@@ -68,7 +68,7 @@ import {
     MAX_FINITE_INHABITANTS,
 } from "./type_algebra.ts"
 
-import { DataType, FamilyType, isPatternCarrierType, type Type, Variant } from "./types.ts"
+import { DataType, isPatternCarrierType, type Type, Variant } from "./types.ts"
 
 import { enumeratePattern, makePatternCountEnv, typeUnionStrings } from "./pattern_lang.ts"
 
@@ -100,7 +100,7 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
     const all = type.allVariants()
     if (depth === 0) {
         return all
-            .filter((variant) => !variant.fields.some((field) => field.type instanceof FamilyType))
+            .filter((variant) => !variant.isRecursive())
             .flatMap((variant) => {
                 const sample = construct(variant, [], eval_, depth)
                 return sample ? [sample] : []
@@ -109,9 +109,7 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
     const shallower = samplesFor(type, depth - 1, eval_)
     const result: VariantVal[] = [...shallower]
     for (const variant of all) {
-        const recursiveCount = variant.fields.filter((field) =>
-            field.type instanceof FamilyType
-        ).length
+        const recursiveCount = variant.recursiveFields().length
         if (recursiveCount === 0) continue
         // One sample per recursive variant per shallower sample: recursive
         // fields draw from the shallower space (the last recursive position
@@ -145,10 +143,7 @@ export function samplesFor(type: DataType, depth: number, eval_: EvalTerm): Vari
  * field construction) also yields `undefined` — the sampler drops it.
  */
 function construct(
-    variant: {
-        name: string
-        fields: readonly { name: string; type: Type }[]
-    },
+    variant: Variant,
     shallow: readonly VariantVal[],
     eval_: EvalTerm,
     depth: number,
@@ -156,11 +151,11 @@ function construct(
 ): VariantVal | undefined {
     const argNames = variant.fields.map((_, i) => `f${i}`)
     const bindings = new Map<string, Value>()
-    const recursiveTotal = variant.fields.filter((field) => field.type instanceof FamilyType).length
+    const recursiveTotal = variant.recursiveFields().length
     let recursiveSeen = 0
     for (let i = 0; i < variant.fields.length; i++) {
         const field = variant.fields[i]!
-        if (field.type instanceof FamilyType) {
+        if (field.isRecursive()) {
             const isLast = ++recursiveSeen === recursiveTotal
             const value = isLast && sample ? sample : shallow[0]
             if (value === undefined) return undefined
@@ -1104,7 +1099,7 @@ function spaceUpToSize(
         }
         return variant.fields.every((field) => {
             const fieldType = field.type
-            if (fieldType instanceof FamilyType) return true
+            if (field.isRecursive()) return true
             // A data field is sampleable iff the carrier carries members:
             // variants (the space walk) or patterns (the token read) — a
             // bare carrier (no members) is a zero-inhabitant field, caught
@@ -1126,7 +1121,7 @@ function spaceUpToSize(
                 field,
             ) => {
                 const fieldType = field.type
-                if (fieldType instanceof FamilyType) return spaces.get(type) ?? []
+                if (field.isRecursive()) return spaces.get(type) ?? []
                 if (fieldType instanceof DataType && fieldType.variants.length > 0) {
                     // The field carrier's variant-member space at this size
                     // (the ≤ size−1 prefix, grown through the shared memo).

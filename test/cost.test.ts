@@ -38,15 +38,7 @@ import {
     TypeRegistry,
     unescapeNameComponent,
 } from "../src/index.ts"
-import {
-    DataType,
-    Family,
-    Field,
-    type RequiredCases,
-    Type,
-    type TypeCases,
-    Variant,
-} from "../src/core/types.ts"
+import { DataType, Family, Field, Type, type TypeCases, Variant } from "../src/core/types.ts"
 import {
     createNatStreamType,
     createNatType,
@@ -586,7 +578,7 @@ Deno.test("typeKind: a pass-local Type subclass classifies unknown, never crashe
         // The pass-local marker is outside the core universe — no generic
         // case table or structural map answers for it (mirrors the engine's
         // FoldRecType).
-        override dispatch<T>(_cases: RequiredCases<T>): T {
+        override dispatch<T>(_cases: TypeCases<T>): T {
             throw new TypeError("ForeignMarker is outside the Type universe")
         }
 

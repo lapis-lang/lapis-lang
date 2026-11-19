@@ -215,6 +215,34 @@ Where `Fᵢ(σ)` substitutes the fold result type σ for recursive positions in 
 The plan is staged so a runnable subset appears early, with the type system and elaboration honest
 from Stage 1 (avoiding the trap of bolting types onto a working evaluator after the fact).
 
+### The hybrid evaluation architecture (implemented, #25)
+
+The core calculus is a **one-pass executable grammar**: a production carries its semantic action, so
+parsing and checking are the same walk (`LCTypeCheck`, `LCEval` in `src/core/`). The surface
+language is deliberately the other shape — **parse to an AST, then consume that AST in named
+passes** (`src/surface/`). Three facts force the difference, and each was verified against the
+engine rather than assumed:
+
+- **Whole-program knowledge precedes elaboration.** A declaration's meaning depends on every other
+  declaration — which variants exist, which operations are in scope — and the surface has no
+  declaration ordering rule. A one-pass production cannot consult a declaration that appears later
+  in the file.
+- **The parsed form must outlive the parse.** The message chain (§3.3 of `surface-grammar.md`) has
+  no core counterpart, so the surface's meaning is computed over a retained representation rather
+  than in the parse callback.
+- **The retained `DerivationTree` is not that representation.** It records _where each `@rule`
+  matched_, not the shape of a production: a repeated production yields nested same-label nodes
+  carrying partial values, and a fixed-arity `seq` yields one node with no children. A pass
+  dispatching on those labels fires once per repetition and cannot distinguish a partial value from
+  a complete one. So the AST is built by the productions' own semantic actions, and `parseToTree` is
+  kept for what it is good at — source spans, diagnostics, and unparsing.
+
+Elaboration emits **the core's own concrete syntax**, not a core AST: an operation definition in `Ω`
+is already "concrete-syntax source text" (`OpSig.definition`), parsed on demand. A surface `fold`
+therefore becomes an `OpSig` whose `definition` is LC text, and the core's existing type checker and
+evaluator validate it with no new machinery. See `surface-grammar.md` §9 for the full pipeline
+diagram.
+
 ### Stage 0: Resolve Foundational Questions (doc-only)
 
 **Goal:** Pin down decisions that are cheap to make and expensive to change.

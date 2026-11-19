@@ -103,15 +103,7 @@ import {
     SemanticPass,
 } from "@lapis-lang/lang-forma"
 
-import {
-    CodataType,
-    DataType,
-    FamilyType,
-    Field,
-    type RequiredCases,
-    Type,
-    type TypeCases,
-} from "./types.ts"
+import { CodataType, DataType, Field, Type, type TypeCases } from "./types.ts"
 
 import { AbstractLC, type LCShape, TypeRegistry } from "./grammar.ts"
 
@@ -876,15 +868,12 @@ function typeKind(type: Type | undefined): "data" | "function" | "unknown" {
     try {
         return type.dispatch<"data" | "function" | "unknown">({
             fun: () => "function",
-            intersection: () => "unknown",
-            polymorphic: () => "unknown",
-            typeVar: () => "unknown",
-            family: () => "unknown",
             data: () => "data",
             codata: () => "data",
-            token: () => "unknown",
-            any: () => "unknown",
-            nothing: () => "unknown",
+            // Every other kind is unclassified. A default rather than seven
+            // declining arms — the answer is the same for all of them, and a
+            // kind added later lands here too.
+            default: () => "unknown",
         })
     } catch {
         // An undeclared Type subclass (a pass-local marker that escaped its
@@ -1024,7 +1013,7 @@ class FoldRecType extends Type {
      * structural reading of a marker exists, so there is no traversal
      * to run.
      */
-    override dispatch<T>(_cases: RequiredCases<T>): T {
+    override dispatch<T>(_cases: TypeCases<T>): T {
         throw new TypeError(
             `FoldRecType (${this.carrierName}) is a cost-engine marker outside ` +
                 `the core Type universe — no generic case table answers for it`,
@@ -1212,7 +1201,7 @@ class CostEngine extends AbstractLC<CostShape> {
         // was Family-typed; an ordinary data field stays itself. Distinguish
         // the two by the DECLARED field type: Family resolves to the carrier
         // (== dataType); a genuine data field names its own type.
-        return field.type instanceof FamilyType ? new FoldRecType(dataType.name) : field.type
+        return field.isRecursive() ? new FoldRecType(dataType.name) : field.type
     }
 
     /**
@@ -2572,7 +2561,7 @@ export class CostPass extends SemanticPass<CostPassShape> {
         record.bindings.forEach((binding, i) => {
             const field = variant.fields[i]
             if (field === undefined) return
-            env = field.type instanceof FamilyType
+            env = field.isRecursive()
                 ? env.extend(binding, foldRecDenotation(dataType.name, binding))
                 : env.extend(binding, denotationFor(binding, field.type))
         })
@@ -2711,7 +2700,7 @@ function foldSummaryFrom(
             variant.fields.forEach((field: Field, i: number) => {
                 const binding = handler.bindings[i]
                 if (binding === undefined) return
-                if (field.type instanceof FamilyType) {
+                if (field.isRecursive()) {
                     const recResult = SizeExpr.variable(RECURSION)
                     bodyCost = bodyCost.substitute(binding, recResult)
                     bodySize = bodySize.substitute(binding, recResult)
@@ -2748,18 +2737,14 @@ function foldSummaryFrom(
         perNodeDepth = perNodeDepth.max(patternCharge.depth)
     }
     const allVariants = dataType.allVariants()
-    const recursiveVariants = allVariants.filter((v) =>
-        v.fields.some((f) => f.type instanceof FamilyType)
-    )
+    const recursiveVariants = allVariants.filter((v) => v.isRecursive())
     let resultSize: SizeExpr
     let recurrence: string | undefined
     const isChain = recursiveVariants.length === 1 &&
-        recursiveVariants[0]!.fields.filter((f) => f.type instanceof FamilyType).length === 1
+        recursiveVariants[0]!.recursiveFields().length === 1
     if (isChain) {
         const recVariant = recursiveVariants[0]!
-        const baseVariants = allVariants.filter(
-            (v) => !v.fields.some((f) => f.type instanceof FamilyType),
-        )
+        const baseVariants = allVariants.filter((v) => !v.isRecursive())
         const baseSize = baseVariants.reduce<SizeExpr>((sum, v) => {
             const h = perHandler.find((ph) => ph.variantName === v.name)
             return sum.plus(h ? h.size : SizeExpr.ZERO)
