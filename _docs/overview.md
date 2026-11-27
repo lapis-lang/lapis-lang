@@ -401,16 +401,30 @@ total:
 | `_` (wildcard) | one arm that catches whatever the others don't — open variant sets | —             |
 
 A **parameterized fold** carries one input — here, an element to append. The spec carries only the
-type (`in: Int`): a fold takes at most one input, so there is nothing for a name to disambiguate —
-the arm binds it, like every field, as an extra trailing binding in the arm's binding list. The type
-gates the call site (`xs append: 3`). Recursive positions arrive as partially-applied continuations:
-give the input and the traversal continues:
+type (`in: Int`); the arm names the input with a binding after the variant's fields:
 
 ```lapis
 fold append <in: Int, out: Family>
-    Nil v -> Cons head: v rest: Nil
-    Cons head rest v -> Cons head: head rest: (rest append: v)
+    Nil in -> Cons head: in rest: Nil
+    Cons head rest in -> Cons head: head rest: (rest append: in)
+```
 
+**The carrier is not that binding.** `append` is declared inside `data List`, so its first argument
+is the list; `in` names the _second_ argument, the `in:` value. The elaborated definition is
+therefore `λe:List. λ<n>:Int. fold_List e {…}`, and that binding is a lambda binding, not a handler
+binding — bindings beyond `Cons`'s two fields never enter the handler's positional list. A fold
+without `in:` (`fold size <out: Int>`) has the carrier alone, so its arms bind only fields.
+
+**The field bindings spell their fields' names.** An arm head is a pattern, so `Cons head rest in`
+names `Cons`'s declared `head` and `rest` and then the parameter; `Cons h r in` would be rejected.
+`in` itself has no declaration to agree with, so the language fixes that one word.
+
+At most one `in:` is legal: an operation takes the receiver and one `in:` value, so the arity is one
+or two and a second `in:` is rejected rather than silently dropped. The type gates the call site
+(`xs append: 3`). Recursive positions arrive as partially-applied continuations: give the input and
+the traversal continues:
+
+```lapis
 xs append: 3      /* with input — called as a method; without input, read as a property */
 ```
 
@@ -773,10 +787,10 @@ data Num
     N value: Int
 
     fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
-        N value other -> Num N: value + other value
+        N value -> Num N: value + in value
 
     fold multiply <in: Self, out: Self, properties: (distributive: #add)>
-        N value other -> Num N: value * other value
+        N value -> Num N: value * in value
 ```
 
 Declare `distributive`, and fusion — Horner's rule — is the compiler's job, not yours. Declare
@@ -810,17 +824,17 @@ supplies a default that conforming types inherit when they don't declare the ope
 protocol Ordered
     fold compare <in: Self, out: Int>
     fold lessThan <in: Self, out: Bool>
-        (self compare: other) < 0
+        (self compare: in) < 0
 
 data Num
     N value: Int
 
     satisfies: Ordered
     fold compare <in: Self, out: Int>
-        N value other -> value - other value
+        N value -> value - in value
 ```
 
-A default body composes operations over `self` and may read the `in:` value as `other` — it can't
+A default body composes operations over `self` and may read the `in:` value as `in` — it can't
 dispatch on a variant, because a protocol never sees its conformers' variants. Only `fold` and `map`
 members take a default.
 
@@ -1655,9 +1669,8 @@ is a real finding for the spec:
     `syntax-design.md` §"Field Transformation"/§"Behavior"/§"Query", and `users/rationale.md`
     §"Query".
 
-30. **A protocol member is a kind-marked signature with an optional default; the default binds
-    `other`; `between:and:` is retired.** Three defects in one construct, none needing new
-    semantics.
+30. **A protocol member is a kind-marked signature with an optional default; the default binds `in`;
+    `between:and:` is retired.** Three defects in one construct, none needing new semantics.
 
     **(a) The kind keyword is required.** `protocolItem` listed the five declaration forms, so a
     bodyless member matched nothing — `foldDecl`'s body is compulsory, and there is no signature
@@ -1669,13 +1682,13 @@ is a real finding for the spec:
     production is semantically wrong. Two of the four corpus sites already spelled `fold`; the other
     two were respelled.
 
-    **(b) A default body binds `self` and `other` — and is an expression, not an arm list.** A
-    protocol cannot see its conformers' variants, so a default has no arm head and no bindings; it
-    can only compose operations over `self`. The `in:` value lands in a fixed name, `other`, bound
-    exactly when the member declares `in:` — the same machinery-supplied binding relationship a fold
-    arm has to its variant's fields (`src/surface/grammar.ts`). Its kind-dependence is what makes
-    defaults work at all: `equals` can be derived from `compare`, and that derivation is the reason
-    a protocol carries bodies rather than only signatures. A default may carry contract clauses and
+    **(b) A default body binds `self` and `in` — and is an expression, not an arm list.** A protocol
+    cannot see its conformers' variants, so a default has no arm head and no bindings; it can only
+    compose operations over `self`. The `in:` value lands in a fixed name, `in`, bound exactly when
+    the member declares `in:` — the mirror of a fold arm's bindings, except that a default supplies
+    them with no head to write (`elaboration.md` §3.3). Its kind-dependence is what makes defaults
+    work at all: `equals` can be derived from `compare`, and that derivation is the reason a
+    protocol carries bodies rather than only signatures. A default may carry contract clauses and
     they are enforced around it, so an installed default is not a weaker operation than a declared
     one.
 
@@ -2061,9 +2074,9 @@ is a real finding for the spec:
     §12.57.
 
 48. **A fold's `in:` value is bound by no rule, so its signature and its definition disagree.** The
-    emitter produces exactly one lambda (`\e:T.`) whatever `in:` says, and puts any further name in
+    emitter produced exactly one lambda (`\e:T.`) whatever `in:` said, and put any further name in
     the handler's binding list; the core's handler loop walks `variant.fields`, so a surplus binding
-    binds _nothing_. The prototype binds a `Family` field to a **continuation** when the fold has an
+    bound _nothing_. The prototype binds a `Family` field to a **continuation** when the fold has an
     `in:` and to the plain folded value otherwise (`Data.mts`); the core has only the second reading
     (`eval_grammar.ts`'s variant arm, `lc.md` §3.1 `E-Fold`). Consequence:
     `fold add <in: Self, out: Self>` declares arity 2 and emits arity 1. Correctness is provable in
@@ -2071,7 +2084,20 @@ is a real finding for the spec:
     `\e:Nat. \other:Nat. fold [Nat] e { Zero() -> other, Succ(p) ->
     Succ(p) }` returns
     `Succ(Succ(Succ(Zero())))` for 2 + 1 — so the missing piece is the emitter, not the calculus.
-    **Owner:** [#130](https://github.com/lapis-lang/lapis-lang/issues/130).
+
+    **Closed by fix:** the emitter now writes the carrier lambda plus one lambda per `in:`,
+    annotated from the spec's type, and the handler list keeps exactly the variant's fields. The
+    parameter's name comes from the arm heads' surplus binding, which is what the surface already
+    taught (`Zero other -> other`) — so the reconciliation needed no core change, and the
+    "continuation" reading is retired. The resolver now enforces both ends of the count, the arms'
+    agreement on the name (§12.60), and the spec record's key multiplicity (§12.56). **Owner:**
+    [#130](https://github.com/lapis-lang/lapis-lang/issues/130).
+
+    Two things this ruled out, recorded so they are not reinvented. The carrier is **always** the
+    first parameter: `size <out: Int>` declares one argument and `add <in: Self>` two, so an `in:`
+    is a _second_ argument and not a replacement for the carrier. And there is **at most one** `in:`
+    — `surface-syntax.md` §2.3 pins the selector at one keyword part — so "an arity-n fold" is not a
+    thing the surface can spell, and a fold's arity is one or two.
 
 49. **Binary operators have no core counterpart, so every infix expression elaborates to text the
     core rejects.** `elaboration.md` §2.4 requires `a + b` → `add(ℰ(a), ℰ(b))`; the emitter instead
@@ -2169,7 +2195,7 @@ is a real finding for the spec:
     only when the declared result is that same function type (`mkAdder : <1> → Nat → Nat` is a real
     operation, not an over-application). **Owner:** closed by fix in
     [#133](https://github.com/lapis-lang/lapis-lang/issues/133); that a function-typed _result_ is
-    legal is stated in `lc.md` §2.4.
+    legal is stated in `lc.md` §2.5.
 
 58. **A fold's `in:` never reached its own definition.** `elaborate.ts` computed `inType` and used
     it only as the declared `paramTypes` entry; the emitted lambda was hard-coded
@@ -2183,6 +2209,118 @@ is a real finding for the spec:
     This is a _defect_, not a ruling on what `in:` means. `in: Type` names the fold's value argument
     and an arm binds it as a trailing binding (`syntax-design.md`'s syntax summary,
     `surface-grammar.md` §4.1), so `fold add <in: Self, out: Self>` declaring a second operand is
-    intended. Making the emitter honour it — one lambda per declared parameter, and the tail bound
-    in the arm — is §12.48, still open. Until then a fold declaring more than its carrier as its
-    parameter is reported rather than silently mis-typed.
+    intended. Making the emitter honour it — the carrier lambda **plus** one lambda per `in:`, and
+    the tail bound in the arm — is §12.48, still open. Until then a fold declaring more than its
+    carrier as its parameter is reported rather than silently mis-typed.
+
+59. **`prelude.md` §3.2 contradicts its own declaration and the resolver.** The declaration is
+    `data Nat / Zero / Succ pred: Family` (`prelude.md` lines 129 and 210), but the `add` example
+    below it constructs `Succ value: (p add: other)` and the prose asserts "`Succ` declares one
+    field, `value`, so `Succ value:` is the only spelling". Both cannot hold: the field is `pred`,
+    and `pred` is what every other passage in the corpus writes (`overview.md` §3.1,
+    `syntax-design.md`, `users/rationale.md`). Verified on `master` at `ca7474f`: the prelude's own
+    `add` resolves `selector-mismatch` and elaborates to
+    `\e:Nat. fold [Nat] e { Zero(other) -> other, Succ(p other) -> Succ() }` — the construction's
+    argument is dropped, because `value` is not a declared field. §12.34's selector-equality rule
+    (ratified for #84) makes the corpus's flagship example an **undeclared constructor**.
+
+    The `value:` spelling is a leftover of the retired `value:` application selector (§12.27c, and
+    §12.34's ratifying note): a construction's keyword sequence is its selector, so a name read
+    there is a _field_, not an application. Fixing the example to `Succ pred: (p add: other)` makes
+    it agree with the declaration and with the rest of the corpus. **Owner:** closed by fix in
+    [#130](https://github.com/lapis-lang/lapis-lang/issues/130); the same sweep corrected
+    `users/rationale.md` §4, whose `Succ (pred other)` was a construction with no keyword selector
+    at all.
+
+60. **An arm head's binding count and names are unvalidated against the variant.** Two rules are
+    required of a fold arm, and only the first is checked.
+
+    **The count is exact.** An arm head binds `variant.fields.length` names, plus one for the fold's
+    `in:` when it declares one. Without the `in:` fix (#12.48) a surplus binding has no meaning, and
+    the resolver enforced only a _minimum_, so `Nil extra -> Nil` over a fold declaring no `in:`
+    resolved `ok` and elaborated to `Nil(extra) -> Nil()` — a handler binding the core's `E-Fold`
+    can never supply a value for. A count that is not exactly
+    `variant.fields.length + (1 if the fold declares an in: else 0)` is `arity-mismatch`, as is a
+    pair of arms naming the parameter differently. **Owner:** closed by fix in
+    [#130](https://github.com/lapis-lang/lapis-lang/issues/130).
+
+    **The names are the fields'.** Each binding for a field must be that field's declared name, `_`
+    discards a field without naming it, and the only non-field binding is the fold's `in:` argument,
+    which no declaration constrains and so is fixed to `in`. A case arm is a pattern-matching form,
+    so a head that renames its subjects is not a destructuring of the declared variant. `M x y -> x`
+    over `M a: Any b: Any` breaks the rule and resolves `ok` today; `surface-grammar.md` §4.1 states
+    it and [#143](https://github.com/lapis-lang/lapis-lang/issues/143) owns the enforcement.
+
+61. **A fold whose result type differs from its carrier types as `Any`.** `T-Fold`'s σ fixpoint is
+    seeded at the carrier (`typing_grammar.ts`'s `parseToFixpoint(dataType, …)`, with the comment
+    "Start at the DataType itself (not Any) because recursive fields have declared type =
+    DataType"), and the join is `join(currentSigma, bodyType)`. Since `join(s, t)` returns `Any`
+    whenever neither operand is a subtype of the other (`subtyping.ts`), the seed **poisons every
+    non-carrier result**: the first round joins `Nat` with `Bool` and gets `Any`, `Any` absorbs the
+    rest, and the fixpoint converges there. Verified with no code change — this is pre-existing:
+
+    | Term                                                   | Result    |
+    | ------------------------------------------------------ | --------- |
+    | `fold [Nat] Zero() { Zero() -> Zero(), Succ(p) -> p }` | `Nat`     |
+    | `fold [Nat] Zero() { Zero() -> T(), Succ(p) -> T() }`  | **`Any`** |
+
+    The seed is a starting _estimate_ for a recursive field's type, not an operand of the join, so
+    it must not enter the lattice. What it should be is the arm bodies' common type, refined to a
+    fixpoint — the seed only has to be a value the first round's re-parse can use, and the current
+    choice makes the declared `out:` unreachable for every fold whose result is not its carrier.
+
+    This is not cosmetic. `prelude.md` §3.1 declares `equals <in: Self, out: Bool>`,
+    `lessThan`/`atMost`/`greaterThan`/`atLeast <in: Self, out: Bool>`, and §3.5 declares
+    `isEmpty <out: Bool>`, `size <out: Int>`, `length <out: Int>` — every one a non-carrier result,
+    so every one infers `Any` and is then rejected by `opWellFormedness` as "returns Any, which is
+    not <: Bool". It also means a law over a predicate fold cannot be checked, since the operation
+    that carries the law never installs. **Owner:**
+    [#140](https://github.com/lapis-lang/lapis-lang/issues/140).
+
+62. **An arm binding can shadow the fold's `in:` parameter.** The `in:` parameter is a curried
+    lambda whose scope encloses every arm, so a field binding that reuses the parameter's name
+    shadows it and one identifier means two different things in one fold. Verified on
+    `mlhaufe/issue130`: `data P / Z / M a: Any in: Any` with
+    `fold f <in: Self, out: Any> / Z in -> in / M a in in -> in` resolves `ok` and emits
+    `\e:P. \in:P. fold [P] e { Z() -> in, M(a in) -> in }`, where `M`'s `in` is the field and `Z`'s
+    is the parameter.
+
+    §12.60's field-name rule removes every author-chosen collision, leaving exactly one: a field
+    literally named `in`, which now collides with the parameter's fixed name. The language has no
+    other shadowing form, and "names are declared, never bound" (§12.6) makes a second declaration
+    in one scope suspicious, so the consistent answer is to reserve `in` from field declarations;
+    the alternative (the inner name wins) is defensible but must then be stated. **Owner:**
+    [#141](https://github.com/lapis-lang/lapis-lang/issues/141).
+
+63. **The surface can name a binder `in`, and the core cannot spell it.** `LC_RESERVED_WORDS` is
+    exactly `["in"]` (`src/core/grammar.ts`), because the core's `let x:σ = t in u` delimiter is
+    whitespace-adjacent to a variable position: `let x:Nat = in in in` would parse either way, so
+    `ident` refuses the word outright. The surface has no such collision and so had no such rule:
+    `in` was an ordinary identifier, so a fold reading
+    `fold pick <in: Self, out: Self> / Zero -> in` emitted `\e:Nat. \in:Nat. …`, which the core
+    cannot parse — on the path of every two-argument fold, and a **field** named `in`
+    (`M a: Any in: Any`) hit it too.
+
+    **Closed by adopting the core's own reading.** The surface now treats `in` as a keyword, like
+    `self`, `old`, `prev`, and `aux`: a machinery-supplied name read from a body and never declared
+    in an arm head or a field. With the word un-nameable, no surface term can produce a binder the
+    core must reject, and the two sides agree on the one reservation the core makes. The emitter
+    still spells the binder differently — `in_`, made hygienic against the arm's own field bindings
+    — because the surface keyword and a core identifier are different lexical classes and the bridge
+    between them is elaboration's job. **Owner:** closed by fix in
+    [#141](https://github.com/lapis-lang/lapis-lang/issues/141); it retires
+    [#142](https://github.com/lapis-lang/lapis-lang/issues/142), whose emitter-rename option was the
+    interim answer.
+
+64. **`aux` reads its operand as syntax, so a binding named like the auxiliary fold is unreachable
+    through it.** `referenceProd` matches `keyword("aux")`, `hws1`, `ident` **before** a plain
+    identifier, so `aux length` always denotes the auxiliary fold named `length` — never an arm
+    binding called `length`. Verified: `fold f <aux: #size, out: Any>` with
+    `Cons length rest -> (aux length)` parses and resolves, and the body reads the aux fold. Unlike
+    `in`, this names no keyword-free alternative: `aux` is a keyword whose operand is syntax, so the
+    reading is fixed by the grammar and cannot be renamed away, and `in`'s fix (reserve the word)
+    does not apply because the collision is between an operation name and a field, not between two
+    spellings of one argument. The answers are "rename one of the two" or a rule forbidding the
+    collision. `surface-grammar.md` §4.1 records the hazard; #107 (`aux d` vs `aux #d`) still owns
+    the operand's _form_, and this finding does not depend on which wins. **Owner:** recorded here;
+    the collision rule belongs with #107's spelling decision.

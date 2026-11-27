@@ -82,7 +82,7 @@ Deno.test("Whitespace: a tab on an otherwise blank line is rejected", () => {
 })
 
 Deno.test("Whitespace: a tab inside a comment is accepted", () => {
-    // A comment's content is free text (§2.4) — the ban is on code position.
+    // A comment's content is free text (`surface-grammar.md` §2.4) — the ban is on code position.
     assertEquals(parses("data Stack\n    Empty\n/* a\tb */\n"), true)
 })
 

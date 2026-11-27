@@ -2,7 +2,7 @@
  * LC Operation Symbols — the operation signature environment `Ω` and named
  * operation application support.
  *
- * See _docs/theory/lc.md §2.2, §2.4, §3 (E-Op/E-OpArg), §5.8 (T-Op).
+ * See _docs/theory/lc.md §2.2, §2.4, §2.5 (Ω's conditions), §3 (E-Op/E-OpArg), §5.8 (T-Op).
  *
  *   Ω ::= ∅ | Ω, op:σ₁→...→σₙ→τ    operation signature (name ↦ argument/result types)
  *
@@ -54,7 +54,8 @@ import { FunType, type Type } from "./types.ts"
 
 /**
  * The signature/definition well-formedness condition that a sealed operation
- * carries (lc.md §2.4): the definition types as `paramTypes → resultType`.
+ * carries (lc.md §2.5, well-formedness): the definition types as
+ * `paramTypes → resultType`.
  *
  * The registry cannot check this itself — checking requires the type checker,
  * and `ops.ts` cannot import it (cycle: `typing_grammar` → `grammar` →
@@ -72,7 +73,7 @@ export interface OpWellFormedness {
 
 /**
  * An operation whose definition has been validated against its signature —
- * the definition types as `paramTypes → resultType` (lc.md §2.4).
+ * the definition types as `paramTypes → resultType` (lc.md §2.5, well-formedness).
  *
  * Produced exclusively by `OpRegistry.declare` (which runs the injected
  * well-formedness check); every entry the grammars read from `Ω` has this

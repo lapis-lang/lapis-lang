@@ -95,7 +95,7 @@ rejects, so `Int = -?[0-9]+` anchors while `.*` does not), and the term types as
 the payload is a _pattern_ (the constructor), not a term. A delimiter `"` inside the payload is
 escaped (`\"`). The bare `Ident` atom for a registered pattern type (§2.3's token) remains the
 registry-gated short form; the two routes yield the same value shape. `match` is reserved from
-operation names (`BUILTIN_CALL_FORMS`, §2.4) so the call shape can never be shadowed by an Ω entry.
+operation names (§2.5's reserved call forms) so the call shape can never be shadowed by an Ω entry.
 The surface language's comment form (`/* ... */` — `surface-syntax.md` §1.4) has no core presence:
 comments are consumed before the surface-to-core elaboration runs, so LC source carries none, and
 the quoted pattern payload here is the one DQ form in the calculus's own concrete syntax.
@@ -129,13 +129,18 @@ signature enters `Ω`; its declared `properties` enter `E` after best-effort scr
 optionally parameterized by them: typing `Ω; Γ ⊢ t : σ` and algebraic equivalence `Ω; E ⊢ t ≡ u`
 (§7).
 
-**Ω's well-formedness condition.** An entry `op: σ₁→...→σₙ→τ ∈ Ω` carries its defining term
-`def(op)`, and the two must agree: `∅ ⊢ def(op) : σ₁ → ... → σₙ → τ`. The condition is part of
-declaring an operation (the entry is installed only after the check), not a typing rule — T-Op
-_trusts_ the entry's `τ` and E-Op executes its `def(op)`, so without the condition a mismatched
-declaration would type-check as one type and evaluate as another: a Preservation violation through Ω
-rather than through a step. Checking a definition requires the typing machinery, which is why the
-condition is a side condition on `Ω`'s construction rather than a rule in §5.
+### 2.5 Operation environments (`Ω` and `E`)
+
+The two environments §2.4 introduces each carry conditions of their own. `E`'s laws are §7's
+subject; this section pins what an entry in `Ω` is and what must hold before one is installed.
+
+**Well-formedness.** An entry `op: σ₁→...→σₙ→τ ∈ Ω` carries its defining term `def(op)`, and the two
+must agree: `∅ ⊢ def(op) : σ₁ → ... → σₙ → τ`. The condition is part of declaring an operation (the
+entry is installed only after the check), not a typing rule — T-Op _trusts_ the entry's `τ` and E-Op
+executes its `def(op)`, so without the condition a mismatched declaration would type-check as one
+type and evaluate as another: a Preservation violation through Ω rather than through a step.
+Checking a definition requires the typing machinery, which is why the condition is a side condition
+on `Ω`'s construction rather than a rule in §5; §5.8 is where `T-Op` reads such an entry.
 
 The agreement is **component-wise, not merely arity-and-result**: each of `def(op)`'s parameter
 types must equal its declared `σᵢ` (in the lattice, mutual subtyping — a parameter _is_ the declared
@@ -144,6 +149,18 @@ is legal and is the one case where `def(op)` has more lambdas than `n`
 (`mkAdder : <1> → Nat → Nat`); there the residue must equal `τ`, not merely be `<: τ`, since `τ` is
 what T-Op reports to callers. `FunType <: Any` by S-Top, so a result of `Any` cannot distinguish an
 over-applied definition from a correct one — the residue check is what does.
+
+**Reserved call forms.** `match(pₖ)` is the calculus's one built-in call shape (§2.2), so it is
+reserved from operation names: an `Ω` entry named `match` would be indistinguishable from the
+language form and would shadow it for every subsequent parse. Because reserved names can never be
+operations, a scanner looking for operation references may exclude them without hiding a real one.
+
+**Acyclicity.** `Ω` is acyclic by construction: an entry's `def(op)` may reference only operations
+installed **before** it, so self-reference, forward reference, and cycles are all rejected at
+declaration. This is a stratification of `Ω` by declaration order, and it is what makes E-Op's
+unfolding terminate without a fuel argument (§6.1's progress argument relies on it). Its cost is
+that no operation may be recursive — see `overview.md` §12.50 for the open question of whether that
+is the right rule.
 
 **Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
 `primitive` (pinned by the language definition — builtin operations with fixed law sets, authority
@@ -155,7 +172,7 @@ to declare. Soundness of law-directed rewriting is **relative to E**; the `disch
 `primitive` tiers are established by their mechanisms, so only `asserted` laws carry declaration
 risk. See [`design-decisions.md`](../design-decisions.md) (Laws).
 
-### 2.5 Notation
+### 2.6 Notation
 
 | Notation                 | Meaning                                                                                |
 | ------------------------ | -------------------------------------------------------------------------------------- |
@@ -458,7 +475,7 @@ form is preserved through elaboration so that operation identity survives substi
 (§2.2).
 
 **Progress note:** `op(v₁, ..., vₙ)` steps by E-Op whenever all arguments are values; a non-value
-argument steps by E-OpArg. Ω is acyclic by construction (§2.4), so the unfolding of nested op
+argument steps by E-OpArg. Ω is acyclic by construction (§2.5), so the unfolding of nested op
 applications terminates by induction on declaration order.
 
 ## 6. Soundness
@@ -483,7 +500,7 @@ value or $t \to t'$ for some $t'$.
 - **Op application:** `op(t₁, ..., tₙ)` — a non-value argument steps by E-OpArg (leftmost); when all
   arguments are values, the application steps by E-Op (applying the definition, which is a
   well-typed term by T-Op's signature premise). The unfolding terminates: Ω is acyclic by
-  construction (§2.4), so nested op applications terminate by induction on declaration order.
+  construction (§2.5), so nested op applications terminate by induction on declaration order.
 
 ### 6.2 Preservation
 
@@ -505,7 +522,7 @@ $\Gamma \vdash t' : \sigma$.
   (the bound) ensures validity.
 
 - **E-Op:** `op(v₁, ..., vₙ) → def(op) v₁ ... vₙ`. By T-Op, `Ω(op) = σ₁ → ... → σₙ → τ` with
-  `vᵢ : σᵢ`, and `def(op)` types as `σ₁ → ... → σₙ → τ` (the definitional-sugar premise, §2.4) — so
+  `vᵢ : σᵢ`, and `def(op)` types as `σ₁ → ... → σₙ → τ` (the definitional-sugar premise, §2.5) — so
   the application's type is τ by T-App, iterated over the arguments. Result is `τ`.
 
 - **E-OpArg:** `op(v₁, ..., tᵢ, ..., vₙ) → op(v₁, ..., tᵢ', ..., vₙ)` with `tᵢ → tᵢ'`. By T-Op's

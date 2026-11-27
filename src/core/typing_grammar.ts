@@ -1289,7 +1289,7 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
 
     /**
      * The signature/definition well-formedness checker for `OpRegistry.declare`
-     * (lc.md §2.4): an operation's definition must type as
+     * (lc.md §2.5, well-formedness): an operation's definition must type as
      * `paramTypes → resultType` before it enters Ω.
      *
      * Injected by the caller because the registry cannot check this itself

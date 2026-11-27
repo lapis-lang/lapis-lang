@@ -646,7 +646,7 @@ implementation; one without is abstract (required).
 
 A default body is an expression rather than an arm list — a protocol cannot see its conformers'
 variants, so a default composes operations over `self`. It may read `self` and, when `in:` is
-declared, `other`, and may be preceded by contract clauses. Only `fold` and `map` members may be
+declared, `in`, and may be preceded by contract clauses. Only `fold` and `map` members may be
 defaulted; `unfold` members declare a constructor the protocol cannot supply, and `merge`/`scan` are
 fusion directives.
 

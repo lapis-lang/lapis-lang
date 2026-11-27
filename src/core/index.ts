@@ -47,7 +47,8 @@ export {
     VariantVal,
 } from "./values.ts"
 
-// Laws (lc.md §2.4, §7.2 — the equational theory environment E)
+// Laws (lc.md §2.4 (the `E` environment), §2.5 (authority), §7.2 — the equational
+// theory environment)
 export {
     LAW_KINDS,
     type LawDecl,
@@ -85,7 +86,7 @@ export {
 // Subtyping (lc.md §4)
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
-// Operation symbols (lc.md §2.2, §2.4 — Ω environment + named application)
+// Operation symbols (lc.md §2.2 (op form), §2.4 (Ω), §2.5 (well-formedness, acyclicity))
 export { OpDeclarationError, OpRegistry, OpSig, scanOpReferences } from "./ops.ts"
 export type { CheckedOpSig } from "./ops.ts"
 

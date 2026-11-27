@@ -2,7 +2,8 @@
  * Operation symbols tests — verify the Ω environment (OpRegistry), the
  * `op(t₁, ..., tₙ)` term form (opProd), T-Op (typing), and E-Op (evaluation).
  *
- * See _docs/theory/lc.md §2.2 (op form), §2.4 (Ω), §3 (E-Op/E-OpArg), §5 (T-Op).
+ * See _docs/theory/lc.md §2.2 (op form), §2.4 (Ω), §2.5 (well-formedness), §3 (E-Op/E-OpArg), §5
+ * (T-Op).
  */
 
 import {
@@ -439,7 +440,7 @@ Deno.test("E-Op: escaping closure — op returning a function, applied later", (
     assertEquals(val.variantName, "Succ")
 })
 
-// ── opWellFormedness: the signature/definition agreement (lc.md §2.4) ────────
+// ── opWellFormedness: the signature/definition agreement (lc.md §2.5) ────────
 //
 // `declare` is the only producer of a `CheckedOpSig`, and T-Op trusts its
 // `resultType` while E-Op executes the raw `definition`. So every way a

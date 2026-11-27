@@ -46,13 +46,13 @@ one judgement rather than two that could drift. A declaration that fails is abse
 named in `errors`; the rest of the program stays usable.
 
 The single failure reason is `not-well-formed`: the emitted definition does not type as
-`paramTypes → resultType` (`lc.md` §2.4). One reason covers every way the two can disagree, because
-they are one condition — the signature comes from the spec (`in:` value, `out:` result), the
-definition from the arms, and `Ω` requires agreement component-wise. It also covers what the core's
-declaration checks reject beyond typing: a recursive body, whose self-reference `Ω`'s acyclicity
-rule forbids. Reporting recursion as an elaboration failure is honest — the operation genuinely
-cannot be installed — but it is not the language's final answer for recursion, which is a separate
-decision.
+`paramTypes → resultType` (`lc.md` §2.5, well-formedness). One reason covers every way the two can
+disagree, because they are one condition — the signature comes from the spec (`in:` value, `out:`
+result), the definition from the arms, and `Ω` requires agreement component-wise. It also covers
+what the core's declaration checks reject beyond typing: a recursive body, whose self-reference
+`Ω`'s acyclicity rule forbids. Reporting recursion as an elaboration failure is honest — the
+operation genuinely cannot be installed — but it is not the language's final answer for recursion,
+which is a separate decision.
 
 ### 1.3 Elaboration is Semantics-Preserving
 
@@ -247,15 +247,27 @@ A surface `data` declaration elaborates to:
 5. **Merge declarations**: see §4.5.
 6. **Satisfies clause**: see §3.5.
 
-**A fold's `in:` is a parameter, not its carrier.** The emitted definition is always
-`λe:<declaring type>. fold_T e {…}` because the arms destructure the declaring type's variants, so
-the fold's parameter is fixed by where it is declared. An `in:` that names some other type declares
-a signature whose parameter disagrees with the definition, which is `not-well-formed` at elaboration
-rather than a type error inside generated text.
+**A fold's carrier is always its first parameter; `in:` adds a second.** A `fold` declared inside
+`data T` is an operation over `T`: the arms destructure `T`'s variants, so the emitted definition
+always begins `λe:T.`. An `in:` does not replace that argument — it declares **one more**, which is
+what makes `add <in: Self>` an operation of two arguments while `size <out: Int>` has one:
 
-What an `in:` _is_ — the fold's value argument, and, beyond the variant's fields, what an arm's
-trailing binding names — is `surface-syntax.md` §1 and `surface-grammar.md` §4.1's question, not
-this one.
+```
+size <out: Int>       →  λe:T.           fold_T e {…}     : T → σ
+add  <in: Self, …>    →  λe:T. λin:T.    fold_T e {…}     : T → T → σ
+```
+
+`surface-syntax.md` §2.3 bounds the count: a selector has one keyword part at most, because an
+operation takes the receiver and **at most one** `in:` value. So an operation's arity is one
+(carrier only) or two (carrier plus `in:`) — never three.
+
+The extra lambda's _name_ is fixed by the machinery, and the core never sees it in a handler's
+binding list: an arm head binds exactly the variant's fields, while the `in:` value is supplied as
+`in` and read from the body (`surface-grammar.md` §4.1). That is why `Zero -> in` elaborates to
+`λe:T. λ<core-name>:T. fold_T e { Zero() -> <core-name>, … }` with no change to the core's `E-Fold`.
+The `<core-name>` is not `in`: the core reserves that word (`LC_RESERVED_WORDS`, its `let … in`
+delimiter) and admits only `[A-Za-z0-9_]` in an identifier, so elaboration picks a core-legal
+spelling that also avoids the arm's own field bindings.
 
 **Example:**
 
@@ -342,7 +354,7 @@ signatures that a type must satisfy. Conformance is checked structurally.
 protocol Eq
     fold equals <in: Self, out: Bool>
     fold notEquals <in: Self, out: Bool>
-        (self equals: other) not
+        (self equals: in) not
 ```
 
 Elaborates to a constraint `Eq` requiring a fold `equals : Self → Bool` on the conforming type, and
@@ -360,12 +372,13 @@ declare the operation itself.
 `unfold Identity` requires each conforming type to declare a constant constructor for its identity
 element (§3.1). A `merge`/`scan` member is a fusion directive and elaborates to nothing of its own.
 
-**A default body's scope is `self` and `other`.** A default body is not an arm — the protocol cannot
-see its conformers' variants — so it has no arm head and no bindings. It may read `self` (the
-receiver) and, when the member declares `in:`, `other` (that input value). Both names are supplied
-by the machinery, exactly as a fold arm's bindings are supplied by its variant. A body that mentions
-`other` when the member declares no `in:` is an unbound-name error (`src/surface/grammar.ts`,
-`specEntry`s).
+**A default body's scope is `self` and, when the member declares `in:`, a fixed `in`.** A default
+body is not an arm — the protocol cannot see its conformers' variants — so it has no arm head and no
+bindings. It may read `self` (the receiver) and, when the member declares `in:`, `in` (that input
+value). Unlike an arm head, these names are **supplied by the machinery**, not chosen by the author:
+a default has no head to name them in, so the same word must mean the same thing in every protocol.
+A body that mentions `in` when the member declares no `in:` is an unbound-name error
+(`src/surface/grammar.ts`, `specEntry`s).
 
 **A default may carry contract clauses**, and they are enforced around it: an installed default runs
 its `demands:` before the body and its `ensures:`/`rescue:` after, exactly as a declared operation
@@ -514,9 +527,9 @@ data Num
     N value: Int
     satisfies: Ordered
     fold equals <in: Self, out: Bool>
-        N value other -> value = other value
+        N value -> value = in value
     fold compare <in: Self, out: Int>
-        N value other -> value - other value
+        N value -> value - in value
 ```
 
 Elaborates to:

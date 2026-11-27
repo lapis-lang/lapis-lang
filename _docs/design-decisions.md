@@ -464,17 +464,58 @@ of "is this well formed" is the defect, not the fix.
   (`in:` value, `out:` result) and the definition from the arms, so an `in:` that names something
   other than what the emitted lambda takes is the same failure as a mismatched result type; one
   reason, because `Ω` requires agreement component-wise. It also covers a recursive body, whose
-  self-reference `Ω`'s acyclicity rule forbids (#131). Reporting recursion as an elaboration failure
-  is honest — the operation genuinely cannot be installed — but it is not the language's answer for
-  recursion; that is a separate decision. Honouring a multi-parameter `in:` in the emitted
-  definition is §12.48's work, not `in:`'s meaning: `in:` names the fold's value argument and an arm
-  binds it as a trailing binding.
+  self-reference `Ω`'s acyclicity rule forbids. Reporting recursion as an elaboration failure is
+  honest — the operation genuinely cannot be installed — but it is not the language's answer for
+  recursion; that is a separate decision.
+- **A fold's arity is one or two, and `in:` is the second argument.** The carrier is always the
+  first parameter (the arms destructure the declaring type's variants), and at most one `in:`
+  follows it (`surface-syntax.md` §2.3). The emitter writes one annotated lambda per declared
+  parameter, and an arm head's binding beyond the variant's field count _names_ that lambda — it is
+  not a handler binding, because the core supplies values for the variant's fields only. The
+  resolver enforces the count exactly.
+- **A fold arm's head is a pattern, so it spells the fields' names.** Each binding for a variant's
+  field must be that field's declared name; `M a b -> …` is the only spelling for `M`'s two fields,
+  and `M x y -> …` is an error rather than a rename. This is the construction rule read the other
+  way: a construction's keyword sequence equals the declared fields, so a fold arm's binding
+  sequence does too. `_` discards a field without naming it. The reason is uniform — a case arm _is_
+  a pattern-matching form, and a pattern that renames its subjects is not a destructuring of the
+  declared variant but a fresh set of bindings that happens to have the right arity. An **unfold**
+  arm is exempt: it binds the seed, which no variant declares, so its name is the author's choice.
+- **The one non-field binding is `in`.** A fold's extra argument has no declaration to agree with,
+  so the language fixes its name: `in`, matching the spec record's key and the name a protocol
+  default body uses — the same word in all three positions. The emitter must translate it when
+  writing a core binder, because the core reserves `in` (`LC_RESERVED_WORDS`) for its `let … in`
+  delimiter; that half is `overview.md` §12.63 and #142.
 - **Parameter types are compared by mutual subtyping.** A parameter _is_ the declared type, not
   merely compatible with it: one-way contravariance would admit `Any → τ` against a declared
   `N → τ`, leaving the signature and the definition describing different operations. A
   function-typed _result_ is legal and is the one case where the definition has more lambdas than
   the declared arity; there the residue must equal the declared result, since that is what callers
   are promised.
+
+## Citing the specification
+
+A section number is not a citation unless it names its document. `_docs/theory/` has **six** `§2.4`
+headings — `lc.md`'s _Contexts_, `surface-grammar.md`'s _Literals_, `surface-syntax.md`'s _Railroad
+diagram_, `elaboration.md`'s _Binary operators_, `prelude.md`'s _`Int`_, and `semantics.md`'s
+_Observation semantics_ — so a bare `§2.4` in a code comment resolves to nothing a reader can act
+on. The convention (`CONTRIBUTING.md` §"Citing the specification") is to name the document, and,
+where the section's title does not name the content, to cite the named paragraph inside it.
+
+The rule exists because the failure is silent: a wrong citation looks exactly like a right one, and
+nothing downstream re-checks it. `E-Op` is in `lc.md` §3.1, not §2.4, though §2.4 is where the
+`Ω`-well-formedness paragraph lives; `compare` is not a prelude operation at all, though
+`prelude.md` §3.1 declares five orderings that look like it.
+
+**Fix the document, not the citation.** When a citation needs a warning attached to be usable, the
+section it points at is malformed. A section whose title names one topic and whose body carries
+another makes a correct number read as a wrong section — the remedy is a section per topic, not an
+apology at every citation site.
+
+This is the same rule the corpus already applies to names: a name the documents teach must be
+declared somewhere a reader can find it (`prelude.md`'s types), and a finding the documents cite
+must exist in the ledger. A citation is a claim, and a claim is checked against the text, not
+against another citation.
 
 ## Attribute grammars + lang-forma
 

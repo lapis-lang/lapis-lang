@@ -2,7 +2,7 @@
  * Law tests — the equational theory environment `E` (LawRegistry), the
  * residual screen (screenLaw), and the identity-elimination exploit.
  *
- * See _docs/theory/lc.md §2.4 (E), §7.2 (law schemas), and
+ * See _docs/theory/lc.md §2.4 (E), §2.5 (provenance), §7.2 (law schemas), and
  * _docs/theory/semantics.md §5.4 (regime-based checking).
  */
 

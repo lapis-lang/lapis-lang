@@ -1,7 +1,7 @@
 /**
  * LC Laws — the algebraic theory environment `E` and law declarations.
  *
- * See _docs/theory/lc.md §2.4, §7.2 (law schemas), and
+ * See _docs/theory/lc.md §2.4 (the `E` environment), §2.5 (law authority), §7.2 (law schemas), and
  * _docs/theory/elaboration.md §6.1 (algebraic contracts).
  *
  *   E ::= ∅ | E, op:ℓ            equational theory (operation ↦ declared laws)
@@ -19,7 +19,7 @@
  * §7), which is never evaluated — rewrites licensed by `≡` are a compiler
  * strategy (the `↝` relation), not part of the operational semantics.
  *
- * ## Provenance (the ladder, lc.md §2.4)
+ * ## Provenance (the ladder, lc.md §2.5)
  *
  * Every law in `E` carries a provenance tag — evidence about the axiom,
  * never a gate on declaring or exploiting it:
@@ -105,7 +105,7 @@ export const RELATIONAL_KINDS: readonly LawKind[] = ["distributive"]
 // ── Provenance ────────────────────────────────────────────────────────────────
 
 /**
- * The provenance ladder (lc.md §2.4): evidence about an axiom's authority.
+ * The provenance ladder (lc.md §2.5): evidence about an axiom's authority.
  * `≡` and `↝` never consult provenance — an installed law is an axiom
  * regardless of tier; the tag records how its authority was established.
  */

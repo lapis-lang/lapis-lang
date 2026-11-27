@@ -21,7 +21,7 @@
  *   cost(op(tⱼ))      = the callee's memoized summary,
  *                       instantiated at the arguments' sizes
  *   cost(fold [T] s)  = Σ over s's nodes of the per-node handler work
- *   latency(e.oₖ)     = cost of gₖ on the seed        (the codata dual, §2.4)
+ *   latency(e.oₖ)     = cost of gₖ on the seed        (the codata dual, `semantics.md` §2.4)
  *
  * Only handler-body costs recurse into the analysis; structure contributes a
  * known skeleton. Folds are NOT monotone as functions — what is rigid is the
