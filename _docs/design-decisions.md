@@ -39,6 +39,19 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
   idempotent, etc.). `properties` is the price paid for subtyping-over-generics.
 - No general fixpoint. Recursion only via fold (terminating, data finite) and unfold (productive,
   guarded). Sized-types story specialized to bialgebraic setting.
+- **A fold's result type is declared or inferred; it is never defaulted to `Any`.** `T-Fold`'s `σ`
+  is the fixpoint `⨆ᵢ type of tᵢ` seeded at `⊥` (`lc.md` §5.2) — the join's identity, so the arms'
+  common type is the result. The limit is the **join**, so arms with no common supertype below `Any`
+  make the fold `Any`; that is the typing rule and it does not change. What changes at the surface
+  is that an omitted `out:` is **inferred** as that LUB, and an inference landing on `Any` from
+  _disagreement_ is **reported**, not admitted. The reason is the direction of subtyping: `Any` is
+  the top, so an entry typed `Nat → Any` is substitutable into no narrower position and its declared
+  result says nothing about its arms — a caller cannot use the value where the arms' type is wanted.
+  Writing `out: Any` makes that an explicit decision. An arm that is itself `Any`-typed is the
+  honest case and is accepted, since `join` collapses the two into `Any` and only the arms can tell
+  them apart. A **declared** `out:` is a premise on every arm, checked case by case so the
+  diagnostic names the arm and its type rather than the join's `Any`. `elaboration.md` §1.3 states
+  both rules; `T-Fold` is unchanged.
 - **Iso-recursive, not equi-recursive.** `fold_T`/`unfold_T` are explicit core terms, not silent
   coercions. Rationale: in Lapis, fold and unfold are not type coercions (as in TAPL) but the
   primary computational constructs — the catamorphism and anamorphism. They carry semantic weight:

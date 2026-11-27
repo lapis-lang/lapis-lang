@@ -232,6 +232,98 @@ Deno.test("T-Fold: a well-typed fold is unaffected", () => {
     assertEquals([...typeForestOf(stackFold.replace("%s", "Empty()"))][0], stack)
 })
 
+// ── T-Fold: the σ fixpoint's RESULT is the arms', not the carrier's ─────────
+//
+// `parseToFixpoint`'s seed is a JOIN OPERAND, so seeding it at the carrier
+// made the carrier an upper bound on the fold's result: round one joined
+// `Nat` with the arm bodies' type, `join(Nat, Bool)` is `Any` (neither is a
+// subtype of the other), and `Any` absorbed every later round. Every fold
+// whose result was not its carrier therefore typed as `Any` — which no
+// declared signature `<: Bool`/`<: Int` accepts, so no predicate fold could
+// enter Ω.
+//
+// The seed is `Nothing`, the identity of `join`, so the first round's join
+// yields the arm bodies' own types. The `Nat` case is the control: a
+// carrier-result fold must be unchanged, because there the carrier genuinely
+// IS the common type and the join finds it.
+
+/** The single type a fold term has, or `undefined` when it is rejected. */
+function foldResult(src: string): Type | undefined {
+    const forest = [...typeForestOf(src)]
+    return forest.length === 1 ? forest[0] : undefined
+}
+
+Deno.test("T-Fold: a non-carrier result types as the arms' type, not Any", () => {
+    // Both arms are `Bool`, so the fold is `Nat → Bool`. The carrier is the
+    // parameter and must play no part in the result: a seed joined with the
+    // carrier instead of with the join's identity makes `Nat` an upper bound and
+    // the result `Any`.
+    assertEquals(
+        foldResult("fold [Nat] Zero() { Zero() -> True(), Succ(p) -> True() }")
+            ?.toString(),
+        "Bool",
+    )
+})
+
+Deno.test("T-Fold: two arms of one type still agree (no common-σ collapse)", () => {
+    // Arm bodies are DIFFERENT terms of the same type; the fixpoint must not
+    // need them to be the same term.
+    assertEquals(
+        foldResult("fold [Nat] Zero() { Zero() -> True(), Succ(p) -> False() }")
+            ?.toString(),
+        "Bool",
+    )
+})
+
+Deno.test("T-Fold: a divergent-arm fold still joins to Any", () => {
+    // The negative control for the CORE rule. `Nat` and `Bool` have no common
+    // supertype below `Any`, so the σ fixpoint's limit really is `Any` — the
+    // seed change must not have narrowed the join. What makes that a *reportable*
+    // situation rather than an accepted one is elaboration's policy (a fold must
+    // say what it means), not the typing rule; `lc.md` §5.2's limit and
+    // `elaboration.md` §1.2's inference rule are the two halves.
+    assertEquals(
+        foldResult("fold [Nat] Zero() { Zero() -> Zero(), Succ(p) -> True() }")
+            ?.toString(),
+        "Any",
+    )
+})
+
+Deno.test("T-Fold: a carrier-result fold is unchanged", () => {
+    // Seeding at the carrier happened to be right for this case, which is why
+    // the defect survived: the fold's result IS the carrier, so the join had
+    // nothing to widen.
+    assertEquals(
+        foldResult("fold [Nat] Zero() { Zero() -> Zero(), Succ(p) -> p }")?.toString(),
+        "Nat",
+    )
+})
+
+Deno.test("T-Fold: a function-typed result is not degraded to Any", () => {
+    // The same defect through a second door. `FunType <: Any` by S-Top, so an
+    // `Any` result is indistinguishable from an over-application: the residue
+    // rule in `opWellFormedness` needs the real function type to tell them
+    // apart.
+    assertEquals(
+        foldResult("fold [Stack] Empty() { Empty() -> \\x:Any. x, Push(v rest) -> rest }")
+            ?.toString(),
+        "(Any → Any)",
+    )
+})
+
+Deno.test("T-Fold: a recursive fold of non-carrier result types as that result", () => {
+    // The arm body sees the recursive field at the REFINED σ, so the fold is
+    // the carrier's catamorphism into `Bool`. Asserting the function type (not
+    // just the result) proves the carrier is still the parameter — the fold
+    // reads as `Nat → Bool`. Installing it in Ω is a separate question: Ω's
+    // acyclicity check rejects a body that names its own operation.
+    assertEquals(
+        foldResult("\\e:Nat. fold [Nat] e { Zero() -> True(), Succ(p) -> True() }")
+            ?.toString(),
+        "(Nat → Bool)",
+    )
+})
+
 // ── T-Unfold: generator exhaustiveness is enforced ───────────────────────────
 
 Deno.test("T-Unfold: non-exhaustive generators are rejected", () => {

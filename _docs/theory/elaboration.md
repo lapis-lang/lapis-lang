@@ -5,6 +5,15 @@
 > maps to a core term. The surface is rich (six declaration forms, specs, contracts,
 > recursion-scheme modifiers); the core is small (μ/ν types, fold, unfold, observation, lambda,
 > bounded polymorphism).
+>
+> **Implementation status.** What runs is `data`, a fold declared in its body, construction, and the
+> reference/application/message-chain forms — §3.1 and §2.1–§2.5's literal, reference,
+> function-value and selector rules. Everything else in this document (the other five declaration
+> forms, `map`/`merge`/`scan`, contracts, properties, `<para>`/`<histo>`/`<aux>`, `<:`) is the
+> intended translation and has no surface production yet. `surface-grammar.md` §5 is the
+> authoritative implementation table; where a section here says more than that table, this document
+> is stating the target. Sections whose target is unreachable are marked where the gap is a
+> surprise.
 
 ## 1. Elaboration Principles
 
@@ -12,7 +21,7 @@
 
 The **surface language** is what the programmer writes: `data`, `behavior`, `protocol`, `relation`,
 `query`, `io`, `fold`, `unfold`, `map`, `merge`, `scan`, specs, contracts, `properties`, message
-sends, blocks, case arms.
+sends, case arms.
 
 The **core calculus (LC)** is what the compiler type-checks and evaluates: μ-types, ν-types, variant
 construction, fold, observation, unfold, cofold, lambda, application, bounded type
@@ -42,8 +51,8 @@ needs to handle the core calculus, not the full surface language.
 returns `ok`, a per-operation `errors` list, and an `opRegistry` holding only the operations that
 hold up. Each emitted operation is checked against its declared signature by the core's own
 `opWellFormedness` — the same check `OpRegistry.declare` runs — so the verdict and the `Ω` entry are
-one judgement rather than two that could drift. A declaration that fails is absent from `Ω` and
-named in `errors`; the rest of the program stays usable.
+one judgement rather than two. A declaration that fails is absent from `Ω` and named in `errors`;
+the rest of the program stays usable.
 
 The single failure reason is `not-well-formed`: the emitted definition does not type as
 `paramTypes → resultType` (`lc.md` §2.5, well-formedness). One reason covers every way the two can
@@ -54,7 +63,45 @@ what the core's declaration checks reject beyond typing: a recursive body, whose
 operation genuinely cannot be installed — but it is not the language's final answer for recursion,
 which is a separate decision.
 
-### 1.3 Elaboration is Semantics-Preserving
+### 1.3 An operation's result type is declared, or inferred from its arms
+
+A fold's `out:` is optional, and omission is **inference**, not a default.
+
+**Declared `out:` — every arm must produce it.** `T-Fold`'s premise `Γ ⊢ tᵢ : Fᵢ(σ) → σ` requires a
+common `σ`, but the fixpoint's `σ` is a different question: two arms of unrelated types join to
+`Any`, which is the lattice **top**, so `τ <: Any` for every `τ` and the definition satisfies any
+declared `out:` at the result position. The operation would install with a result describing none of
+its arms. Elaboration therefore checks each arm against the declaration **before** the
+signature/definition verdict, and names the arm:
+
+```
+the arm for "Succ" returns Nat, which is not <: the declared `out: Bool`
+```
+
+That is the same premise read case by case, so `T-Fold` needs no change.
+
+**Omitted `out:` — the LUB of the arm bodies.** This is exactly what the σ fixpoint computes
+(`lc.md` §5.2), so it is read off the emitted term's type — the residue after peeling one `FunType`
+per declared parameter — rather than re-derived. Deriving it from the arms would be a second
+implementation of `T-Fold`.
+
+An inference that lands on `⊤` **from disagreement** is reported, not admitted:
+
+```
+`fold f` declares no `out:`, and its arms have no common type —
+an `Any` result describes none of them, so declare `out: Any` if that is intended
+```
+
+`Any` is the top, so an entry typed `Nat → Any` says nothing about what its arms produce and is
+substitutable into no narrower position. Naming it makes an accident a decision. `join` collapses
+"is `Any`" with "no common supertype", so the arms are consulted to tell them apart: an arm that is
+itself `Any`-typed makes the inference honest and is accepted.
+
+**Why this is not a typing rule.** `T-Fold` is unchanged, and a fold typed `Any` stays well-typed in
+the core. The rule constrains what an _operation declaration_ may omit — an `Ω` entry is a promise
+to callers, and `τ <: Any` always holds while `Any <: τ` does not.
+
+### 1.4 Elaboration is Semantics-Preserving
 
 **Goal:** The meaning of the surface program equals the meaning of the elaborated core program:
 
@@ -131,19 +178,26 @@ Under-application at a normal expression site is an arity error, not a silently 
 
 Binary operators are **operation applications** on the receiver. Each operator maps to a fold on the
 appropriate type. All binary operators have **uniform precedence** (left-to-right, no hierarchy —
-see [`surface-syntax.md`](./surface-syntax.md) §2.1):
+see [`surface-syntax.md`](./surface-syntax.md) §2.1). Operator names follow `prelude.md` §3, which
+is normative for every spelling in this table:
 
 | Surface  | Core                   | Notes                                                             |
 | -------- | ---------------------- | ----------------------------------------------------------------- |
 | `a + b`  | `add(ℰ(a), ℰ(b))`      | `add` is a fold on `Int`/`Complex`                                |
-| `a - b`  | `sub(ℰ(a), ℰ(b))`      | Similarly                                                         |
-| `a * b`  | `mul(ℰ(a), ℰ(b))`      |                                                                   |
-| `a / b`  | `div(ℰ(a), ℰ(b))`      |                                                                   |
+| `a - b`  | `subtract(ℰ(a), ℰ(b))` | Similarly                                                         |
+| `a * b`  | `multiply(ℰ(a), ℰ(b))` |                                                                   |
+| `a / b`  | `divide(ℰ(a), ℰ(b))`   |                                                                   |
 | `a = b`  | `equals(ℰ(a), ℰ(b))`   | `equals` is a fold (structural for data, bisimulation for codata) |
 | `a < b`  | `lessThan(ℰ(a), ℰ(b))` | Requires `Ordered` protocol                                       |
 | `a \| b` | `or(ℰ(a), ℰ(b))`       | Fold on `Bool`                                                    |
 | `a & b`  | `and(ℰ(a), ℰ(b))`      | Fold on `Bool`                                                    |
 | `a , b`  | `cons(ℰ(a), ℰ(b))`     | List/structure cons; a built-in or fold                           |
+
+**This table is the target, and no row of it runs today.** The emitter writes the infix through
+instead, and the core has no infix production, so every infix expression elaborates to text the core
+rejects (`overview.md` §12.49, [#129](https://github.com/lapis-lang/lapis-lang/issues/129)). The
+postfix send is the model to copy: §2.5's `b negate` already emits `negate(ℰ(b))`, the application
+form, and type-checks.
 
 **Key principle:** There are no primitive operators in the core. Every operator is an operation
 application that resolves to a fold on the appropriate type. For pattern-matched types (`Int`,
@@ -184,8 +238,9 @@ distinction is made by the fold's spec: if it has no `in` parameter, it's a gett
 it's a method.
 
 **The elimination form is fixed by the receiver's kind.** `fold_T` is data's elimination; the codata
-dual is **observation** (`E-Obs`); a function type's elimination is **application**, and its
-selector is the fixed keyword `value:`.
+dual is **observation** (`E-Obs`); a function type's elimination is **application**. The surface has
+**no** selector for application: there is no `value:` form (`overview.md` §12.27c,
+`design-decisions.md` §"Function values"), because no surface position can be of function type.
 
 | Surface | Core  | Notes                                                                                       |
 | ------- | ----- | ------------------------------------------------------------------------------------------- |
@@ -206,14 +261,19 @@ supports.
 
 ### 2.6 Arrays and Records
 
+**Not implemented.** Neither array nor record literals have a surface production, so every row below
+is the _intended_ translation, not one the compiler performs.
+
 | Surface            | Core                                      | Notes                                     |
 | ------------------ | ----------------------------------------- | ----------------------------------------- |
 | `{}`               | `Nil` (empty array)                       | Or a built-in empty-array value           |
 | `{a, b, c}`        | `Cons(ℰ(a), Cons(ℰ(b), Cons(ℰ(c), Nil)))` | List literal = nested cons                |
 | `(k1: v1, k2: v2)` | `{k1 = ℰ(v1), k2 = ℰ(v2)}`                | Record = product type (built-in or sugar) |
 
-Arrays are elaborated to a built-in `List` type (a μ-type with `Nil` and `Cons` variants). Records
-are elaborated to built-in product types.
+Arrays would elaborate to a built-in `List` type (a μ-type with `Nil` and `Cons` variants) and
+records to built-in product types. Both would also need a core counterpart, which the calculus does
+not have — see §9's record question. `properties:`'s value shape is the case that will force a
+decision first (`overview.md` §12.35, [#122](https://github.com/lapis-lang/lapis-lang/issues/122)).
 
 ### 2.7 Variant Construction
 
@@ -225,11 +285,11 @@ are elaborated to built-in product types.
 
 Variant construction is `Cᵢ(t₁, ..., tₙ)` in the core. The surface syntax
 `Type Variant field1: val1 field2: val2` is desugared to positional construction in declaration
-order. **The field names bind by name, so the written order carries no meaning**: `P2 y: … x: …` is
-the same construction as `P2 x: … y: …`, and the mapping of names to positions is exactly what this
-pass performs. A field that is omitted, duplicated, or undeclared is rejected by resolution
-(`surface-grammar.md` §2.8), so a construction reaching elaboration names every declared field
-exactly once. See `overview.md` §12.38.
+order. **A construction's keyword sequence _is_ its selector**, so the written order is part of the
+meaning: `P2 x: … y: …` and `P2 y: … x: …` are different constructions, and only the one matching
+the declared field sequence denotes a declared variant — the other is an _undeclared constructor_,
+rejected, not silently reordered. A field that is omitted, duplicated, or undeclared is likewise
+rejected by resolution (`surface-grammar.md` §2.8). See `overview.md` §12.34, §12.38.
 
 ## 3. Declaration Elaboration
 
@@ -245,7 +305,7 @@ A surface `data` declaration elaborates to:
    `unfold_T s {oⱼ → ℰ(gⱼ)}`.
 4. **Map declarations**: see §4.4.
 5. **Merge declarations**: see §4.5.
-6. **Satisfies clause**: see §3.5.
+6. **Satisfies clause**: see §3.7.
 
 **A fold's carrier is always its first parameter; `in:` adds a second.** A `fold` declared inside
 `data T` is an operation over `T`: the arms destructure `T`'s variants, so the emitted definition
@@ -285,7 +345,7 @@ Elaborates to:
 ```
 Stack = μ α. (Empty | Push(Any, α))
 
-size = fold_Stack e {
+size = λe:Stack. fold_Stack e {
     Empty() → 0,
     Push(_, rest) → 1 + rest
 }

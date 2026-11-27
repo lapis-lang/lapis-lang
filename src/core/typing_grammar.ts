@@ -927,8 +927,25 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         }
         // Use parseToFixpoint to refine σ (variant arms only; the pattern
         // arms' constant types enter the join every round at no cost).
-        // Start at the DataType itself (not Any) because recursive fields
-        // have declared type = DataType. This gives a better initial estimate.
+        //
+        // The seed is NOT the carrier. parseToFixpoint's seed is a join
+        // operand, not merely the initial estimate: round one joins the seed
+        // with the arm bodies' types, so seeding at the carrier makes the
+        // carrier an UPPER BOUND on the fold's result. `join(Nat, Bool)` is
+        // `Any` (neither is a subtype of the other), and `Any` absorbs every
+        // later round, so every fold whose result is not its carrier typed as
+        // `Any` — which made every predicate fold (`isEmpty <out: Bool>`,
+        // `size <out: Int>`) a definition that does not type-check its own
+        // signature.
+        //
+        // `Nothing` is the identity of `join` (`join(Nothing, t) = t`), so
+        // seeding there leaves the arm bodies' common type as the result
+        // while still giving round one a value to bind recursive fields to —
+        // the seed's only other job (a `Family` field is rebound to σ so the
+        // arm body can be re-parsed). The carrier remains reachable: it is
+        // what a recursive field's own arm sees when the fold's result IS the
+        // carrier, which is now a consequence of the join rather than a
+        // premise planted in the seed.
         //
         // A handler body that fails to re-parse under the refined σ is a
         // genuine ill-typedness: the recursion was valid under the previous
@@ -938,19 +955,14 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
         // `Any` body type that silently satisfies the join.
         let reparseFailed = false
         const sigma = this.parseToFixpoint(
-            // σ₀: the seed the join folds FROM — a variant-less
-            // (patterns-only) carrier would join its pattern σ against
-            // DataType itself and converge to Any (the seed is part of the
-            // fold per parseToFixpoint's contract). A patterns-only carrier's degenerate
-            // case: the fold result is the pattern group's σ
-            // EXACTLY (the pattern arms' σ-constant bodies make the variant fixpoint's
-            // contribution empty) — seed with
-            // the pattern group's σ when no variant arms exist (with no
-            // variant arms the seed is never re-read, so the pattern σ IS the
-            // result).
-            variantArms.length === 0 && patternSigma !== undefined
-                ? patternSigma
-                : dataType as Type, // recursive fields' declared type
+            // σ₀: the join's identity, so the first round's join yields the
+            // arm bodies' own types. A patterns-only carrier is the one case
+            // whose seed is also its RESULT — with no variant arms the
+            // fixpoint's contribution is empty, so the pattern group's σ (a
+            // strict `typeEquals` premise above) is what the fold types as.
+            // Keep that special case: seeding it with `Nothing` would be
+            // re-read as the result.
+            variantArms.length === 0 && patternSigma !== undefined ? patternSigma : Nothing,
             (currentSigma: Type) => {
                 // Re-parse each VARIANT arm's body under currentSigma
                 // (recursive fields rebound to currentSigma); each PATTERN
@@ -1303,31 +1315,10 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     readonly opWellFormedness: OpWellFormedness = {
         checkDefinition: (op: OpSig): string | undefined => {
             // The definition must be a curried function over the declared
-            // parameters, returning the declared result type. Peel one FunType
-            // layer per parameter and compare each layer's domain against the
-            // declared parameter type, then check the residue against
-            // resultType (up to subsumption — T-Sub at the result).
-            const defType = this.typeCheckSource(op.definition)
-            if (defType === undefined) {
-                return `definition does not type-check: "${op.definition}"`
-            }
-            let def = defType
-            for (const declared of op.paramTypes) {
-                if (!(def instanceof FunType)) {
-                    return "definition is not a function of the declared arity"
-                }
-                // A parameter is *equal* to its declaration, not merely
-                // compatible with it. One-way contravariance would admit
-                // `Any -> τ` against a declared `N -> τ` and one-way
-                // covariance `Nothing -> τ`; either leaves the signature and
-                // the definition describing different operations, which is
-                // the divergence Ω exists to prevent. Mutual subtyping is the
-                // equality the lattice can express.
-                if (!isSubtype(declared, def.param) || !isSubtype(def.param, declared)) {
-                    return `parameter type ${def.param} does not match the declared ${declared}`
-                }
-                def = def.result
-            }
+            // parameters, returning the declared result type.
+            const peeled = this.peelDeclaredParameters(op)
+            if (typeof peeled === "string") return peeled
+            const def = peeled.residue
             // More lambdas than declared parameters leave a function-typed
             // residue. Checked before the result comparison because that
             // comparison cannot see it: a FunType is <: Any by S-Top, so an
@@ -1357,6 +1348,45 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
             }
             return undefined
         },
+    }
+
+    /**
+     * Peel one `FunType` layer per declared parameter, leaving the residue —
+     * the type the definition actually returns.
+     *
+     * Shared with elaboration, which needs the residue as the **inferred result
+     * type** of a fold declared without `out:`: the fixpoint's answer is only
+     * reachable through the emitted term's type, and deriving it a second time
+     * from the arms would be a parallel implementation of `T-Fold`. `Nothing`'s
+     * definition and `Ω`'s acceptance are the same judgement, so a fold and its
+     * installed entry cannot disagree about the result.
+     *
+     * Returns the reason it could not be peeled, as a string, when the
+     * definition is not a function of the declared arity.
+     */
+    peelDeclaredParameters(op: OpSig): { readonly residue: Type } | string {
+        const defType = this.typeCheckSource(op.definition)
+        if (defType === undefined) {
+            return `definition does not type-check: "${op.definition}"`
+        }
+        let def = defType
+        for (const declared of op.paramTypes) {
+            if (!(def instanceof FunType)) {
+                return "definition is not a function of the declared arity"
+            }
+            // A parameter is *equal* to its declaration, not merely
+            // compatible with it. One-way contravariance would admit
+            // `Any -> τ` against a declared `N -> τ` and one-way
+            // covariance `Nothing -> τ`; either leaves the signature and
+            // the definition describing different operations, which is
+            // the divergence Ω exists to prevent. Mutual subtyping is the
+            // equality the lattice can express.
+            if (!isSubtype(declared, def.param) || !isSubtype(def.param, declared)) {
+                return `parameter type ${def.param} does not match the declared ${declared}`
+            }
+            def = def.result
+        }
+        return { residue: def }
     }
 
     /**

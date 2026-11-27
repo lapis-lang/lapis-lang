@@ -350,6 +350,148 @@ Deno.test("elaborate: `Family` in a field stays the μ-bound", () => {
     assertEquals(types[0]?.findVariant("Push")?.fields[1]?.type, Family)
 })
 
+// ── A fold's declared `out:` is its result ──────────────────────────────────
+//
+// The σ fixpoint's seed is a join operand, so a carrier-seeded fixpoint made
+// every non-carrier `out:` infer `Any` and fail the elaboration verdict with
+// `returns Any, which is not <: Bool`. The fold's declared result must be the
+// one it reports, or no predicate operation can enter Ω.
+
+const BOOL_NAT = `data Bool
+    True
+    False
+
+data Nat
+    Zero
+    Succ pred: Family
+    fold isZero <out: Bool>
+        Zero -> True
+        Succ pred -> False
+`
+
+Deno.test("elaborate: a non-carrier `out:` installs and keeps its declared type", () => {
+    const { operations, types, opRegistry } = pipeline(BOOL_NAT)
+    assertEquals(operations.length, 1)
+    const op = operations[0]!
+    // The declaration and the registry must agree; comparing the declaration
+    // alone would pass even if the *definition* had inferred something else.
+    assertEquals(op.resultType.toString(), "Bool")
+    assertEquals(opRegistry.lookup("isZero")?.resultType.toString(), "Bool")
+    // The carrier is still the parameter — the seed change must not have
+    // narrowed the fold's domain. Looked up by name so the assertion does not
+    // depend on the declaration order in the fixture.
+    const nat = types.find((t) => t.name === "Nat")
+    assertEquals(op.paramTypes.length, 1)
+    assertEquals(op.paramTypes[0], nat)
+})
+
+Deno.test("elaborate: a non-carrier fold's definition types as declared", () => {
+    // End to end: the emitted text, checked by the core against the same
+    // registry Ω was built from. This is the property the verdict depends on —
+    // asserting only the declared signature would not catch a definition that
+    // inferred `Any` while claiming `Bool`.
+    const { operations, registry } = pipeline(BOOL_NAT)
+    const forest = typesOf(operations[0]?.definition ?? "", registry)
+    assertEquals(forest.length, 1)
+    assertEquals(forest[0]?.toString(), "(Nat → Bool)")
+})
+
+// ── An omitted `out:` is inferred from the arms ─────────────────────────────
+//
+// A fold need not answer "what is my result?". The σ fixpoint already computes
+// the LUB of the arm bodies, so the answer is read off the emitted term rather
+// than substituted with `Any`. `Any` is never a default: it is `<:` every
+// declared type, so a silent `Any` accepts any use and hides a disagreement.
+
+const inferred = (arms: string, spec = "") => {
+    const program = new SurfaceParse().parseProgram(`data Bool
+    True
+    False
+
+data Nat
+    Zero
+    Succ pred: Family
+    fold f ${spec}
+${arms}
+`)
+    if (program === undefined) throw new Error("fixture did not parse")
+    return elaborateProgram(program)
+}
+
+Deno.test("elaborate: an omitted `out:` infers the arms' common type", () => {
+    // Both arms are `Nat`, so the fold is `Nat → Nat` — not `Nat → Any`.
+    const result = inferred("        Zero -> Zero\n        Succ pred -> pred")
+    assertEquals(result.ok, true)
+    assertEquals(result.operations[0]?.resultType.toString(), "Nat")
+})
+
+Deno.test("elaborate: an omitted `out:` infers a non-carrier type", () => {
+    // The case a carrier-based guess cannot reach: the arms are `Bool` while the
+    // carrier is `Nat`.
+    const result = inferred("        Zero -> True\n        Succ pred -> False")
+    assertEquals(result.ok, true)
+    assertEquals(result.operations[0]?.resultType.toString(), "Bool")
+})
+
+Deno.test("elaborate: an omitted `out:` whose arms disagree is rejected", () => {
+    // `Nat` and `Bool` have no common supertype below `Any`, so the LUB is
+    // `Any` — and an inferred `Any` would accept every use of `f`, including
+    // uses the author cannot have meant. The author must say which they want.
+    const result = inferred("        Zero -> True\n        Succ pred -> Zero")
+    assertEquals(result.ok, false)
+    assertEquals(result.operations.length, 0)
+    assertEquals(result.errors.length, 1)
+    assert(result.errors[0]?.message.includes("no common type"))
+    assert(result.errors[0]?.message.includes("out: Any"))
+})
+
+Deno.test("elaborate: an explicit `out: Any` allows disagreeing arms", () => {
+    // The escape hatch: naming `Any` is a decision, and a decision is honoured.
+    // This is what distinguishes the rule from "divergence is illegal".
+    const result = inferred("        Zero -> True\n        Succ pred -> Zero", "<out: Any>")
+    assertEquals(result.ok, true)
+    assertEquals(result.operations[0]?.resultType.toString(), "Any")
+})
+
+Deno.test("elaborate: an `Any`-typed arm is a legal inferred result", () => {
+    // The other way an inference lands on `Any`, and it is honest: `Push`'s
+    // `value` field IS `Any`, so the fold really does return `Any`. Without this
+    // distinction the rule would reject a fold whose arms agree.
+    const program = new SurfaceParse().parseProgram(`data Stack
+    Empty
+    Push value: Any rest: Family
+    fold f
+        Empty -> Empty
+        Push v r -> v
+`)!
+    const result = elaborateProgram(program)
+    assertEquals(result.ok, true)
+    assertEquals(result.operations[0]?.resultType.toString(), "Any")
+})
+
+// ── A declared `out:` is a premise on every arm ─────────────────────────────
+
+Deno.test("elaborate: an arm that does not produce `out:` is named", () => {
+    // The diagnostic half. The signature/definition verdict also rejects this,
+    // but it sees the fixpoint's `Any` — the join of `Bool` and `Nat` — and can
+    // only say "returns Any", naming neither the case nor the type. Checking the
+    // arms first makes the message point at the mistake.
+    const result = inferred("        Zero -> True\n        Succ pred -> pred", "<out: Bool>")
+    assertEquals(result.ok, false)
+    assertEquals(result.errors.length, 1)
+    const message = result.errors[0]?.message ?? ""
+    assert(message.includes('"Succ"'), `expected the arm named: ${message}`)
+    assert(message.includes("Bool"), `expected the declared type: ${message}`)
+    assert(message.includes("Nat"), `expected the produced type: ${message}`)
+})
+
+Deno.test("elaborate: a fold whose arms all produce `out:` still installs", () => {
+    // The no-false-positive half: the premise must not reject a correct fold.
+    const result = inferred("        Zero -> True\n        Succ pred -> False", "<out: Bool>")
+    assertEquals(result.ok, true)
+    assertEquals(result.operations[0]?.resultType.toString(), "Bool")
+})
+
 Deno.test("elaborate: an operation's declared signature agrees with its definition", () => {
     // The `Ω` seal requires a definition to type as `paramTypes → resultType`.
     // A surface elaboration that produces both must therefore be self-consistent,

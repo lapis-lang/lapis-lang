@@ -397,6 +397,38 @@ join every round at no cost). A pattern-arm group keeps the strict one-common- �
 patterns-only carrier degenerates to that group's σ, a variants-only carrier to the variant
 fixpoint's σ.
 
+**The σ-fixpoint.** The rule above is a recursive premise: `σ` appears both in each arm's type and
+in the conclusion, so it is read as the limit of
+
+```
+σ₀ = ⊥
+σₙ₊₁ = ⨆ᵢ  type of tᵢ  under  σ = σₙ
+```
+
+where `⊥` is `Nothing` and `⨆` is the lattice join. Two properties of that choice are normative, not
+implementation detail, because the natural wrong choice is silent:
+
+- **The seed is the join's identity, never the carrier.** `σ₀` is an operand of the first round's
+  join, so seeding it at the carrier `T` makes `T` an _upper bound_ on the fold's result: for
+  `Nat = Zero | Succ pred: Family` and `Bool`, `⨆(Nat, Bool) = Any`, and `Any` absorbs every later
+  round. A fold into `Bool` then types as `Any`, which no declared `τ <: Bool` accepts — so no
+  predicate fold can enter `Ω`. Since `⨆(Nothing, t) = t`, seeding at `⊥` leaves the arm bodies'
+  common type as the result while still giving round one a value for the `Family` rebinding.
+- **The limit is the join.** Arms whose types have no common supertype below `Any` make `⨆` yield
+  `Any`; that is the lattice's answer, and `T-Fold` does not refine it further. The strict
+  `typeEquals` premise above belongs to the _pattern_-arm group, which has no fixpoint to widen it.
+  A `⊤` result is therefore **well-typed but vague**: `Any` is the top, so `τ <: Any` for every `τ`
+  and a fold typed `Any` satisfies any declared `out:` at the result position — while telling
+  callers nothing, since `Any <: τ` holds only for `τ = Any`. Whether such a program is one the
+  language accepts is an elaboration question, not a typing one: `elaboration.md` §1.3 requires an
+  operation to name its result, so the surface reports an inferred `Any` that came from disagreement
+  rather than admitting it as a declaration.
+
+The seed's second job is why `⊥` is admissible at all: a `Family` field is rebound to `σₙ` so the
+arm body can be re-parsed, which needs `σₙ` to be a real type from the first round. `⊥` is one
+(`Nothing <: t` for every `t`, so a first-round body cannot fail for want of a binding), and the
+next round's join replaces it with the bodies' own types.
+
 ### 5.3 Observation (codata elimination)
 
 ```
