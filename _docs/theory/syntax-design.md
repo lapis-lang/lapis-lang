@@ -274,8 +274,9 @@ been an anonymous binder).
 
 Bounding a stream to `n` elements is not a decision any `Stream` variant can express — `Stream` is
 codata, so it has no variants at all. It is a decision on a **numeric seed**, and that places it in
-an `unfold`, whose arms decide by `guard | payload` (`surface-grammar.md` §5.2). The seed carries
-both of the values the decision needs, so no product type and no conditional is involved:
+an `unfold`, whose arms decide by `guard | payload` (`src/surface/grammar.ts`, `unfoldArm`). The
+seed carries both of the values the decision needs, so no product type and no conditional is
+involved:
 
 ```lapis
 data Slice
@@ -505,7 +506,7 @@ PathFinder explore: (start: "a", goal: "e", graph: myGraph) options: (maxResults
 ```
 
 The seed is a declared type, not an inline record shape — the surface has no record type production
-(`surface-grammar.md` §3.8), and a multi-value seed is spelled the same way `Slice` is:
+(`src/surface/grammar.ts`), and a multi-value seed is spelled the same way `Slice` is:
 
 ```lapis
 data SearchSeed

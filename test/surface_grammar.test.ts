@@ -1,5 +1,5 @@
 /**
- * Surface grammar tests — the layout rules (`surface-grammar.md` §7) and the
+ * Surface grammar tests — the layout rules (`surface-grammar.md` §4) and the
  * declaration/expression productions (§3, §4.1, §5.1).
  *
  * These are the *structural* tests. The pipeline's semantic behaviour is in
@@ -250,11 +250,11 @@ Deno.test("foldDecl: a non-type `in:` value is a parse failure, never an express
     )
 })
 
-Deno.test("foldDecl: every `properties:` law spelling is a parse failure (§12.35)", () => {
+Deno.test("foldDecl: every `properties:` law spelling is a parse failure", () => {
     // This pins a *known gap*, not a desired behaviour. `properties` carries a
     // `recordLiteral` (§3.6) and no such production exists, so the corpus's law
     // examples cannot be written. The test exists so the gap cannot close — or
-    // change shape — silently: closing #122 must flip these assertions.
+    // change shape — silently: closing it must flip these assertions.
     const law = (value: string) =>
         parses(
             `data Box\n    Wrap x: Box\n    fold m <out: Box, properties: ${value}>\n        Wrap x -> x\n`,
@@ -268,7 +268,7 @@ Deno.test("foldDecl: every `properties:` law spelling is a parse failure (§12.3
     // The empty law set.
     assertEquals(law("()"), false)
     // And the one form that *does* parse is not a flag list: it is a paren over
-    // an ordinary expression, which is exactly the conflation #122 must fix.
+    // an ordinary expression, which is exactly the conflation to fix.
     const fold = foldOf(dataOf(`data Box
     Wrap x: Box
     fold m <out: Box, properties: (commutative)>

@@ -87,7 +87,7 @@ carried as the implicit `match` field, accessible in fold handlers.
 
 There is no block literal. A function value is an operation reference, and its type is the
 operation's curried signature (`FunType` chain, `ops.ts`'s `OpSig.signature`). That type is read
-from `Ω`, not written: `typeExpr` is `atomType` (`surface-grammar.md` §3.8), so a declaration cannot
+from `Ω`, not written: `typeExpr` is `atomType` (`src/surface/grammar.ts`), so a declaration cannot
 state `σ -> τ` and cannot declare a parameter, field, or result of function type. Since nothing in
 the surface binds a name at top level or in a body (`overview.md` §12.6), an unbound camelCase
 `ident` in `primary` position can only denote an operation, so no new resolution rule is needed.
@@ -104,8 +104,8 @@ the operation's definition, which _has_ type `σ → τ` directly. The core appl
 the surface does not, because no surface position can be of function type.
 
 **Contract clauses are not function values.** `demands:`, `ensures:`, `invariant:`, and `rescue:`
-take an indented body (`surface-grammar.md` §5.1) whose expression the fold machinery forces at its
-own chosen moment. No thunk value is created, so no function value appears.
+take an indented body (`src/surface/grammar.ts`, `contractClause`) whose expression the fold
+machinery forces at its own chosen moment. No thunk value is created, so no function value appears.
 
 **Partial application** (a section: `(NatList append 3)`) has no surface spelling yet — see
 `overview.md` §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
@@ -141,19 +141,25 @@ Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; 
 
 ### 2.5 Unary and Keyword Applications
 
-| Surface         | Core                                     | Notes                                   |
-| --------------- | ---------------------------------------- | --------------------------------------- |
-| `recv selector` | `fold_T recv {Cᵢ → hᵢ}` (applied)        | Unary call = parameterless fold access  |
-| `recv key: arg` | `fold_T recv {Cᵢ → hᵢ}` (applied to arg) | Keyword call = parameterized fold       |
-| `- expr`        | `negate(ℰ(expr))`                        | Prefix negation = operation application |
-| `not expr`      | `not(ℰ(expr))`                           | Negation = fold on `Bool`               |
+| Surface         | Core                                     | Notes                                  |
+| --------------- | ---------------------------------------- | -------------------------------------- |
+| `recv selector` | `fold_T recv {Cᵢ → hᵢ}` (applied)        | Unary call = parameterless fold access |
+| `recv key: arg` | `fold_T recv {Cᵢ → hᵢ}` (applied to arg) | Keyword call = parameterized fold      |
+| `recv negate`   | `negate(ℰ(recv))`                        | Unary send = operation application     |
+| `recv not`      | `not(ℰ(recv))`                           | Unary send = fold on `Bool`            |
+
+**There is no prefix operation form.** Prefix position belongs to constructors: a symbol at the
+start of a token introduces data (`-7` is one `Int` token, `#x` a pattern match), never an
+operation. Every unary operation is a **suffix send** — `b negate`, `p not` — so `- expr` and
+`not expr` are not productions. Verified: `3 negate` parses and emits `negate(3)`; `negate 3`, `- 3`
+and `not A1` yield an empty forest.
 
 **A selector has one keyword part at most.** A fold takes the receiver and at most one `in:` value,
 so a two-part selector (`recv k1: a k2: b`) can name no declared operation — it is an arity error,
 not a differently-grouped call. The surface grammar collects keyword parts greedily
-([`surface-grammar.md`](./surface-grammar.md) §3.3), so the parse is unambiguous; the arity rule is
-what makes the two-part case unsatisfiable. A multi-argument operation is spelled by currying
-through the result, not by a longer selector.
+(`src/surface/grammar.ts`, `keywordParts`), so the parse is unambiguous; the arity rule is what
+makes the two-part case unsatisfiable. A multi-argument operation is spelled by currying through the
+result, not by a longer selector.
 
 **Uniform access principle:** A unary call `recv selector` where `selector` is a parameterless fold
 is _not_ a function call — it is a property access (the fold is applied with no arguments, producing
@@ -165,17 +171,17 @@ it's a method.
 dual is **observation** (`E-Obs`); a function type's elimination is **application**, and its
 selector is the fixed keyword `value:`.
 
-| Surface | Core  | Notes                                                                                             |
-| ------- | ----- | ------------------------------------------------------------------------------------------------- |
-| `f`     | `f`   | The function value itself                                                                         |
-| `f x`   | `f x` | Core application — reached by elaboration, not by a surface send (§3.6.1 of `surface-grammar.md`) |
+| Surface | Core  | Notes                                                                                       |
+| ------- | ----- | ------------------------------------------------------------------------------------------- |
+| `f`     | `f`   | The function value itself                                                                   |
+| `f x`   | `f x` | Core application — reached by elaboration, not by a surface send (`src/surface/grammar.ts`) |
 
-**The surface has no receiver of function type.** A surface type is `atomType` (`surface-grammar.md`
-§3.8) — a name, never a shape — so no declaration can state `σ -> τ` and no expression can acquire
-one. An operation reference still _has_ a function type (`Ω`'s declared `FunType` chain), and the
-core applies it by juxtaposition; but there is no surface position that receives a function value,
-so `value:` names no surface declaration. Application is a core rule, derived from the elimination
-principle, not a surface form.
+**The surface has no receiver of function type.** A surface type is `atomType`
+(`src/surface/grammar.ts` §3.8) — a name, never a shape — so no declaration can state `σ -> τ` and
+no expression can acquire one. An operation reference still _has_ a function type (`Ω`'s declared
+`FunType` chain), and the core applies it by juxtaposition; but there is no surface position that
+receives a function value, so `value:` names no surface declaration. Application is a core rule,
+derived from the elimination principle, not a surface form.
 
 **Parentheses re-open the chain.** A parenthesised expression is a `primary`, so `(f k: x) k: y` is
 two sends. The core's application is single-argument (a curried `FunType` chain), so a
@@ -195,15 +201,19 @@ are elaborated to built-in product types.
 
 ### 2.7 Variant Construction
 
-| Surface                       | Core                       | Notes                                                     |
-| ----------------------------- | -------------------------- | --------------------------------------------------------- |
-| `Color Red`                   | `Red` (variant of `Color`) | Simple variant (no fields)                                |
-| `Point Point2D x: 3 y: 4`     | `Point2D(3, 4)`            | Named-argument construction → positional                  |
-| `Stack Push value: 3 rest: s` | `Push(3, s)`               | Named-argument → positional (fields in declaration order) |
+| Surface                       | Core                         | Notes                                                              |
+| ----------------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| `Color Red`                   | `Red()` (variant of `Color`) | Nullary construction — bare `Red` is a variable, not a constructor |
+| `Point Point2D x: 3 y: 4`     | `Point2D(3, 4)`              | Named-argument construction → positional                           |
+| `Stack Push value: 3 rest: s` | `Push(3, s)`                 | Named-argument → positional (fields in declaration order)          |
 
 Variant construction is `Cᵢ(t₁, ..., tₙ)` in the core. The surface syntax
 `Type Variant field1: val1 field2: val2` is desugared to positional construction in declaration
-order. Named arguments are resolved by matching field names to the variant's declared fields.
+order. **The field names bind by name, so the written order carries no meaning**: `P2 y: … x: …` is
+the same construction as `P2 x: … y: …`, and the mapping of names to positions is exactly what this
+pass performs. A field that is omitted, duplicated, or undeclared is rejected by resolution
+(`surface-grammar.md` §2.8), so a construction reaching elaboration names every declared field
+exactly once. See `overview.md` §12.38.
 
 ## 3. Declaration Elaboration
 
@@ -316,7 +326,7 @@ in the core, see [`lc.md`](./lc.md) §4).
 
 **A member is a signature; the body is optional.** The kind keyword is required (`fold`, `unfold`,
 `map`, `merge`, `scan`) because the kind fixes what may be defaulted — see the table in
-[`surface-grammar.md`](./surface-grammar.md) §4.3. A member with no body must be provided by every
+[`src/surface/grammar.ts`, `protocolDecl`). A member with no body must be provided by every
 conforming type; a member with a body is satisfied by that body when the conforming type does not
 declare the operation itself.
 
@@ -328,8 +338,8 @@ element (§3.1). A `merge`/`scan` member is a fusion directive and elaborates to
 see its conformers' variants — so it has no arm head and no bindings. It may read `self` (the
 receiver) and, when the member declares `in:`, `other` (that input value). Both names are supplied
 by the machinery, exactly as a fold arm's bindings are supplied by its variant. A body that mentions
-`other` when the member declares no `in:` is an unbound-name error
-([`surface-grammar.md`](./surface-grammar.md) §3.7).
+`other` when the member declares no `in:` is an unbound-name error (`src/surface/grammar.ts`,
+`specEntry`s).
 
 **A default may carry contract clauses**, and they are enforced around it: an installed default runs
 its `demands:` before the body and its `ensures:`/`rescue:` after, exactly as a declared operation
@@ -378,6 +388,14 @@ The `closure()` operation is a fused unfold+fold (hylomorphism): the unfold deri
 by composing facts through recursive constructors; the fold collapses each tree to its endpoint pair
 for deduplication.
 
+**Why it terminates (overview §12.43).** The measure is the endpoint product: dedup is by endpoint
+pair, so the fact set is at most `|domain| × |codomain|` and iteration stops when a round derives
+nothing new. That bound is also what makes cyclic input safe (`X→Y→Z→X` closes to nine pairs, not an
+infinite expansion), so no safety limit is needed. The fixpoint is `R⁺ = μX. R ∪ (R;X)`; the
+auto-generated join invariant is what makes `(R;X)` meaningful — without it the closure would derive
+`alice→dave` across an unconnected gap. A conformer that overrides the dedup key (a custom `key`)
+owns the termination argument too, since the bound is the key's codomain.
+
 ### 3.5 `query` → behavior + cospan projections
 
 A `query` is sugar over `behavior` with three required cospan projections:
@@ -396,7 +414,7 @@ query PathFinder
 ```
 
 The seed is a declared type, not an inline record shape — the surface has no record type production
-(`surface-grammar.md` §3.8), and a multi-value seed is spelled the same way `take`'s is
+(`src/surface/grammar.ts`), and a multi-value seed is spelled the same way `take`'s is
 (`syntax-design.md` §"Behavior"):
 
 ```lapis
@@ -415,6 +433,16 @@ Elaborates to:
 4. **Auto-generated operation**: `explore(seed, options?)` — the greatest- fixpoint driver that
    steps through the behavior, collecting accepted outputs until done or limits reached. Includes
    tabling (cycle detection on outputs).
+
+**Tabling is by output _value_, and the representation decides what "value" means (overview
+§12.43).** Objects are tracked by identity (a `WeakSet`), primitives by value (a `Set`) —
+deliberately not by serializing, which would fail on circular or non-serializable values. The split
+fixes when a branch is cut: identity-tabled objects that are structurally equal are still distinct
+branches, and structurally unequal primitives are distinct entries. A single `deepEquals` story
+would either leak (no tabling for cyclic structures) or over-prune (collapsing genuinely distinct
+searches). The `maxSteps` / `maxResults` options are safety valves for an _incomplete_ search, not
+the termination argument: with a finite state space tabling terminates it, and with an infinite one
+nothing does.
 
 ### 3.6 `io` → Mealy machine record
 
@@ -535,7 +563,7 @@ fold fib <histo, out: Int>
 ```
 
 A histomorphism needs a result that carries the prior results, and the surface has no type
-parameters with which to write `Stream<σ>` (`surface-grammar.md` §3.8) — so the stream is a
+parameters with which to write `Stream<σ>` (`src/surface/grammar.ts`) — so the stream is a
 **declared** codata type whose `result` observer is typed by the fold's own result, exactly the way
 `Self` types a continuation:
 
@@ -686,6 +714,14 @@ pairs in a merge pipeline cancel: `merge(#f, #f, #rest)` → `merge(#rest)`.
 sequential: `foldInner(args)` runs first (producing an intermediate structure), then `foldOuter()`
 is applied to the result. This is algebraically equivalent to `instance.foldInner(args).foldOuter()`
 but grouped under a single named operation.
+
+> **What the annotation currently buys (overview §12.42).** Pairing, not fusion. `merge`'s ordinary
+> rule admits at most one fold; a validated `distributive` claim unlocks a _second_ one under one
+> name. Both traversals remain — the prototype says so plainly ("each fold completes its own full
+> traversal … true single-traversal fusion requires first-class inspectable handler expressions"),
+> and `semantics.md` §5.5's "fuses two folds into one traversal" describes the intended consequence,
+> which no implementation performs. Do not cite the single-traversal claim as a property of the
+> current elaboration.
 
 ### 4.6 Scan (Scan Lemma)
 
@@ -884,6 +920,15 @@ The properties are validated against the closed vocabulary (`associative`, `comm
 user-declared laws are membership claims in a fixed catalog of algebraic structures, which is what
 keeps rewriting terminating and the `≡` theory well-behaved.
 
+> **The catalog is provisional, not the language's boundary (overview §12.41).** The prototype
+> settles fifteen plain names plus five namespaced forms, and the seven above are a strict subset.
+> The missing ones are not exotic: `reflexive`, `symmetric`, `antisymmetric`, `transitive`, and
+> `total` are exactly what a comparison protocol needs — `prelude.md` §5.2 records that `Ordered`
+> "is not yet expressible" and declares `<`/`<=`/`>`/`>=` on `Int` outright, and the vocabulary is
+> why — while `composition` is the functor law a `map` member needs and `lapis-vs-coal.md` already
+> claims `map` is a functor. `absorption:g` and `inverse:via:E` complete the set. Read "No arbitrary
+> equations" as "no user-invented equations yet", not as "this list is final".
+
 **Intrinsic vs. relational claims.** `associative`, `commutative`, `identity:e`, `idempotent`,
 `involutory`, `absorbing:z` are claims about one operation. `distributive:g` is a claim about a
 _relation_ between two operations — elaboration checks that `g` names a declared operation on the
@@ -1065,7 +1110,8 @@ Branching is **structural dispatch**, in exactly two forms:
 
 - **Fold arms** dispatch on a variant. The arm keying _is_ the decision — `Red -> true` needs no
   guard, because `Red` is the condition.
-- **Unfold arms** decide on a seed: `guard | payload`, first match wins (`surface-grammar.md` §5.2).
+- **Unfold arms** decide on a seed: `guard | payload`, first match wins (`src/surface/grammar.ts`,
+  `unfoldArm`).
 
 A decision that is neither — a predicate computed over a value with no discriminating variants —
 belongs in an unfold over a declared seed type, not in a fold arm's body. `take` is the worked case

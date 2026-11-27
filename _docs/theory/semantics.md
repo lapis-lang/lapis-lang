@@ -325,6 +325,12 @@ equivalence judgment `Ω; E ⊢ t ≡ u`, never by an evaluation rule:
   `fold(⊕) ∘ fold(⊗) ≡
   fold(⊗-then-⊕)` from it and fuses two folds into one traversal.
 
+  > **Intended, not achieved (overview §12.42).** What a validated `distributive` claim unlocks
+  > today is _pairing_ — a second fold under one name, past `merge`'s at-most-one-fold rule — and
+  > the two traversals remain. Single-traversal fusion needs first-class inspectable handler
+  > expressions, which no implementation has. State the axiom and the pairing as the current
+  > capability; the one-traversal form is a target.
+
 - **Involutory cancellation:** `involutory` contributes `f(f(a)) ≡ a`; the optimizer cancels
   consecutive pairs in a merge pipeline.
 

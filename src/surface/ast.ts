@@ -1,54 +1,33 @@
 /**
  * The surface language's abstract syntax.
  *
- * This is the artifact the two tree-consuming passes (`NameResolverPass`,
- * `ElaboratorPass`) operate on. It exists because the engine's
- * `DerivationTree` retains *where a `@rule` matched*, not the shape of a
- * production: a repeated production yields nested same-label nodes carrying
- * partial values (a `many()` over a rule produces
- * `[as] → [as] → [as] → [one]`), and a fixed-arity `seq` yields one node with
- * no children. A pass dispatching on those labels fires once per repetition and
- * cannot tell a partial value from a complete one.
- *
- * The AST is produced by the surface grammar's own semantic actions
- * (`.map`/`chain`), which see each production exactly once. The derivation tree
- * is still available via `parseToTree` — it is the right vehicle for spans,
- * diagnostics, and unparsing.
- *
- * See `_docs/theory/surface-grammar.md` for the productions these types mirror.
+ * Exists because `DerivationTree` records *where* a `@rule` matched, not the
+ * shape of a production: a repeated production nests as same-label nodes
+ * carrying partial values, so a pass over it cannot tell a partial value from
+ * a complete one. The AST is built by the productions' own semantic actions,
+ * which see each production exactly once. `parseToTree` remains the vehicle for
+ * spans, diagnostics, and unparsing.
  */
 
-// ── Expressions (`surface-grammar.md` §3) ────────────────────────────────────
+// ── Expressions (`grammar.ts`'s `expr`) ───────────────────────────────────────
 
 /**
- * An expression.
- *
- * The surface has exactly three operation-application forms plus the primaries
- * (§3.1) — there is no application production and no anonymous binder (§3.2,
- * §3.6.1):
- *
- * - `Call` — a receiver plus a (possibly empty) message chain.
- * - `BinOp` — `lhs op rhs`, one flat precedence level, left-associative.
- * - `UnaryOp` — `op rhs` in a prefix position (`not x`), and the postfix
- *   unary send of §3.1's `unaryExpr`.
- *
- * A *primitive* is one of the `Primary` variants below.
+ * Three application forms plus the primaries. No application production, no
+ * anonymous binder — see `grammar.ts`'s `expr`.
  */
 export type Expr = Call | BinOp | UnaryOp | Primary
 
-/** A receiver followed by its messages — the message chain of §3.3. */
+/** A receiver and its message chain. */
 export interface Call {
     readonly kind: "call"
     readonly receiver: Primary
     /**
-     * The selector's keyword parts and their arguments, in source order.
-     *
-     * Empty for a bare operation reference (`double`), which is a value, not a
-     * call. Greedy collection (§3.3): when any `key: arg` is present, *all* of
-     * them belong to this one call — they are never nested sends.
+     * The selector's keyword parts, in source order. Empty for a bare operation
+     * reference, which is a value, not a call. Collected greedily: when any
+     * `key: arg` is present, all of them belong to this one call.
      */
     readonly parts: readonly KeyArg[]
-    /** Unlabelled messages in the chain (`unaryExpr`'s postfix send). */
+    /** Unlabelled messages in the chain (the postfix unary send). */
     readonly messages: readonly string[]
 }
 
@@ -58,7 +37,7 @@ export interface KeyArg {
     readonly value: Expr
 }
 
-/** A binary call: `lhs op rhs` (§3.1 level 2, uniform precedence). */
+/** A binary call: one flat, left-associative precedence level. */
 export interface BinOp {
     readonly kind: "binop"
     readonly op: string
@@ -101,10 +80,9 @@ export interface Ref {
 }
 
 /**
- * A zero-field variant read as a value: `Red`, or qualified `Color Red` (§3.4).
- *
- * `qualifier` is the declaring type's name when written, `undefined` when bare.
- * Bare is the default; qualification is disambiguation (#84).
+ * A zero-field variant as a value: `Red`, or qualified `Color Red`.
+ * `qualifier` is the declaring type's name when written; bare is the default and
+ * qualification is disambiguation.
  */
 export interface VariantRef {
     readonly kind: "variantRef"
@@ -114,10 +92,12 @@ export interface VariantRef {
 
 /**
  * A construction with fields: `Point2D x: 1 y: 2`, or qualified
- * `Point Point2D x: 1 y: 2` (§3.4, §2.7 of `elaboration.md`).
+ * `Point Point2D x: 1 y: 2`.
  *
- * Fields are positional in declaration order; the surface spells them by name
- * and elaboration resolves names to positions.
+ * Fields are **named arguments**: each `field: value` pair binds by name, so the
+ * order they are written in carries no meaning. Resolution requires the names to
+ * be exactly the variant's declared set; elaboration emits the values in
+ * declaration order, which is what the core's positional construction needs.
  */
 export interface Construction {
     readonly kind: "construction"
@@ -126,18 +106,16 @@ export interface Construction {
     readonly fields: readonly KeyArg[]
 }
 
-/** A parenthesized expression — the only way to re-open a message chain (§3.3). */
+/** A parenthesized expression — the only way to re-open a message chain. */
 export interface Paren {
     readonly kind: "paren"
     readonly inner: Expr
 }
 
 /**
- * An operation reference — a function value (§3.6.1).
- *
- * A function value is *only* an operation reference: there is no block literal,
- * so an unbound `camelCase` name in `primary` position resolves through the
- * enclosing bindings and then `Ω`.
+ * An operation reference — the only spelling of a function value. An unbound
+ * `camelCase` name in `primary` position resolves through the enclosing bindings,
+ * then `Ω`.
  */
 export interface OpRef {
     readonly kind: "opRef"
@@ -145,41 +123,28 @@ export interface OpRef {
     readonly name: string
 }
 
-// ── Types (§3.8) ─────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
- * `( typeExpr )` | `pascalIdent` | `Family` | `Self` | `Any` | `Nothing` (§3.8).
+ * A type is always a name, never a shape. There is no function-type production,
+ * so no declaration can state `σ -> τ` and no position could inhabit one; an
+ * operation's type is its `FunType` chain in `Ω`.
  *
- * This is the whole type grammar, so a surface type is never anything but a
- * name. There is deliberately no function-type production: an operation
- * reference is the only way to *name* a function value (§3.6.1), and an
- * operation's type is its declared `FunType` chain in `Ω` rather than something
- * written in a declaration. A `σ -> τ` production would therefore build a type
- * that no surface position could inhabit.
- *
- * There are no type variables and no type parameters, permanently (§3.8,
- * overview §12.29): `atomType` admits no lowercase production and no
- * declaration takes a parameter list. Subtyping is the sole abstraction
- * mechanism.
- *
- * `Family` and `Self` are the recursive self-references and are reserved as
- * declaration names (#101); that gate is applied at declaration, not here.
+ * No type variables, no type parameters — permanently. Subtyping is the sole
+ * abstraction mechanism. `Family`/`Self` are reserved as declaration names.
  */
 export interface AtomType {
     readonly kind: "atom"
     readonly name: string
 }
 
-// ── Spec records (§3.7) ──────────────────────────────────────────────────────
+// ── Spec records ────────────────────────────────────────────────────────────
 
 /**
- * A spec record: `<in: Int, out: Int, para>`.
- *
- * The recognized keys have different value shapes (§3.7's table) — `in`/`out`
- * carry a *type*, `aux` a reference, `properties` an expression, and
- * `para`/`histo` are bare flags. An unknown key is still parsed (as an
- * expression value) so it can be reported with its own diagnostic rather than
- * as a parse failure (#99).
+ * The recognized keys carry different shapes: `in`/`out` a type, `aux` a
+ * reference, `properties` an expression; `para`/`histo` are bare flags. An
+ * unknown key still parses as an expression so it can be reported rather than
+ * rejected as a parse failure.
  */
 export interface SpecRecord {
     readonly entries: readonly SpecEntry[]
@@ -191,29 +156,22 @@ export type SpecEntry =
     | { readonly key: string; readonly kind: "type"; readonly type: AtomType }
     /** `properties: (…), <flags>` — an expression value. */
     | { readonly key: string; readonly kind: "expr"; readonly value: Expr }
-    /** `aux: #name` — a zygomorphism's auxiliary fold reference (§4.3). */
+    /** `aux: #name` — a zygomorphism's auxiliary fold reference. */
     | { readonly key: string; readonly kind: "aux"; readonly name: string }
     /** `para` / `histo` — a bare flag. */
     | { readonly key: string; readonly kind: "flag" }
 
-// ── Declarations (§4, §5) ────────────────────────────────────────────────────
+// ── Declarations ────────────────────────────────────────────────────────────
 
-/** A program is `declaration*` — there are no expression statements (§4). */
+/** A program is `declaration*` — there are no expression statements. */
 export interface SurfaceProgram {
     readonly declarations: readonly Declaration[]
 }
 
-/**
- * A declaration. This PBI implements `data`; the other five forms are #97's and
- * later PBIs' production sets, plugged into this same pipeline.
- */
+/** Only `data` has a production; the other five forms plug into this same pipeline. */
 export type Declaration = DataDecl
 
-/**
- * `data Name <: Parent?` with an indented body (§4.1).
- *
- * The head is a bare `pascalIdent` — never a parameter list (§4.1, §12.29).
- */
+/** `data Name <: Parent?` with an indented body. The head is a bare `pascalIdent`. */
 export interface DataDecl {
     readonly kind: "data"
     readonly name: string
@@ -221,10 +179,10 @@ export interface DataDecl {
     readonly items: readonly DataBodyItem[]
 }
 
-/** A `data` body item (§4.1). */
+/** A `data` body item. */
 export type DataBodyItem = VariantDecl | FoldDecl | MapDecl
 
-/** `pascalIdent ( ident ":" typeExpr )*` — fields in declaration order (§4.1). */
+/** Fields in declaration order; the surface spells them by name. */
 export interface VariantDecl {
     readonly kind: "variantDecl"
     readonly name: string
@@ -238,11 +196,9 @@ export interface FieldDecl {
 }
 
 /**
- * `fold name specRecord?` with an indented body (§5.1).
- *
- * `contractClauses` are parsed here because they are `foldItem`s, but their
- * *semantics* — the closed bindable-name set per clause kind and the head arity
- * — belong to #110 and are not elaborated by this PBI.
+ * `fold name specRecord?` with an indented body. Contract clauses parse here
+ * because they are `foldItem`s; their semantics — the bindable-name set per
+ * clause kind and the head arity — are a resolution rule, not elaboration.
  */
 export interface FoldDecl {
     readonly kind: "foldDecl"
@@ -253,14 +209,10 @@ export interface FoldDecl {
 }
 
 /**
- * `map name specRecord?` with an indented body (§5.3).
- *
- * A map is **field-keyed**, not variant-keyed: each transform names a *field* and
- * binds its own parameter, so the structure is preserved and only the named
- * fields change. Recursion through `Family`/`Self` fields is automatic, which is
- * what distinguishes a map from a fold — a fold must name every variant and
- * thread the recursion itself, and only a map is eligible for pipeline fusion
- * (`merge`).
+ * A map is field-keyed, not variant-keyed: each transform names a field and
+ * binds its own parameter, so only the named fields change. Recursion through
+ * `Family` descends automatically — that is what makes it a map rather than a
+ * fold that happens to rebuild.
  */
 export interface MapDecl {
     readonly kind: "mapDecl"
@@ -270,11 +222,8 @@ export interface MapDecl {
 }
 
 /**
- * One field transform: `field param -> expr`.
- *
- * The same `ident binding "->" expr` shape a fold arm uses, keyed on a field name
- * instead of a variant name. `param` binds the field's current value, so a
- * transform needs no lambda form of its own.
+ * One field transform: `field param -> expr`. `param` binds the field's current
+ * value, so a transform needs no lambda form of its own.
  */
 export interface FieldTransform {
     readonly field: string
@@ -282,7 +231,7 @@ export interface FieldTransform {
     readonly body: Expr
 }
 
-/** `demands: self | expr` — a clause kind, its bindable names, its body (§5.1). */
+/** `demands: self | expr` — a clause kind, its bindable names, its body. */
 export interface ContractClause {
     readonly kind: "demands" | "ensures" | "invariant" | "rescue"
     readonly bindings: readonly string[]
@@ -290,11 +239,8 @@ export interface ContractClause {
 }
 
 /**
- * `armHead -> armBody` (§5.1).
- *
- * The arm head is a variant name followed by bindings for its fields. Bindings
- * beyond the variant's field count bind the fold's `in:` value — the *only*
- * seed-binding mechanism (overview §12.19).
+ * `armHead -> armBody`. Bindings beyond the variant's field count bind the
+ * fold's `in:` value — the only seed-binding mechanism.
  */
 export interface CaseArm {
     readonly head: ArmHead

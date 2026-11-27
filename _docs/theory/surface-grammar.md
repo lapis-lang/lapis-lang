@@ -1,21 +1,23 @@
-]633;E;head -n 888 _docs/theory/surface-grammar.md;2da1cbd7-bc47-4b3c-976d-d11a10295357]633;C#
-Lapis Surface Grammar (EBNF)
+# Lapis Surface Grammar
 
-> **Status:** Draft v0.1. This document is the **single consolidated grammar** for the Lapis surface
-> language — every production, in one place, in EBNF. It is the surface counterpart of
-> [`lc.md`](./lc.md) §2, which gives the core calculus's grammar in TAPL style.
+> **Status:** Draft v0.1. This document covers what a production set cannot state about itself:
+> lexical structure, layout, the per-production implementation status, and the open questions. The
+> **productions themselves** are the `@rule` methods of
+> [`src/surface/grammar.ts`](../../src/surface/grammar.ts), whose header carries the same grammar in
+> EBNF. That file is normative on _shape_; this document is normative on _tokens_ and _layout_, and
+> is the index from a production to its status.
 >
-> [`surface-syntax.md`](./surface-syntax.md) remains the _narrative_ specification: lexical
-> structure, the pattern language, precedence rationale, railroad diagrams, the indentation
-> strategy, and the worked examples. This document is the _normative_ production set — where the two
-> disagree, **this document wins** for the shape of the syntax.
+> [`surface-syntax.md`](./surface-syntax.md) remains the _narrative_ specification: the pattern
+> language, precedence rationale, railroad diagrams, and the worked examples. Where this document
+> and the code disagree on the shape of the syntax, **the code wins** — a claim here that no `@rule`
+> admits is a defect in this document.
 >
 > **Status of the surface grammar in the implementation:** the core calculus is implemented
 > (`src/core/grammar.ts`) and the surface pipeline is under `src/surface/` — parse to an AST,
-> resolve names, then elaborate to the core's concrete syntax. Implemented today: layout (§7),
+> resolve names, then elaborate to the core's concrete syntax. Implemented today: layout (§4),
 > `data` with named variants, an in-body `fold`, and the expression forms an arm body needs. The
 > other five declaration kinds (`behavior`, `protocol`, `relation`, `query`, `io`), variant
-> inheritance, pattern members, and `merge`/`scan`/`map` are not. See §9 for the per-production
+> inheritance, pattern members, and `merge`/`scan`/`map` are not. See §5 for the per-production
 > status and for why the surface is a two-phase pipeline while the core is a one-pass executable
 > grammar.
 
@@ -32,8 +34,8 @@ Lapis Surface Grammar (EBNF)
 | `{ X }`          | zero or more occurrences of `X`                       |
 | `[ X ]`          | a bracketed group (not a token)                       |
 | `⟨ X ⟩`          | a non-terminal written inline (for readability)       |
-| `␣`              | one space (or the layout's required indentation — §7) |
-| `⏎`              | a newline (the statement separator — §7)              |
+| `␣`              | one space (or the layout's required indentation — §4) |
+| `⏎`              | a newline (the statement separator — §4)              |
 | `ε`              | the empty sequence                                    |
 
 **Terminals** are written as quoted strings; **non-terminals** as `camelCase` or `PascalCase`
@@ -46,7 +48,7 @@ identifiers. Keywords (`data`, `fold`, …) are terminals.
 - **L2 — Newline.** A newline separates body lines. Blank lines and comments are consumed between
   them.
 
-Both are formalized in §7.
+Both are formalized in §4.
 
 ---
 
@@ -107,7 +109,7 @@ charLiteral    ::= "'" ( char | escape ) "'"
 ```
 
 where `escape ::= "\\" ( '"' | "'" | "\\" )` — the delimiter escapes, pinned in spec §1.4. The
-fuller escape vocabulary (`\n`, `\t`) is **open** (spec §9.1).
+fuller escape vocabulary (`\n`, `\t`) is **open** (`surface-syntax.md` §9.1).
 
 ### 2.5 Keywords
 
@@ -146,7 +148,7 @@ hws1       ::= " "+
 ```
 
 **Whitespace is spaces, never tabs.** A tab is not a whitespace character in any code position, so a
-file that mixes the two is rejected rather than silently re-indented. The rule follows from L1 (§7):
+file that mixes the two is rejected rather than silently re-indented. The rule follows from L1 (§4):
 the indent unit is exactly four spaces, so a tab would make a line's column depend on the reader's
 tab width — and a mix of the two makes the nesting a matter of editor configuration rather than of
 the source.
@@ -158,651 +160,72 @@ because their content is prose.
 
 ---
 
-## 3. Expressions
+## 2.8 Constructor position
 
-### 3.1 Precedence
+A **constructor** is a `pascalIdent` in expression position — a `variantRef` or a `construction` —
+and nothing else. A `camelCase` name is a binding or an operation reference; a literal is whatever
+text a declared pattern matched. Type names are checked where they are written (an annotation), but
+a constructor names its variant _inside a body_, so it needs its own resolution rule (implemented by
+`src/surface/resolve.ts`).
 
-Three operation-application forms, three precedence levels, strictly ordered:
+### Field names bind; order does not
 
-| Level       | Non-terminal  | Message type                       | Associativity      |
-| ----------- | ------------- | ---------------------------------- | ------------------ |
-| 1 (lowest)  | `keywordExpr` | Keyword calls                      | Left               |
-| 2           | `binaryExpr`  | Binary calls (all symbolic ops)    | **Left (uniform)** |
-| 3 (highest) | `unaryExpr`   | Unary calls                        | Left               |
-| —           | `primary`     | literals, refs, composites, parens | —                  |
+A construction spells its fields as **named arguments**, and a name binds by name:
 
-**Uniform binary precedence:** _all_ binary operators have the same precedence and are
-left-associative. `1 + 2 * 3` parses as `(1 + 2) * 3`. There is no precedence ladder.
+> A construction denotes its variant **iff** it names every declared field exactly once and nothing
+> else. The order the pairs are written in carries no meaning — `P2 x: … y: …` and `P2 y: … x: …`
+> are the same construction.
 
-### 3.2 The expression grammar
+This is the point of named arguments: the caller says which slot each value fills, and a variant's
+field names are unique within it, so there is no ambiguity for the order to resolve. Rejecting a
+reorder would refuse valid code — the two spellings denote one value.
 
-```
-expr           ::= keywordExpr
+The core's construction is positional, `Cᵢ(t₁, …, tₙ)`, so **elaboration emits the arguments in
+declaration order**, resolving each name to its slot (`elaboration.md` §2.7). That mapping is what
+elaboration is for: the surface is order-insensitive, the core is positional.
 
-keywordExpr    ::= binaryExpr ( ␣ keywordPart )+
-                | binaryExpr
+An undeclared field, a duplicated field, and an omitted field are all rejected — each leaves a slot
+unbound or a value with no slot.
 
-keywordPart    ::= ident ":" ␣ expr
+### Bare and qualified
 
-binaryExpr     ::= binaryExpr ␣ binaryOp ␣ unaryExpr
-                | unaryExpr
+A construction may name the type whose constructor is meant — `Point Point2D x: 1 y: 2` — and bare
+is the default:
 
-binaryOp       ::= symbolicOp
-                | ident                     (* named operation: add, mul, lessThan *)
+- A **bare** name resolves iff it is unique in scope. Two types with no ancestry relation declaring
+  the same variant make it ambiguous, and the qualified form is required.
+- A **qualified** name requires the qualifier to be a declared type that declares the variant. A
+  qualifier naming no declaration, or a type whose variants lack the name, is an error.
+- A **parent and child** that both declare a variant are **not** ambiguous. A child re-declaring an
+  inherited variant is narrowing it (comb inheritance, `surface-syntax.md` §4.1), so the two
+  declarations are one constructor. Only declarers with no ancestry relation collide.
 
-unaryExpr      ::= unaryExpr ␣ ident        (* unary send *)
-                | primary
+A bare _inherited_ variant's constructing type — what `Cartesian2 x: 1 y: 2` denotes when
+`Point3 <: Point2`, and therefore which member sets the value belongs to — is a different question,
+and is not decided here (overview §12.7, [#86](https://github.com/lapis-lang/lapis-lang/issues/86)).
 
-primary        ::= literal
-                | "(" expr ")"              (* parenthesized *)
-                | arrayLiteral
-                | recordLiteral
-                | specRecord
-                | reference
-                | "nil" | "true" | "false"
-                | variantRef
-                | ident
-```
+### Diagnostics
 
-**There is no application production.** The grammar has no `expr expr` form and no `value:` suffix
-of its own. The core derives application from the message chain — a send to a function-typed
-receiver applies it — but **the surface never produces such a receiver**: a type is `atomType`
-(§3.8), so no declaration can state a function type and no expression can acquire one. Application
-is therefore a core rule reached by elaboration, not a surface form.
+| Reason                  | When                                                                  |
+| ----------------------- | --------------------------------------------------------------------- |
+| `unknown-constructor`   | A bare name no type in scope declares                                 |
+| `ambiguous-constructor` | A bare name declared by types unrelated by ancestry (names every one) |
+| `bad-qualifier`         | The qualifier is not a declared type, or lacks the named variant      |
+| `selector-mismatch`     | A field is omitted, duplicated, or undeclared                         |
 
-### 3.3 The message-chain rule
+The walk covers every expression position a constructor can occupy — a construction's field values,
+a call's receiver and its keyword-part values, a `binop`'s operands, a `unary`'s operand, and any
+depth of parentheses — plus a fold's arm bodies and contract-clause bodies, and a `map`'s transform
+bodies.
 
-A keyword send is `receiver key1: arg1 key2: arg2 …`. The selector is the concatenation of the
-keyword parts.
-
-```
-messageChain   ::= primary ( ␣ ident )* ( ␣ ident ":" ␣ expr )?
-```
-
-**Greedy collection:** when keyword suffixes are present, _all_ `key: arg` pairs are collected into
-a single `KeywordCall` — they are not nested sends. This is the Smalltalk rule: a two-part spelling
-is one call with two arguments, never a call whose argument is a call.
-
-**A selector has at most one keyword part, because an operation has at most one `in:`** (§3.7). The
-receiver supplies one argument and `in:` supplies at most one more, so no surface-declared operation
-can have arity 3+. A two-part selector therefore parses but cannot resolve to any declaration — it
-is an arity error at elaboration, not a different grouping. The greedy rule still decides the parse;
-it just has no satisfiable case.
-
-**A keyword send eliminates its receiver, then applies the arguments** (`elaboration.md` §2.5). The
-elimination form is fixed by the receiver's kind: data eliminates by `fold`, codata by observation,
-and a function type eliminates by **application**, through its fixed `value:` selector. The surface
-never produces a receiver of function type — `typeExpr` is `atomType` (§3.8), never a shape — so
-`value:` names no surface declaration and application stays a **core** rule, reached by elaboration
-rather than written (§3.6.1).
-
-**Parentheses re-open the chain.** A parenthesized expression is a `primary`, so `(f k: x) k: y` is
-two sends, not one two-part selector.
-
-> **Open (overview §12.2).** The payload of a generator arm (`| head: n rest: n - 1`) has this
-> _same_ shape as a keyword send, and §2.3's greedy collection would swallow it. The generator-arm
-> body must therefore be a **restricted production** that keeps `head:`/`rest:` as labels rather
-> than a send. See §5.2.
-
-### 3.4 Variant references and construction
-
-A `pascalIdent` in expression position is a **variant reference** — a zero-field variant, read as a
-value:
-
-```
-variantRef     ::= pascalIdent
-```
-
-A variant with fields is _constructed_, and the construction is a keyword message with the variant
-name as the receiver's role:
-
-```
-construction  ::= pascalIdent ( ␣ ident ":" ␣ expr )+
-```
-
-> **Open (overview §12.7).** Whether a construction may be _qualified_ by its type
-> (`Point3 Cartesian2 x: 1 y: 2`) is unpinned. Both spellings are legal; the qualifier names the
-> _type_ whose constructor is meant, and is required only to disambiguate a colliding variant name
-> or to select the constructing type for an inherited variant.
-
-### 3.5 References
-
-```
-reference      ::= "self"
-                | "Family"
-                | "Self"
-                | "old" ident
-                | "prev" ident
-                | "aux" ident
-```
-
-These are parsed in the `primary` production, _before_ ordinary identifiers — so `old`, `prev`,
-`aux`, `self`, `Family`, and `Self` are reserved as keyword-like references.
-
-### 3.6 Composite expressions
-
-```
-arrayLiteral   ::= "{" ( expr ( "," ␣ expr )* )? "}"
-recordLiteral  ::= "(" ( ident ":" ␣ expr ( "," ␣ ident ":" ␣ expr )* )? ")"
-specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
-```
-
-**List literal** — `{1, 2, 3}`. Elaborates to nested cons.
-
-**Record literal** — `(x: 3, y: 4)`. The named-argument form. (A record may also carry _bare flags_
-— `(commutative, associative)` — but only inside a spec's `properties` value; see §3.7.)
-
-### 3.6.1 Function values
-
-There is no block literal — `[params | expr]` is **not** a production. A function value is an
-operation reference:
-
-```lapis
-double                    /* an operation reference — the function value itself */
-Int double                /* qualified: the `double` declared by `Int`, when names collide */
-```
-
-**An operation reference is the only way to name a function value.** An unbound camelCase `ident` in
-`primary` position resolves through ρ (an arm binding) and then through `Ω` (§7.4): since no surface
-form binds a name at top level or inside a body (overview §12.6), an operation is the only thing
-such a name can denote. The reference carries the operation's declared type, its law set, and its
-cost summary — which an anonymous lambda could not.
-
-**A function value has a type, but not a writable one.** The reference's type is the operation's
-curried `FunType` chain in `Ω` (`ops.ts`'s `OpSig.signature`), and that is read from `Ω` rather than
-spelled. `typeExpr` is `atomType` (§3.8), so a declaration cannot write `σ -> τ` and cannot declare
-a parameter, field, or result of function type. Consequently a function value can be _named_ and
-_applied in the core_, but it cannot be **passed** between surface operations — the position that
-would receive it has no spellable type. That is a known limitation of the current surface, not a
-rejection rule: there is nothing to reject.
-
-**Qualification is disambiguation.** `Type op` is a unary send whose selector is resolved against
-the declaring type's operations, exactly the rule variant construction uses (§3.4): bare when unique
-in scope, qualified only to resolve a collision. One rule, both constructor kinds and operations.
-
-**Under-application is an error, not a silent function value.** `xs append` (a typo for
-`xs append: 3`) fails on arity — it never becomes a function value. Uniform access (§3.3's
-getter/method split) stays intact.
-
-> **Open (overview §12.27, [#109](https://github.com/lapis-lang/lapis-lang/issues/109)).** **Partial
-> application** — supplying some of an operation's arguments and holding the rest — has no
-> production yet, and is deliberately kept out of expression position: `f a` is never application
-> anywhere in the surface grammar. The pinned spelling, when it lands, is the _section_ form
-> `(op arg …)` — juxtaposition allowed only inside parentheses, exactly as uniform binary precedence
-> confines grouping to parentheses (§3.1). Until then an operation is referenced whole or not at
-> all.
-
-> **Open (overview §12.2).** The generator-arm payload (`| head: n rest: n - 1`) has the same shape
-> as a keyword send, and §3.3's greedy collection would swallow it. The generator-arm body must
-> therefore be a **restricted production** that keeps `head:`/`rest:` as labels rather than a send.
-> See §5.2.
-
-### 3.7 Spec records
-
-A spec record appears after a fold/unfold/map name, and also as an observer's _type_ in a `behavior`
-declaration.
-
-```
-specEntry      ::= ident ":" ␣ expr
-                | ident                       (* bare flag *)
-
-specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
-```
-
-**Recognized keys** (spec §3.4):
-
-| Key          | Value shape                | Meaning                                |
-| ------------ | -------------------------- | -------------------------------------- |
-| `in`         | `typeExpr`                 | Input parameter with type              |
-| `out`        | `typeExpr`                 | Output/return type                     |
-| `para`       | (flag)                     | Paramorphism — `old field` available   |
-| `histo`      | (flag)                     | Histomorphism — `prev field` available |
-| `aux`        | `"#" ident` \| `"(" … ")"` | Zygomorphism — auxiliary fold result   |
-| `properties` | `recordLiteral`-shaped     | Algebraic property annotations         |
-
-> **Not implemented (overview §12.35,
-> [#122](https://github.com/lapis-lang/lapis-lang/issues/122)).** `properties`'s value is a record
-> literal (§3.6), and **neither `recordLiteral` nor `arrayLiteral` has a production** —
-> `parenOrRecord` accepts `"(" expr ")"` only. Every spelling the corpus writes
-> (`(commutative, associative)`, `(distributive: #add)`, `(identity: (Num N: 0))`, `()`) is
-> therefore a parse failure, and the one form that parses — `(commutative)` — yields a parenthesised
-> _ordinary expression_, not a flag list. Nothing validates the key either: resolution inspects only
-> the `type`-shaped entries, so a surviving `properties` entry is carried to the AST and dropped.
-> Treat the corpus's law examples as syntax still to be built, not as working syntax.
-
-> **Decided (overview §12.29).** There is **no `typeParam` key**. A map's transform takes its
-> argument type from the arm that binds it, so a separate declaration-time type parameter would be a
-> second spelling for something the arm already carries.
-
-> **Decided (overview §12.19).** `in:` carries **only the type** — `in: Int`, never `in: v Int`. A
-> fold takes at most one input, so there is nothing for a name to disambiguate; the name would also
-> be unspellable under the spec record's own production (`specEntry ::= ident ":" ␣ expr` — `v Int`
-> is not an `expr`, since a unary send's message must be a camelCase `ident` and `Int` is
-> PascalCase). **The arm binds the input**, and the same `armHead` binding list carries it: a fold
-> arm's bindings beyond the variant's field count bind the input (`Cons head rest v -> …`, optional
-> per arm); an unfold arm's bindings bind the **seed** (`Empty arr -> …`, `Push arr -> …` — the arm
-> produces a variant rather than destructuring one, so there are no fields to bind). An unfold that
-> declares no `in:` has no seed, so its arms carry no bindings at all (§5.2).
-
-**A protocol member's default body binds `other` (§4.3).** A default body has no arm head and no
-binding list, so the arm rule above does not reach it: a protocol cannot know its conformers'
-variant names, so it cannot destructure anything. Its scope is exactly three things —
-
-- `self`, the receiver, in scope in every body;
-- `other`, the member's `in:` value, bound **exactly when the member declares `in:`**; and
-- the recursive references `Family` and `Self` (§3.5).
-
-So a getter member (no `in:`) binds no `other`, and a default body that mentions it is an
-unbound-name error. There is no other binding mechanism in a default body — no local, no arm
-binding, no field name.
-
-### 3.8 Types
-
-Types appear in field declarations, spec entries, and operation result positions.
-
-```
-typeExpr       ::= atomType
-
-atomType       ::= "(" typeExpr ")"
-                | pascalIdent                  (* a declared type *)
-                | "Family" | "Self"
-                | "Any" | "Nothing"
-```
-
-**There is no function-type production.** A surface type is always a name, so a declaration cannot
-state `σ -> τ` anywhere — not in a field (§4.1), not in a spec's `in:`/`out:` (§3.7). This is not an
-omission: a function value is _only_ an operation reference (§3.6.1), and an operation's type is its
-declared `FunType` chain in `Ω`, which is read from `Ω` rather than written in a declaration. A `->`
-production would therefore build a type that **no position could inhabit** — accepted by the parser
-and rejected by every pass after it, which is how `function-typed-field` and `function-typed-spec`
-came to exist as repairs for a grammar defect rather than as rules.
-
-> **Decided (overview §12.29).** **There are no type variables and no type parameters anywhere in
-> the surface language — now or in the future.** `atomType` admits no lowercase production, so a
-> name like `σ` or `τ` is not a type; every declaration form (`data`, `behavior`, `protocol`,
-> `relation`, `query`, `io`) takes a bare `pascalIdent` and no parameter list; and there is no
-> type-application form (§4.1). This is not an omission to be filled in later — it is the language's
-> type discipline.
->
-> Subtyping is the sole abstraction mechanism. Where a generic type would be introduced, one of
-> three existing forms is used instead: a **subtype** with narrowed fields (`IntList <: List`, every
-> field covariance-checked), the **declaring type itself** (`Self` in an operation spec, which is
-> what lets `Num add <in: Self, out: Self>` return its operand type), or the lattice's top **`Any`**
-> where the element type genuinely varies and no relation between the element and the container is
-> needed. `Any` is what the corpus previously misspelled `Object` — see §12.18's leak class.
->
-> Consequences for the rest of this document: no type-abstraction or type-application surface form
-> exists (the core's `Λα <: σ. t` and `t[τ]` are core-only, reached by elaboration and never
-> written); an operation reference's type is its declared `FunType` chain, never an instantiation.
-
-> **Open (overview §12.4, §12.13).** `Family` and `Self` are the recursive self-references; whether
-> they are _reserved_ type names or shadowable by user declarations is decided in favour of reserved
-> (overview §12.16) but the enforcement is not yet in the core's lexer.
+**No scope is needed.** An arm head's binding is a `nameOrKeyword` (`ident` or a keyword, never a
+`pascalIdent`), so it cannot shadow a constructor, and no other form introduces a name in an
+expression. Constructor resolution is therefore a property of the name alone, plus the program's
+declarations.
 
 ---
 
-## 4. Declaration Forms
-
-There are six declaration forms. All are top-level; a program's top level is **declarations only** —
-there are no expression statements and no binding/definition form (overview §12.6, §12.21).
-
-Named values are _declared_, never bound: a zero-field variant introduces a value (`variantRef`,
-§3.4), and an operation declaration introduces a named computation with a declared type and an entry
-in `Ω` (so it can carry laws and a cost summary). A `camelCase` name in expression position resolves
-to the enclosing declaration's bindings and the declared operations in scope; it is never introduced
-by assignment.
-
-```
-program        ::= declaration*
-
-declaration   ::= dataDecl
-                | behaviorDecl
-                | protocolDecl
-                | relationDecl
-                | queryDecl
-                | ioDecl
-```
-
-### 4.1 `data` — algebraic data type (μ-type)
-
-```
-dataDecl       ::= "data" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ dataBody
-
-dataBody       ::= ␣(4) dataBodyItem+
-
-dataBodyItem   ::= variantDecl
-                | foldDecl
-                | unfoldDecl
-                | mapDecl
-                | mergeDecl
-                | scanDecl
-                | satisfiesClause
-
-variantDecl    ::= pascalIdent ( ␣ ident ":" ␣ typeExpr )*     (* fields, in declaration order *)
-```
-
-A variant's fields are **positional in declaration order**; the surface spelling
-(`Point2D x: 1 y: 2`) is the named-argument form, and elaboration resolves names to positions
-(elaboration §2.7).
-
-> **Decided.** A variant field's type and a spec entry's type are `typeExpr`, and `typeExpr` **is**
-> `atomType` (§3.8) — a name, never a shape. There is therefore no function type to reject:
-> `Wrap f: Any -> Any` and `<in: (Any -> Any)>` are _parse_ failures, because no production builds a
-> type from `->`. A function value is still a value (§3.6.1) — an operation reference, typed by its
-> declared `FunType` chain in `Ω` — but nothing can declare a position of function type, so one
-> cannot be passed as an argument and a variant field cannot carry one (a core variant field is an
-> `atomProd`, so `Wrap(\x:Any. x)` has no parse either).
-
-> **Decided (overview §12.29).** A declaration's head is a bare `pascalIdent` — **never a parameter
-> list**. The same holds for §4.2–§4.6: `behavior`, `protocol`, `relation`, `query`, and `io` all
-> take `pascalIdent` and nothing else. There is no `data List<a>`, and adding one would require a
-> type-application production that `atomType` (§3.8) deliberately does not have. Element types vary
-> by **subtyping** (`NatList <: List`, covariance-checked per field) or by `Any`.
-
-> **Open (overview §12.4).** A variant may be re-declared in a child type to **narrow** a field type
-> (covariant re-specification): every re-specified field's type must be a subtype of the parent's,
-> and no new fields may be introduced. Unmentioned fields are inherited.
-
-### 4.2 `behavior` — final coalgebra (ν-type)
-
-```
-behaviorDecl   ::= "behavior" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ behaviorBody
-
-behaviorBody   ::= ␣(4) behaviorBodyItem+
-
-behaviorBodyItem ::= observerDecl
-                 | foldDecl
-                 | unfoldDecl
-                 | mapDecl
-                 | mergeDecl
-                 | scanDecl
-                 | satisfiesClause
-
-observerDecl   ::= ident ":" ␣ specRecord
-```
-
-A `behavior` is defined by its **observations**; an `unfold` inside it is a _generator_ — one arm
-per observer, each producing the next seed.
-
-### 4.3 `protocol` — qualified type
-
-```
-protocolDecl    ::= "protocol" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ protocolBody
-
-protocolBody    ::= ␣(4) protocolItem+
-
-protocolItem    ::= foldSignature
-                 | unfoldSignature
-                 | mapSignature
-                 | mergeDecl
-                 | scanDecl
-
-foldSignature   ::= "fold" ident ␣ specRecord ( ⏎ memberBody )?
-mapSignature    ::= "map" ident ␣ specRecord ( ⏎ memberBody )?
-unfoldSignature ::= "unfold" pascalIdent ( ␣ specRecord )?
-
-memberBody      ::= ␣(8) ( contractClause ⏎ )* ␣(8) expr
-```
-
-**A protocol member is a signature with an optional default.** The `fold`/`unfold`/`map` keyword is
-required, because the member's kind is load-bearing: fold and map members admit a default body,
-unfold members do not, and `merge`/`scan` are themselves kind-named. A `fold`/`map` member must
-state its type with a spec record, and a `merge`/`scan` member with the `#name` form — without one a
-conforming type has nothing to satisfy. An **unfold** member needs neither: an unfold's result type
-is the declaration site (§5.2), which here is the conforming type itself, so `unfold Identity`
-states all there is to state. Its seed, when it has one, is `<in: …>` and is the conformer's to
-choose; a seedless unfold requires a constant constructor, which is the shape a protocol needs for
-an identity element.
-
-| Item     | Type stated by | Default body | Why                                                        |
-| -------- | -------------- | ------------ | ---------------------------------------------------------- |
-| `fold`   | `specRecord`   | allowed      | A default composes the type's own operations over `self`   |
-| `map`    | `specRecord`   | allowed      | Same; a map is an operation like any other                 |
-| `unfold` | — (site)       | **rejected** | Its result type is the declaring type; the seed is `<in:>` |
-| `merge`  | `<#name, …>`   | **rejected** | It names a fusion of existing folds, not a computation     |
-| `scan`   | `<#name>`      | **rejected** | Same — a fusion directive, not a computation               |
-
-**A default body is an expression, not a `foldBody`.** `foldBody` (§5.1) and `mapBody` (§5.3) both
-begin with `caseArm`s, which dispatch on the _declaring_ type's variants — and a protocol cannot see
-its conformers' variants. So a default body has no arms and only composes operations:
-`(self equals: other) not`. It may be preceded by contract clauses, which the default honours
-exactly as a declared operation does; see [`elaboration.md`](./elaboration.md) §3.3.
-
-### 4.4 `relation` — span-structured data
-
-```
-relationDecl   ::= "relation" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ relationBody
-
-relationBody   ::= ␣(4) relationItem+
-
-relationItem   ::= variantDecl
-                | foldDecl
-                | unfoldDecl
-                | mapDecl
-                | mergeDecl
-                | scanDecl
-```
-
-A `relation` is sugar over `data` with two distinguished folds (`origin`, `destination`) and an
-auto-generated join invariant (elaboration §3.4).
-
-### 4.5 `query` — cospan-structured behavior
-
-```
-queryDecl      ::= "query" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ queryBody
-
-queryBody      ::= ␣(4) queryItem+
-
-queryItem      ::= observerDecl
-                | foldDecl
-                | unfoldDecl
-                | mapDecl
-                | mergeDecl
-                | scanDecl
-```
-
-### 4.6 `io` — Mealy machine
-
-```
-ioDecl         ::= "io" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ ioBody
-
-ioBody         ::= ␣(4) ioItem+
-
-ioItem         ::= stateFieldDecl
-                | ioStep
-
-stateFieldDecl ::= ident ":" ␣ typeExpr
-ioStep         ::= pascalIdent ( ␣ ident )* "->" ␣ expr
-```
-
-An `io` step's body produces a record `(state: …, output: …)` — a `recordLiteral` (elaboration
-§3.6).
-
-### 4.7 `satisfies:` — conformance clause
-
-```
-satisfiesClause ::= "satisfies" ":" ␣ pascalIdent
-```
-
----
-
-## 5. Operation Declarations
-
-These appear as body items inside a declaration (§4), and each is indented one further unit relative
-to its declaration.
-
-### 5.1 `fold` — catamorphism
-
-```
-foldDecl       ::= "fold" ident specRecord? ⏎ foldBody
-
-foldBody       ::= ␣(8) foldItem+
-
-foldItem       ::= contractClause
-                | caseArm
-
-contractClause ::= clauseKind ":" ␣ ident* ( "|" ␣ )? ⏎ ␣(12) expr
-
-clauseKind     ::= "demands" | "ensures" | "invariant" | "rescue"
-
-caseArm        ::= armHead "->" armBody
-
-armHead        ::= pascalIdent ( ␣ binding )*
-                | "_" ( ␣ binding )*            (* wildcard arm — open variant sets *)
-
-binding        ::= ident | "_"
-
-armBody        ::= expr                        (* inline *)
-                | ⏎ ␣(12) expr               (* indented *)
-```
-
-**Arm head** — a variant name followed by the bindings for its fields. Bindings beyond the variant's
-field count bind the fold's **input** (the `in:` parameter), which is optional per arm.
-
-**Wildcard arm** — `_` catches whatever the other arms don't, keeping the fold total over an open
-variant set. Inherited wildcards are overridable.
-
-**Contract clauses carry a body, not a block.** A clause names its bindings after the `:` — the same
-`ident* ( "|" expr )` head a block literal used — and then takes an indented expression (`␣(12)`,
-the column of a multi-line arm body, §7):
-
-```
-demands: self | self size > 0
-ensures: self old result | result size = old size - 1
-rescue:  self err args retry | retry value: 0
-```
-
-The clause's body is _always_ forced by the fold machinery — before the body, after the body, at
-construction, on failure — and is never held as a value, so it needs no literal and no function
-value. What it does need is the binding head, which is a **clause parameter list**, not an anonymous
-function: the names are supplied by the machinery (`self`, `old`, the result, the error/args/retry
-of `rescue`), exactly as a fold arm's bindings are supplied by its variant. This is the same
-relationship an arm head has to its fields — a declared binding position, not a lambda.
-
-> **Decided (overview §12.19).** The input is bound _at the arm_, like a field:
-> `Cons head rest v
-> -> …` binds `v` to the `in:` value. This is the only binding mechanism — the
-> record's fields are not bound directly by name, and there is no fixed seed binding in arm scope.
-
-### 5.2 `unfold` — anamorphism
-
-```
-unfoldDecl     ::= "unfold" pascalIdent specRecord? ⏎ unfoldBody
-
-unfoldBody     ::= ␣(8) unfoldArm+
-
-unfoldArm      ::= armHead "->" ␣ guard "|" ␣ payload
-                | armHead "->" ␣ guard
-
-guard          ::= expr
-
-payload        ::= ident ( ␣ ident ":" ␣ expr )+    (* target-typed field list *)
-```
-
-**The arm is `guard | payload`.** The guard decides whether the arm applies; when it holds, the arm
-produces the variant named in the arm head, with the fields the payload supplies. Otherwise it
-declines and the next arm is tried — the first arm whose guard holds wins (the prototype's shape: a
-handler returns either a fields object or `null`, and the first non-null one decides).
-
-**The payload is a target-typed construction.** The variant is not repeated, because the arm head
-already names it (C#'s target-typed `new` is the same move — the target comes from context, so the
-name is omitted). The payload spells only the fields, as a keyword message — `head: n rest: n - 1` —
-the Smalltalk shape; the field names are _labels_ there, not bindings, so `n` is still the seed.
-
-**The payload is required exactly when the arm's variant has fields.** The base arm carries none,
-because a fieldless variant has nothing to say:
-
-```lapis
-unfold Range <in: Int>
-    Nil n -> n = 0
-    Cons n -> n > 0 | head: n rest: n - 1
-```
-
-**An unfold may have no seed.** When the spec record omits `in:`, the unfold takes no input and its
-arms carry no bindings — the arm head is the variant it produces and the guard alone decides:
-
-```lapis
-unfold Identity
-    Zero -> true
-```
-
-That is a constant constructor: one arm, always applicable, producing a fieldless variant. No spec
-record appears because an unfold's result type is the declaration site, never a parameter — so there
-is no `out:` to write, and with no seed there is no `in:` either. A seedless unfold is therefore how
-a protocol requires a constructor each conformer must supply — the identity element of a monoid is
-the worked case — without a `fold`'s arms and without a default body (§4.3).
-
-> **Open (overview §12.2).** Two sub-questions remain: (a) the payload's keyword-message shape
-> collides with §3.3's greedy keyword-send collection — the arm body needs its own restricted
-> production keeping `head:`/`rest:` as labels rather than a send; (b) `|` is listed among the
-> symbolic operator names (§2.1), so the spec must either reserve it as a separator or pick another
-> (`=>` is the candidate). The _reading_ — guard, separator, target-typed payload — is decided.
-
-**Recursive fields carry the next seed, not a value.** In a recursive field, the payload's value is
-the seed for the recursive unfolding: `rest: n - 1` says "the rest is whatever unfolding the seed
-`n - 1` produces", not "the rest is the number `n - 1`" (the prototype draws the same line).
-
-### 5.3 `map` — field transformation
-
-```
-mapDecl         ::= "map" ident specRecord? ⏎ mapBody
-
-mapBody         ::= ␣(8) fieldTransform+
-fieldTransform  ::= ident ␣ binding "->" ␣ expr
-```
-
-A map's body is **field-keyed, not variant-keyed**: each transform names a _field_ and binds its own
-parameter. That is the whole difference from a fold, and it is what makes a map a map.
-
-- **Recursion is automatic.** A field typed `Family` (or `Self` in a codata declaration) is
-  descended into under the same map — a transform never names it and never recurses itself. A fold
-  cannot do this: it must name every variant and thread the recursion through its own operation
-  name, which `Ω`'s acyclicity then forbids.
-- **Only a map is eligible for fusion.** `merge` composes a pipeline of `unfold`, `map`, `fold`
-  stages (`elaboration.md` §4.5). A map is a transform stage — `map`∘`map` composes into one
-  traversal, and a map before a fold is fused into the fold's field access. A fold written to
-  rebuild its own structure is not a pipeline stage and fuses with nothing.
-
-A transform therefore needs **no lambda form**: `head x -> (x + 1)` binds the field's current value
-to `x`, reusing the same `ident ␣ binding "->" ␣ expr` shape a fold arm uses with a field name in
-place of the variant name.
-
-```lapis
-map double <out: Family>
-    head x -> (x + 1)
-    value v -> (v * 2)
-```
-
-The structural rule: a transform names a **field of every variant that declares it**. A field the
-map does not name is carried through unchanged, and `Family` fields are mapped recursively without
-being named.
-
-The counterpart form in a `behavior` declaration is the **lazy** map — the same field-keyed
-production over observers, applied at observation time rather than at construction time
-(`elaboration.md` §4.4's codata map).
-
-### 5.4 `merge` — deforestation
-
-### 5.4 `merge` — deforestation
-
-```
-mergeDecl      ::= "merge" ident "<" mergeRef ( "," ␣ mergeRef )* ">"
-
-mergeRef       ::= "#" ident
-```
-
-### 5.5 `scan` — scan lemma
-
-```
-scanDecl       ::= "scan" ident "<" "#" ident ">"
-```
-
-> **Open (overview §12.20).** `scan`'s surface spelling is unpinned; the form above is the
-> candidate, matching `merge`'s `#name` reference form.
-
----
-
-## 6. Module Declarations
+## 3. Module Declarations
 
 > **Open (overview §12.20).** The module system's _surface grammar_ is entirely unpinned — the spec
 > has no module production at all, and the module mechanism is Stage 7 of the implementation plan.
@@ -831,7 +254,7 @@ moduleInstantiation ::= pascalIdent ( ":" ␣ expr )*
 
 ---
 
-## 7. Layout
+## 4. Layout
 
 Layout is a grammar-level concern in Lapis, not a post-pass. Two rules:
 
@@ -853,9 +276,9 @@ The declaration/body/case-arm/body nesting is:
 | Case arms / contracts in a fold | 8      | `Red -> "#FF0000"` |
 | Multi-line case arm body        | 12     | `expr`             |
 
-The implementation uses **P4P-style column-parameterised productions** (spec §6.2): no pre-pass, no
-token rewriting. Every block-introducing production takes the child column as a parameter, and
-`spaces(n)` matches exactly `n` spaces.
+The implementation uses **P4P-style column-parameterised productions** (see
+`src/surface/layout.ts`): no pre-pass, no token rewriting. Every block-introducing production takes
+the child column as a parameter, and `spaces(n)` matches exactly `n` spaces.
 
 Because the column is measured in spaces, **a tab is not whitespace in code position** (§2.7): a
 file that mixes the two has no well-defined column, so the mix is rejected rather than resolved by
@@ -874,52 +297,21 @@ tries the indented form first (longer match), then falls back to inline.
 > **Decided (overview §12.6).** An arm body is a single expression. There is no arm-level binding
 > form — no `let … in`, no `name ::= expr` header, no initialised-slot block. An intermediate needed
 > by one arm is a declared operation (a sibling `fold`, possibly companion via `<aux: …>`), which
-> carries a declared type, a law set, and a cost summary that an anonymous local could not. See §9's
-> `quadratic` example for the worked case.
+> carries a declared type, a law set, and a cost summary that an anonymous local could not. See
+> `examples/quadratic.lapis` for the worked case.
 
 ---
 
-## 8. Abstract Syntax
-
-The AST node types, matching spec §2.1 and the implementation's shapes:
-
-| Production       | AST node                                                                      |
-| ---------------- | ----------------------------------------------------------------------------- |
-| `expr`           | `Expr` — a discriminated union of the forms below                             |
-| `keywordExpr`    | `KeywordCall(receiver, parts: {key, value}[])`                                |
-| `binaryExpr`     | `BinaryCall(receiver, op, arg)`                                               |
-| `unaryExpr`      | `UnaryCall(receiver, selector)`                                               |
-| `primary`        | `primary` — one of the composite/reference/literal forms below                |
-| `arrayLiteral`   | `ArrayLit(items: Node[])`                                                     |
-| `recordLiteral`  | `Record(entries: RecordEntry[])` where `RecordEntry(key, value)`              |
-| `specRecord`     | `Spec(entries: SpecEntry[])` where `SpecEntry(key, value: Node \| null)`      |
-| `variantRef`     | `VariantRef(name)`                                                            |
-| `construction`   | `VariantConstruct(name, args: {field, value}[])`                              |
-| `reference`      | `SelfRef` \| `FamilyRef` \| `CoSelfRef` \| `OldRef` \| `PrevRef` \| `AuxRef`  |
-| `dataDecl`       | `DataDecl(name, parent, body: DataBodyItem[])`                                |
-| `behaviorDecl`   | `BehaviorDecl(name, parent, observers: Field[], body: BehaviorBodyItem[])`    |
-| `protocolDecl`   | `ProtocolDecl(name, parent, members: ProtocolMember[])`                       |
-| `relationDecl`   | `RelationDecl(name, variants: Variant[], folds: FoldDecl[])`                  |
-| `queryDecl`      | `QueryDecl(name, observers: Field[], unfolds: UnfoldDecl[])`                  |
-| `ioDecl`         | `IoDecl(name, stateFields: Field[], arms: CaseArm[])`                         |
-| `foldDecl`       | `FoldDecl(name, spec, contractClauses, arms: CaseArm[])`                      |
-| `protocolMember` | `FoldDecl \| UnfoldDecl \| MapDecl \| MergeDecl \| ScanDecl`, `arms` optional |
-| `unfoldDecl`     | `UnfoldDecl(name, spec, arms: CaseArm[])`                                     |
-| `mapDecl`        | `MapDecl(name, spec, arms: CaseArm[])`                                        |
-| `mergeDecl`      | `MergeDecl(name, foldNames: string[])`                                        |
-| `caseArm`        | `CaseArm(head, bindings, body)`                                               |
-| `unfoldArm`      | `UnfoldArm(head, bindings, guard, payload)`                                   |
-
-### 8.1 Why a case arm has no bound intermediate
+### 4.1 Why a case arm has no bound intermediate
 
 An arm body's bindings are exactly the arm head's: the variant's fields, plus the fold's `in:`
-argument as a trailing binding (§5.1). Nothing else can be introduced — there is no `let … in`, no
-`name ::= expr` header, and no initialised-slot block.
+argument as a trailing binding (see the `armHead` production). Nothing else can be introduced —
+there is no `let … in`, no `name ::= expr` header, and no initialised-slot block.
 
 The motivating case is the quadratic formula, whose two roots share the discriminant and the `2a`
 denominator. The discriminant is spelled as a **declared sibling operation** and fused into `roots`
-via `<aux: …>` (§5.1), rather than bound in the arm. The full worked file — with the result type,
-the `sqrt` domain as a `demands:` contract, and the `Int`-pattern trap on `-b` — is
+via `<aux: …>`, rather than bound in the arm. The full worked file — with the result type, the
+`sqrt` domain as a `demands:` contract, and the `Int`-pattern trap on `-b` — is
 [`examples/quadratic.lapis`](../../examples/quadratic.lapis); the shape is:
 
 ```lapis
@@ -932,16 +324,17 @@ data Quadratic
     fold roots <aux: #discriminant, out: QuadraticRoots>
         demands: self | self hasRealRoots
         Coeffs a b c -> Roots
-            plus: ((- b + ((aux discriminant) sqrt)) / (2 * a))
-            minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))
+            plus: (((b negate) + ((aux discriminant) sqrt)) / (2 * a))
+            minus: (((b negate) - ((aux discriminant) sqrt)) / (2 * a))
 ```
 
-Two details in that snippet are load-bearing rather than stylistic. `- b` is written with a space:
-contiguity is position-meaningful, so a contiguous `-3` is one `Int` token (the `-?[0-9]+` pattern)
-while `- expr` in prefix position is `negate` applied to `expr`. The space is what picks the second
-reading. And the `demands:` clause is how `sqrt`'s partiality is handled — the principal square root
-is undefined over the reals for a negative radicand, so `roots` is callable only on a value with a
-non-negative discriminant, which makes the precondition checkable instead of a silent domain error.
+Two details in that snippet are load-bearing rather than stylistic. `b negate` is a **suffix** send,
+never `- b`: a symbol at the start of a token introduces data, so `-3` is one `Int` token (the
+`-?[0-9]+` pattern) and `- b` would be that pattern failing to match `b`. Prefix position belongs to
+constructors, which is why a unary operation is written as a message. And the `demands:` clause is
+how `sqrt`'s partiality is handled — the principal square root is undefined over the reals for a
+negative radicand, so `roots` is callable only on a value with a non-negative discriminant, which
+makes the precondition checkable instead of a silent domain error.
 
 **This example is a target, not runnable code.** `Float` and `sqrt` are deferred by the prelude
 ([`prelude.md`](./prelude.md) §5.3) because `sqrt`'s domain restriction needs `demands:` and
@@ -954,7 +347,7 @@ This is strictly better than a local would be, on four counts that an anonymous 
 
 - **Type.** `discriminant` is declared `out: Float`; a local would carry only the type of its
   expression, and the surface has no binder that could introduce one in the first place (there is no
-  `let`, and no block literal — §3.6.1).
+  `let`, and no block literal).
 - **Reuse.** It is callable elsewhere (`q discriminant`) instead of being scoped to one body.
 - **Laws and cost.** As an operation it holds a place in `Ω`, so it can carry `properties:` and a
   memoized cost summary (`cost.ts`); a local has neither.
@@ -966,21 +359,21 @@ intermediate it needs twice, except the two-root case above, which `<aux: …>` 
 
 ---
 
-## 9. Implementation Status
+## 5. Implementation Status
 
 Per-production, against the core in `src/core/` and the surface pipeline in `src/surface/`. The core
 grammar is the abstract base `AbstractLC` (`grammar.ts`); the semantic passes are its subclasses
 `LCTypeCheck` (`typing_grammar.ts`) and `LCEval` (`eval_grammar.ts`). The surface language uses a
 _different_ shape, explained below the table.
 
-| Production group              | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Core terms (`lc.md` §2.2)     | **Implemented** — `lambdaProd`, `foldProd`, `unfoldProd`, `cofoldProd`, `letProd`, `variantProd`, `patternTokenProd`, `patternMatchProd`, `obsProd`, `appProd`, `opProd`, `typeAbsProd`, `typeAppProd`                                                                                                                                                                                                                                                                                                                                                                               |
-| Types (`lc.md` §2.1)          | **Implemented** — `typeProd`, `atomType`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Surface layout (§7)           | **Implemented** — `src/surface/layout.ts`: exact-column `spaces(n)`, newline-excluding `hws`/`hws1`, `lineEnd`, nestable block comments, and `trivia`. Column threading is a `@rule` method parameter, the engine's documented answer for context-sensitive grammars.                                                                                                                                                                                                                                                                                                                |
-| Surface expressions (§3)      | **Partial** — `primary`, the three call forms, references, literals, spec records, and types are implemented in `src/surface/grammar.ts`. Not yet: array and record literals (§3.6), contract-clause semantics (#110), and pattern-driven literals beyond the numeric subset (§2.4). **Consequence:** `properties`'s `recordLiteral` value shape has no production, so every law spelling in the corpus is a parse failure (overview §12.35). Also not yet: operator resolution — an undeclared symbolic operator is passed through into the emitted core text rather than reported. |
-| Surface declarations (§4, §5) | **Partial** — `data` with named variants and an in-body `fold` (declarations and case arms) are implemented. Not yet: `behavior`, `protocol`, `relation`, `query`, `io`; variant inheritance (§4.1's `<:` open question); pattern members; `merge`/`scan`; `map`; `satisfies`.                                                                                                                                                                                                                                                                                                       |
-| Modules (§6)                  | **Not implemented** — Stage 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Production group              | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core terms (`lc.md` §2.2)     | **Implemented** — `lambdaProd`, `foldProd`, `unfoldProd`, `cofoldProd`, `letProd`, `variantProd`, `patternTokenProd`, `patternMatchProd`, `obsProd`, `appProd`, `opProd`, `typeAbsProd`, `typeAppProd`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Types (`lc.md` §2.1)          | **Implemented** — `typeProd`, `atomType`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Surface layout (§4)           | **Implemented** — `src/surface/layout.ts`: exact-column `spaces(n)`, newline-excluding `hws`/`hws1`, `lineEnd`, nestable block comments, and `trivia`. Column threading is a `@rule` method parameter, the engine's documented answer for context-sensitive grammars.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Surface expressions           | **Partial** — `primary`, the three call forms, references, literals, spec records, and types are implemented in `src/surface/grammar.ts`. Not yet: array and record literals, contract-clause semantics (#110), and pattern-driven literals beyond the numeric subset. **Consequences.** `properties`'s `recordLiteral` value shape has no production, so every law spelling in the corpus is a parse failure (overview §12.35). Operator names are never resolved — an undeclared symbolic operator is passed into the emitted core text (§12.35), and the emitted infix form has no core production at all (§12.49). **Constructor position is resolved** (§2.8): a bare or qualified name must denote a declared variant, and a construction's keyword sequence must equal the variant's declared field sequence (#84). A qualified operation reference still has no grammar path and no core spelling (§12.39). A fold's `in:` value is bound by no rule, so a two-argument operation's signature and its definition disagree (§12.48). |
+| Surface declarations (§4, §5) | **Partial** — `data` with named variants and an in-body `fold` (declarations and case arms) are implemented. Not yet: `behavior`, `protocol`, `relation`, `query`, `io`; variant inheritance — §4.1's `<:` is parsed, validated, then **discarded**, so `DataType.parent` is always `null` and no inherited variant exists ([#86](https://github.com/lapis-lang/lapis-lang/issues/86)); pattern members; `merge`/`scan`; `map`, which parses, is never validated, and is dropped (§12.40, [#124](https://github.com/lapis-lang/lapis-lang/issues/124)); `satisfies`. **Consequences.** Elaboration has no verdict (§12.47): a fold is emitted as LC text and never checked against its own signature, so a signature/definition mismatch is silent. No elaborated operation enters `Ω`, and a recursive one cannot — its body names itself, which `Ω`'s acyclicity rule rejects (§12.50). Contract-clause bodies are parsed and dropped (§12.52), and duplicate field, binding, and transform names are accepted (§12.51).                  |
+| Modules (§3)                  | **Not implemented** — Stage 7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ### The hybrid architecture
 
@@ -1014,32 +407,32 @@ vehicle — for spans, diagnostics, and unparsing (#34).
 
 **The implemented keyword set** for the core is `<:`, `cofold`, `fold`, `in`, `let`, `match`,
 `unfold`; the surface adds `data` and `fold`. `in` and `let` are the core's terminator and former,
-**not** surface keywords: the surface grammar has no `let` production (§4, §7).
+**not** surface keywords: the surface grammar has no `let` production (§4).
 
 ---
 
-## 10. Open Questions
+## 6. Open Questions
 
 The questions this grammar does _not_ settle, with their owning finding in
 [`overview.md`](../overview.md) §12:
 
-| #                                                         | Question                                                                                                                           | Finding |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| 1                                                         | The generator-arm payload's collision with the greedy keyword-send collection — the arm body needs its own restricted production   | §12.2   |
-| 2                                                         | `\|` as the generator separator — reserve it, or pick `=>`?                                                                        | §12.2   |
-| 3                                                         | Variant qualification at construction, and the bare default for an _inherited_ variant                                             | §12.7   |
-| 4                                                         | `scan`'s surface spelling                                                                                                          | §12.20  |
-| 5                                                         | The module system's surface grammar                                                                                                | §12.20  |
-| 6                                                         | The symbolic operator character set (whether `:` is an operator character)                                                         | §2.1    |
-| 7                                                         | `Family`'s reservation in type position (decided, but unenforced in the core)                                                      | §12.16  |
-| 8                                                         | The string-escape vocabulary (`\n`, `\t`)                                                                                          | §1.4    |
-| 9                                                         | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                  | §12.8   |
-| 10                                                        | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                         | §12.4   |
-| 11                                                        | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                         | §12.26  |
-| 12                                                        | Partial application (sections): supplying some of an operation's arguments — spelling, elaboration, and effect on the cost algebra | §12.27  |
-| 13                                                        | The law argument's spelling: `identity:` wants a value, `#name` is a reference, and a protocol's identity is an operation          | §12.32  |
-| 14                                                        | Operation aliasing (`.as(...)`): no surface spelling, and a protocol is where two naming conventions must coexist                  | §12.33  |
-| **Closed (recorded here so the numbering stays stable):** |                                                                                                                                    |         |
+| #                                                         | Question                                                                                                                                               | Finding |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| 1                                                         | The generator-arm payload's collision with the greedy keyword-send collection — the arm body needs its own restricted production                       | §12.2   |
+| 2                                                         | `\|` as the generator separator — reserve it, or pick `=>`?                                                                                            | §12.2   |
+| 3                                                         | Variant qualification at construction — **decided** (`src/surface/grammar.ts`); the remaining open half is the bare default for an _inherited_ variant | §12.7   |
+| 4                                                         | `scan`'s surface spelling                                                                                                                              | §12.20  |
+| 5                                                         | The module system's surface grammar                                                                                                                    | §12.20  |
+| 6                                                         | The symbolic operator character set (whether `:` is an operator character)                                                                             | §2.1    |
+| 7                                                         | `Family`'s reservation in type position (decided, but unenforced in the core)                                                                          | §12.16  |
+| 8                                                         | The string-escape vocabulary (`\n`, `\t`)                                                                                                              | §1.4    |
+| 9                                                         | Pattern captures: capture-vs-type-reference disambiguation, delimited regions, `\|` in patterns, and slice gating                                      | §12.8   |
+| 10                                                        | The user-declared pattern member's surface syntax (the mixed-carrier form)                                                                             | §12.4   |
+| 11                                                        | The `aux` reference's read spelling (`aux d` vs. `aux #d`)                                                                                             | §12.26  |
+| 12                                                        | Partial application (sections): supplying some of an operation's arguments — spelling, elaboration, and effect on the cost algebra                     | §12.27  |
+| 13                                                        | The law argument's spelling: `identity:` wants a value, `#name` is a reference, and a protocol's identity is an operation                              | §12.32  |
+| 14                                                        | Operation aliasing (`.as(...)`): no surface spelling, and a protocol is where two naming conventions must coexist                                      | §12.33  |
+| **Closed (recorded here so the numbering stays stable):** |                                                                                                                                                        |         |
 
 - **The conditional's branch arity** — there is no conditional. `ifTrue:ifFalse:` is retired: no
   declaration, no sugar. `Bool` appears in result position only, and branching is structural
@@ -1047,24 +440,24 @@ The questions this grammar does _not_ settle, with their owning finding in
   with no discriminating variants belongs in an unfold over a declared seed type — `take` is the
   worked case (`syntax-design.md` §"Behavior"). See also `elaboration.md` §10.
 - **Surface application** (`expr expr` vs. a `value:` send) — there is **no application
-  production**, and no surface receiver of function type either: a type is `atomType` (§3.8), so no
+  production**, and no surface receiver of function type either: a type is `atomType`, so no
   declaration can state one. Application is a **core** rule (a send to a function-typed receiver
   applies it, exactly as μ-types eliminate by `fold` and ν-types by observation), reached by
-  elaboration rather than written (§3.2, §3.3, §3.6.1).
+  elaboration rather than written.
 - **The top-level definition form** (`name = expr`) — there is none; see §4 and overview §12.6.
-- **Arm-level bindings** — there is no `let`/definition/initialised-slot form in any body; see §7.
-- **The block literal** (`[params | expr]`) — retired; see §3.6.1.
-- **Type variables and type parameters** — there are none, by design and permanently; see §3.8 and
-  §4.1, and overview §12.29.
+- **Arm-level bindings** — there is no `let`/definition/initialised-slot form in any body; see §4.1.
+- **The block literal** (`[params | expr]`) — retired.
+- **Type variables and type parameters** — there are none, by design and permanently; see §4.1, and
+  overview §12.29.
 - **Protocol members** — the kind keyword is required and so is the member's type (a spec record, or
   the `#name` form for `merge`/`scan`); `fold` and `map` members admit a default body,
   `unfold`/`merge`/`scan` do not; a default body binds `self` and (when `in:` is declared) `other`,
-  and is an expression rather than an arm list. See §4.3, §3.7, and overview §12.30. `between:and:`
-  is retired: a selector has at most one keyword part.
+  and is an expression rather than an arm list. See overview §12.30. `between:and:` is retired: a
+  selector has at most one keyword part.
 
 ---
 
-## 11. See Also
+## 7. See Also
 
 - [`surface-syntax.md`](./surface-syntax.md) — the narrative specification: lexical structure, the
   pattern language, precedence rationale, railroad diagrams, indentation strategy, worked examples.

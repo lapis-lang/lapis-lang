@@ -30,9 +30,9 @@ Bracha (Pluggable Type Systems), a subtyping lattice covers what a generic type 
 inheritance + field narrowing is the mechanism.
 
 This is expressed in the surface grammar as an absence: `atomType` has no lowercase production
-(§`surface-grammar.md` 3.8), and no declaration form takes a parameter list (`surface-grammar.md`
-§4.1–§4.6). There is no `data List<a>`, no type-application form, and no `typeParam:` spec key.
-Every site that would call for one of those uses a subtype, `Self`, or `Any`.
+(`src/surface/grammar.ts`), and no declaration form takes a parameter list. There is no
+`data List<a>`, no type-application form, and no `typeParam:` spec key. Every site that would call
+for one of those uses a subtype, `Self`, or `Any`.
 
 **Core calculus:** F<: (System F with subtyping) + μ/ν types + guarded fold/unfold
 
@@ -140,20 +140,20 @@ worked case (`syntax-design.md` §"Behavior"). This is why no conditional is nee
 
 This is the master document. The formal details live in companion documents:
 
-| Document                                         | Contents                                                                                                                                                       | Status  |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `language-design.md` (this file)                 | Vision, decisions, structure, implementation plan                                                                                                              | Draft   |
-| [`../users/rationale.md`](../users/rationale.md) | Narrative for prospective users: fold/unfold → totality → laws → Datalog/Prolog → contracts                                                                    | Draft   |
-| `why-lapis.md`                                   | Defense (Atanassow's questions): why this language deserves to exist                                                                                           | Draft   |
-| `lapis-vs-coal.md`                               | Comparative study with Coal (closest existing language)                                                                                                        | Draft   |
-| `lc.md`                                          | LC in TAPL style: syntax, evaluation rules, typing rules, subtyping rules, soundness — the formal specification                                                | Draft   |
-| `semantics.md`                                   | Denotational (fold) and operational (unfold) semantics; bialgebraic laws (Turi-Plotkin); attribute-grammar equations; evaluation strategy; contracts; equality | Draft   |
-| `elaboration.md`                                 | Surface → core desugaring: relation/query/io → data/behavior; rescue → Result; map/merge/scan → fold/unfold; contracts; properties; subtyping                  | Draft   |
-| `grammar-as-semantics.md`                        | Implementation architecture: grammar subclassing as compiler pipeline, `chain` for one-pass type checking, contracts as inference-rule encoding                | Draft   |
-| `evaluation-model.md`                            | Eager data / lazy codata; Church–Rosser; graph reduction / super-combinators; GC                                                                               | Planned |
-| `contracts-and-laws.md`                          | Contract assessment flow; LSP subcontracting; law checking (static + runtime); effects position                                                                | Planned |
-| `surface-syntax.md`                              | Railroad diagrams; precedence ladder; indentation strategy; lexical structure; declaration forms                                                               | Draft   |
-| `surface-grammar.md`                             | The consolidated EBNF for the surface language — every production in one place (the normative production set behind `surface-syntax.md`'s narrative)           | Draft   |
+| Document                                         | Contents                                                                                                                                                       | Status      |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `language-design.md` (this file)                 | Vision, decisions, structure, implementation plan                                                                                                              | Draft       |
+| [`../users/rationale.md`](../users/rationale.md) | Narrative for prospective users: fold/unfold → totality → laws → Datalog/Prolog → contracts                                                                    | Draft       |
+| `why-lapis.md`                                   | Defense (Atanassow's questions): why this language deserves to exist                                                                                           | Draft       |
+| `lapis-vs-coal.md`                               | Comparative study with Coal (closest existing language)                                                                                                        | Draft       |
+| `lc.md`                                          | LC in TAPL style: syntax, evaluation rules, typing rules, subtyping rules, soundness — the formal specification                                                | Draft       |
+| `semantics.md`                                   | Denotational (fold) and operational (unfold) semantics; bialgebraic laws (Turi-Plotkin); attribute-grammar equations; evaluation strategy; contracts; equality | Draft       |
+| `elaboration.md`                                 | Surface → core desugaring: relation/query/io → data/behavior; rescue → Result; map/merge/scan → fold/unfold; contracts; properties; subtyping                  | Draft       |
+| `grammar-as-semantics.md`                        | Implementation architecture: grammar subclassing as compiler pipeline, `chain` for one-pass type checking, contracts as inference-rule encoding                | Draft       |
+| `evaluation-model.md`                            | Eager data / lazy codata; Church–Rosser; graph reduction / super-combinators; GC                                                                               | Planned     |
+| `contracts-and-laws.md`                          | Contract assessment flow; LSP subcontracting; law checking (static + runtime); effects position                                                                | Planned     |
+| `surface-syntax.md`                              | Railroad diagrams; precedence ladder; indentation strategy; lexical structure; declaration forms                                                               | Draft       |
+| `src/surface/grammar.ts`                         | The executable surface grammar — header EBNF plus one production per `@rule` method                                                                            | Implemented |
 
 ## 4. Core Calculus Summary
 
@@ -227,9 +227,9 @@ engine rather than assumed:
   declaration — which variants exist, which operations are in scope — and the surface has no
   declaration ordering rule. A one-pass production cannot consult a declaration that appears later
   in the file.
-- **The parsed form must outlive the parse.** The message chain (§3.3 of `surface-grammar.md`) has
-  no core counterpart, so the surface's meaning is computed over a retained representation rather
-  than in the parse callback.
+- **The parsed form must outlive the parse.** The message chain (`src/surface/grammar.ts`) has no
+  core counterpart, so the surface's meaning is computed over a retained representation rather than
+  in the parse callback.
 - **The retained `DerivationTree` is not that representation.** It records _where each `@rule`
   matched_, not the shape of a production: a repeated production yields nested same-label nodes
   carrying partial values, and a fixed-arity `seq` yields one node with no children. A pass
@@ -240,7 +240,7 @@ engine rather than assumed:
 Elaboration emits **the core's own concrete syntax**, not a core AST: an operation definition in `Ω`
 is already "concrete-syntax source text" (`OpSig.definition`), parsed on demand. A surface `fold`
 therefore becomes an `OpSig` whose `definition` is LC text, and the core's existing type checker and
-evaluator validate it with no new machinery. See `surface-grammar.md` §9 for the full pipeline
+evaluator validate it with no new machinery. See `src/surface/grammar.ts` for the full pipeline
 diagram.
 
 ### Stage 0: Resolve Foundational Questions (doc-only)
