@@ -235,22 +235,36 @@ spells the quoted forms the surface language recognizes.
 | `unfold`    | Unfold operation (anamorphism)         |
 | `map`       | Map operation (field transformation)   |
 | `merge`     | Merge operation (deforestation)        |
+| `scan`      | A fold's every partial result          |
 | `satisfies` | Protocol conformance clause            |
 | `not`       | Negation on `Bool` (suffix send)       |
 | `self`      | Current instance (always in scope)     |
+| `in`        | A fold's `in:` value (read in an arm)  |
 | `Family`    | Recursive self-reference in data       |
 | `Self`      | Corecursive self-reference in behavior |
 | `old`       | Raw pre-fold sub-node (paramorphism)   |
 | `prev`      | Previous fold result (histomorphism)   |
 | `aux`       | Auxiliary fold result (zygomorphism)   |
 
-### 1.6 Special Values
+### 1.6 There Are No Special Values
 
-| Token   | Meaning                   |
-| ------- | ------------------------- |
-| `nil`   | Null reference            |
-| `true`  | `True` variant of `Bool`  |
-| `false` | `False` variant of `Bool` |
+There is no reserved spelling for a value. A literal is whatever text a declared pattern matched
+(`surface-grammar.md` §2.4), and every other value is a **declared variant**: `true` and `false` are
+`Bool`'s `True` and `False`, and a null value would be a declared variant such as `Nil`. A program
+writes the variant's own name — `Bool True` when the type has to be named, `True` when it does not —
+exactly as it writes any other constructor.
+
+The names `nil`, `true`, and `false` therefore have no reserved meaning. Each of them lexes as an
+ordinary `ident` (`true`, `false`, `nil` are lowercase) and elaborates as an **operation
+reference**, so none of them is a value: a program that has not declared the name emits a reference
+to nothing (`overview.md` §12.69). This is the same rule that keeps a name the corpus teaches from
+being accepted silently — the surface has no type variables and no value variables, so every name
+must denote a declaration.
+
+> **Open (§12.70, [#154](https://github.com/lapis-lang/lapis-lang/issues/154)).** Operation
+> references are the one name position resolution does not walk, so an undeclared operation name is
+> reported by the core as "the definition does not type-check" rather than at its own span. The rule
+> is enforced; only the diagnostic is downstream.
 
 ## 2. Expression Precedence
 
@@ -260,12 +274,12 @@ have the same precedence, evaluated left-to-right).
 
 ### 2.1 Precedence Table
 
-| Level       | Production    | Message type                            | Associativity      | AST Node      |
-| ----------- | ------------- | --------------------------------------- | ------------------ | ------------- |
-| 1 (lowest)  | `keywordExpr` | Keyword calls                           | Left               | `KeywordCall` |
-| 2           | `binaryExpr`  | Binary calls (all symbolic operators)   | **Left (uniform)** | `BinaryCall`  |
-| 3 (highest) | `unaryExpr`   | Unary calls                             | Left               | `UnaryCall`   |
-| —           | `primary`     | literals, refs, arrays, records, parens | —                  | various       |
+| Level       | Production    | Message type                          | Associativity      | AST Node      |
+| ----------- | ------------- | ------------------------------------- | ------------------ | ------------- |
+| 1 (lowest)  | `keywordExpr` | Keyword calls                         | Left               | `KeywordCall` |
+| 2           | `binaryExpr`  | Binary calls (all symbolic operators) | **Left (uniform)** | `BinaryCall`  |
+| 3 (highest) | `unaryExpr`   | Unary calls                           | Left               | `UnaryCall`   |
+| —           | `primary`     | literals, refs, records, parens       | —                  | various       |
 
 **No application level.** There is no `expr expr` production. A surface type is `atomType` — a name,
 never a shape — so the surface has no receiver of function type and application never appears as a
@@ -303,8 +317,6 @@ flowchart TD
     unaryExpr --> primary
     primary --> prim_data["pattern-matched data (Int, String, ...)"]
     primary --> prim_ref["self / Family / Self / old f / prev f / aux f"]
-    primary --> prim_nil["nil / true / false"]
-    primary --> prim_array["{ expr, ... }  (ArrayLit)"]
     primary --> prim_paren["( expr )"]
     primary --> prim_pascal["PascalIdent (VariantRef)"]
     primary --> prim_ident["camelCase ident  (arm binding, else operation reference)"]
@@ -418,24 +430,7 @@ error, never a silent function value — the uniform-access getter/method split 
 Partial application (a function value of fewer arguments than the operation's arity) has no
 production yet; see overview §12.27 and [#109](https://github.com/lapis-lang/lapis-lang/issues/109).
 
-### 3.2 List Literal `{ expr, expr, ... }`
-
-```lapis
-{}                        — empty array
-{1, 2, 3}                 — three elements
-{value} , rest            — cons (via ',' operator at level 6)
-```
-
-```mermaid
-flowchart LR
-    lb["'{'"] --> ws --> items{"expr (',' expr)*"}
-    items -->|yes| ws2 --> rb["'}'"]
-    items -->|empty| ws3 --> rb
-```
-
-**AST:** `ArrayLit(items: Node[])`
-
-### 3.3 Record `(key: val, ...)`
+### 3.2 Record `(key: val, ...)`
 
 Inline record / named-argument record. Used for specs, named-argument construction, and Mealy
 machine state transitions.
@@ -454,7 +449,7 @@ flowchart LR
 
 **AST:** `Record(entries: RecordEntry[])` where `RecordEntry(key: string, value: Node)`
 
-### 3.4 Spec Record `<key: val, key, ...>`
+### 3.3 Spec Record `<key: val, key, ...>`
 
 The spec record appears after a fold/unfold/map name. Entries are either `key: value` or bare flags
 (boolean presence).
@@ -873,11 +868,11 @@ data Stack
         Push _ rest -> 1 + rest
 
     fold peek
-        Empty -> nil
+        Empty -> Empty
         Push value -> value
 
     fold pop <para>
-        Empty -> nil
+        Empty -> Empty
         Push value rest -> value , old rest
 
     unfold FromArray <in: List>

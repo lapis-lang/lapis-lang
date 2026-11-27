@@ -248,11 +248,11 @@ data Stack
         Push _ rest -> 1 + rest
 
     fold peek
-        Empty -> nil
+        Empty -> Empty
         Push value -> value
 
     fold pop <para>
-        Empty -> nil
+        Empty -> Empty
         Push value rest -> value , old rest
 ```
 

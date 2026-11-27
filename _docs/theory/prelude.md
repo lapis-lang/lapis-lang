@@ -37,7 +37,7 @@ types").
 | ----------------- | ------- | ------------------------------------ | ------------------------ |
 | `Char`            | pattern | `'.'`                                | `'a'`                    |
 | `String`          | pattern | `"<Char>*"`                          | `"hello"`                |
-| `Bool`            | named   | `True`, `False`                      | `true`, `false`          |
+| `Bool`            | named   | `True`, `False`                      | `True`, `False`          |
 | `Int`             | pattern | `-?[0-9]+`                           | `42`, `-7`               |
 | `Nat`             | named   | `Zero`, `Succ pred: Family`          | `Nat Succ …`             |
 | `List`            | named   | `Nil`, `Cons head: Any rest: Family` | `Cons head: 1 rest: Nil` |
@@ -93,9 +93,9 @@ data Bool
 ```
 
 `Bool` declares **variants, not patterns** — so it can be destructured by a fold's arm heads, which
-is the only way a program reads a branch. Its value spellings `true` and `false` are fixed by the
-language (§4.1 below), because `variantDecl` requires a `pascalIdent` and `true` therefore cannot be
-a variant name.
+is the only way a program reads a branch. Its values are those variants' names: `True` and `False`
+are written exactly as declared, in arm heads and in expressions alike (§4.1 lists the consequences
+this has for the connectives).
 
 `Bool` appears in **result position only**. There is no conditional (`overview.md` §12.28):
 branching is structural dispatch — a fold's arms dispatch on variants, an unfold's arms decide on a
@@ -147,9 +147,8 @@ data List
 ```
 
 The one container. `Array` is retired: it was the same type under a second name (`syntax-design.md`
-§"Behavior" called `Array` "the prelude's list"), and `elaboration.md` §2.6 already elaborates the
-`{a, b, c}` literal to nested `Cons` on `List`. One name owns the literal, the `,` operator, and the
-accessors.
+§"Behavior" called `Array` "the prelude's list"). One name owns the constructors, the `,` operator,
+and the accessors; there is no separate list or array literal to spell.
 
 The element type is `Any`, and the element-type relation is carried by **subtyping**, not by a type
 parameter (`overview.md` §12.29):
@@ -256,8 +255,8 @@ exercises. Five things about the spelling are load-bearing:
 
 | Symbolic | Named | Signature               | Notes                                                         |
 | -------- | ----- | ----------------------- | ------------------------------------------------------------- |
-| `&`      | `and` | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: true`  |
-| `\|`     | `or`  | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: false` |
+| `&`      | `and` | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: True`  |
+| `\|`     | `or`  | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: False` |
 | `not`    | —     | `<out: Self>`           | keyword; a suffix send — `b not`                              |
 
 `not` is a keyword and a getter (no `in:`), so `x not` is a unary send — the only form. There is no
@@ -280,7 +279,7 @@ Declared because the corpus's canonical examples depend on them and none was eve
 
 | Name       | Signature       | Notes                                                          |
 | ---------- | --------------- | -------------------------------------------------------------- |
-| `isEmpty`  | `<out: Bool>`   | `Nil -> true`, `Cons _ _ -> false`                             |
+| `isEmpty`  | `<out: Bool>`   | `Nil -> True`, `Cons _ _ -> False`                             |
 | `notEmpty` | `<out: Bool>`   | `<out: Bool>`, a default over `isEmpty`: `self isEmpty not`    |
 | `first`    | `<out: Any>`    | partial on `Nil` — a `demands:` clause, so **deferred** (§5.1) |
 | `tail`     | `<out: Family>` | partial on `Nil`, same                                         |
@@ -298,18 +297,22 @@ fold, and until operation aliasing is pinned the prelude would have to declare t
 duplicated bodies. Listing both, marked, is more honest than silently picking one and leaving half
 the corpus misspelled.
 
-## 4. Two rules that are not declarations
+## 4. Rules that are not declarations
 
 Both are language rules the prelude depends on. Neither is expressible as a declaration, and neither
 is stated anywhere else.
 
-### 4.1 `Bool`'s value spellings
+### 4.1 A value spelling is a declared variant's name
 
-`true` and `false` are `Bool`'s `True` and `False` variants, spelled lowercase, and are **not
-keywords** (`surface-syntax.md` §1.6 lists them as special values). Because
-`variantDecl ::= pascalIdent ( ident ":" typeExpr )*` requires a PascalCase head, the variants must
-be declared `True`/`False` and the lowercase spellings supplied by the language. A fold's arm head
-therefore names the variant (`True -> …`), and an expression uses the value spelling (`true`).
+There is no reserved spelling for a value (`surface-grammar.md` §2.4): a literal is whatever text a
+declared pattern matched, and every other value is written as the constructor that builds it. So
+`Bool`'s values are `True` and `False` — the variant names themselves, in arm heads and expressions
+alike — and a `Bool` identity or law argument is spelled the same way (`identity: True`).
+
+The prelude's tables therefore read in the variant vocabulary throughout: `Empty -> True`,
+`Cons _ _ -> False`, `identity: True`. A bare lowercase `true` is not a value form; it lexes as an
+ordinary `ident` and elaborates as an operation reference, so it denotes nothing a program has not
+declared (`overview.md` §12.69).
 
 ### 4.2 `Int` equality is structural, not numeric
 

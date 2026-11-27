@@ -360,6 +360,20 @@ Deno.test("expr: a literal is a literal", () => {
     assertEquals(exprOf("42"), { kind: "lit", text: "42" })
 })
 
+// There is no special-value literal category: `true`/`false` are `Bool`'s variants and `nil` is a
+// declared variant like any other, so each spelling reaches the resolver as an ordinary reference
+// and a program that has not declared the name parses no value out of it.
+Deno.test("expr: `True`/`False` are variant references, not literals", () => {
+    assertEquals(exprOf("True"), { kind: "variantRef", name: "True" })
+    assertEquals(exprOf("False"), { kind: "variantRef", name: "False" })
+})
+
+Deno.test("expr: lowercase `true`/`false`/`nil` are operation references", () => {
+    assertEquals(exprOf("true"), { kind: "opRef", name: "true" })
+    assertEquals(exprOf("false"), { kind: "opRef", name: "false" })
+    assertEquals(exprOf("nil"), { kind: "opRef", name: "nil" })
+})
+
 Deno.test("expr: a bare camelCase name is an operation reference", () => {
     assertEquals(exprOf("double"), { kind: "opRef", name: "double" })
 })
@@ -377,11 +391,11 @@ Deno.test("expr: a qualified variant reference records the qualifier", () => {
 })
 
 Deno.test("expr: a construction records its named fields in order", () => {
-    assertEquals(exprOf("Push value: nil rest: Empty"), {
+    assertEquals(exprOf("Push value: Empty rest: Empty"), {
         kind: "construction",
         variant: "Push",
         fields: [
-            { key: "value", value: { kind: "lit", text: "nil" } },
+            { key: "value", value: { kind: "variantRef", name: "Empty" } },
             { key: "rest", value: { kind: "variantRef", name: "Empty" } },
         ],
     })
@@ -390,14 +404,14 @@ Deno.test("expr: a construction records its named fields in order", () => {
 Deno.test("expr: a two-field construction has exactly one derivation", () => {
     // §3.3's greedy collection: every `key: value` pair after a construction
     // head belongs to that construction. Letting a field's value absorb the next
-    // pair gives the input a second reading (`value: (nil rest: Empty)`), and the
+    // pair gives the input a second reading (`value: (Empty rest: Empty)`), and the
     // two readings are structurally distinct objects — they do not collapse in
     // the forest, so a `Set` of one is the only proof of an unambiguous parse.
     const { forest } = new SurfaceParse().parseToTree(`data Stack
     Empty
     Push value: Any rest: Family
     fold f
-        Empty -> Push value: nil rest: Empty
+        Empty -> Push value: Empty rest: Empty
 `)
     assertEquals(forest.size, 1)
 })
@@ -411,12 +425,12 @@ Deno.test("expr: a nested construction must be parenthesized", () => {
 })
 
 Deno.test("expr: a qualified construction records the qualifier", () => {
-    const expr = exprOf("Stack Push value: nil")
+    const expr = exprOf("Stack Push value: Empty")
     assertEquals(expr, {
         kind: "construction",
         qualifier: "Stack",
         variant: "Push",
-        fields: [{ key: "value", value: { kind: "lit", text: "nil" } }],
+        fields: [{ key: "value", value: { kind: "variantRef", name: "Empty" } }],
     })
 })
 
@@ -453,10 +467,10 @@ Deno.test("expr: parentheses re-open the chain (§3.3)", () => {
 })
 
 Deno.test("expr: a keyword send records a key/arg part", () => {
-    assertEquals(exprOf("rest size: nil"), {
+    assertEquals(exprOf("rest size: Empty"), {
         kind: "call",
         receiver: { kind: "opRef", name: "rest" },
-        parts: [{ key: "size", value: { kind: "lit", text: "nil" } }],
+        parts: [{ key: "size", value: { kind: "variantRef", name: "Empty" } }],
         messages: [],
     })
 })
