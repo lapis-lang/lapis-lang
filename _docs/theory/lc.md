@@ -255,7 +255,6 @@ t.oₖ → t'.oₖ
 t → t'
 ─────────────────────────────                         (E-LetArg)
 let x:σ = t in u → let x:σ = t' in u
-
 t → t'
 ─────────────────────────────                         (E-CofoldArg)
 cofold [T] t {oⱼ → tⱼ} → cofold [T] t' {oⱼ → tⱼ}
@@ -270,6 +269,21 @@ definition, exactly as if the definition had been `let`-bound and called. The na
 semantically transparent — but it is _not_ inlined eagerly, precisely so that law-aware passes can
 recognize and rewrite operation applications before evaluation. Note that laws never add steps: all
 algebraic knowledge acts on `≡` (§7), never on `→`.
+
+**`E-Fold` and `E-Cofold` select exactly one handler.** A fold's handler list is a dispatch table —
+which entry applies is decided by the scrutinee's constructor — so an implementation that reaches an
+unselected arm has stepped by something these rules do not license. The mistake is visible on a
+recursive operation: a self-call in an arm the scrutinee never selects is evaluated anyway, the
+recursion never reaches its base case, and `E-Fold`'s termination argument (a μ-type's finiteness,
+§6.1) no longer holds.
+
+The implementation therefore distinguishes _locating_ a body from _selecting_ it. Lambda, fold,
+unfold, and cofold bodies are recorded as spans and re-evaluated by the higher-order attribute
+mechanism (`_forward`) when the surrounding form is applied or dispatched. While such a body is
+being located, an application inside it must not compute — otherwise the redex fires once during the
+scan and again on replay. So the scan is a **capture**, and applications are inert within it: both
+`E-App` and `E-Op` yield a placeholder instead of a value, exactly as an unbound binding does
+(`src/core/eval_grammar.ts`, the capture phase).
 
 ## 4. Subtyping
 
