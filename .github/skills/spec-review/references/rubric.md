@@ -31,12 +31,12 @@ is none, that is the finding.
 
 **Cases.**
 
-| Construct                            | Status                                                                                        |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `Block<σ,τ> = ν α. Π value: (σ → τ)` | Retracted — a type constructor at kind `*→*→*`, which §2.1 forbids, and uninhabited (§12.27a) |
-| `typeParam:` spec key                | Removed — a second spelling for what the arm binding already carries (§12.29)                 |
-| `data List<a>`                       | Forbidden permanently — no declaration takes a parameter list (§12.29)                        |
-| `protocol equals: <in: Self, …>`     | Was unspellable — `protocolItem` had no signature form (#113)                                 |
+| Construct                            | Status                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `Block<σ,τ> = ν α. Π value: (σ → τ)` | Retracted — a type constructor at kind `*→*→*`, which §2.1 forbids, and uninhabited (§12.27) |
+| `typeParam:` spec key                | Removed — a second spelling for what the arm binding already carries (§12.29)                |
+| `data List<a>`                       | Forbidden permanently — no declaration takes a parameter list (§12.29)                       |
+| `protocol equals: <in: Self, …>`     | Was unspellable — `protocolItem` had no signature form (#113)                                |
 
 **Distinguish two failures.** A construct with _no production_ is a spec defect. A construct with a
 production that _rejects its own example_ is a grammar defect. They have different remedies and
@@ -52,7 +52,7 @@ different severities.
   declaration site and `aux depth` at every read site (§12.26). Neither was marked provisional.
 - _Two meanings:_ find a token whose resolution depends on ambient declarations. `Family` meant open
   recursion in a program without a user type of that name, and closed recursion in a program with
-  one (§12.13). The recursion discipline flipped silently, decided by what else was in scope
+  one (§12.12). The recursion discipline flipped silently, decided by what else was in scope
   (§12.16).
 
 **Why this class matters more than it looks.** A language whose surface has two readings per token
@@ -246,14 +246,14 @@ _not_ a rejection. Branch pruning is the production's job (`empty()`). A change 
 A language change is not done until the description matches. Report each absence, Low severity, but
 report it.
 
-| Where                                     | What must agree                         |
-| ----------------------------------------- | --------------------------------------- |
-| `surface-grammar.md` front matter         | what is implemented today               |
-| `surface-grammar.md` §9                   | per-production status table             |
-| `elaboration.md`                          | a translation rule per surface form     |
-| `overview.md` §12 / `design-decisions.md` | the decision, numbered                  |
-| `_docs/theory/lc.md`                      | the inference rule, if the core changed |
-| `examples/README.md`                      | blockers, if a fixture became runnable  |
+| Where                                       | What must agree                                            |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `surface-grammar.md` front matter           | what is implemented today                                  |
+| `surface-grammar.md` §9                     | per-production status table                                |
+| `elaboration.md`                            | a translation rule per surface form                        |
+| `overview.md` §12.2 / `design-decisions.md` | the finding's index row, and the decision where it has one |
+| `_docs/theory/lc.md`                        | the inference rule, if the core changed                    |
+| `examples/README.md`                        | blockers, if a fixture became runnable                     |
 
 **The `data`-declarations precedent.** The surface productions shipped while `surface-grammar.md`
 still said "**Not implemented**". The docs taught a language the compiler could not read — for

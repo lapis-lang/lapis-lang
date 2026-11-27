@@ -73,8 +73,8 @@ them produces a finding that is wrong in its own frame.
 
 ## The defect classes this repository actually has
 
-`_docs/overview.md` §12 records 33 findings found by reading. They cluster. Check these
-deliberately, because a generic reviewer misses every one of them.
+`_docs/overview.md` §12.1 lists the nine classes of defect this language produces. They cluster.
+Check these deliberately, because a generic reviewer misses every one of them.
 
 Their shape is always the same: **the language says one thing in one place and something else
 everywhere else, and nothing detects the disagreement.**
@@ -84,10 +84,10 @@ everywhere else, and nothing detects the disagreement.**
 | **Undeclared name taught by the docs** | Does every type name in the corpus resolve to a built-in or a declaration? | `Number` (§12.18), `Boolean` (§12.31), `Object` (§12.29)                    |
 | **Unspellable construct**              | Is every form the spec _teaches_ actually a production?                    | `Block<σ,τ>` (§12.27a), `typeParam:` (§12.29), `data` declarations (§12.15) |
 | **Two spellings for one concept**      | Does one reference form have one spelling?                                 | `aux d` vs `aux #d` (§12.26)                                                |
-| **Same spelling, two meanings**        | Does one token resolve one way?                                            | `Family` open vs. closed recursion (§12.13)                                 |
+| **Same spelling, two meanings**        | Does one token resolve one way?                                            | `Family` open vs. closed recursion (§12.12)                                 |
 | **Rule stated, never enforced**        | Is a decided rule enforced at its site, or only recorded in prose?         | `Family` reserved, unenforced (§12.16)                                      |
 | **Grammar vs. corpus drift**           | Do the productions match their own examples?                               | `protocolItem` had no signature form (#113)                                 |
-| **Missing arm in a relation**          | Does every constructor of a judgment have a rule?                          | `isSubtype` had no `FamilyType` arm (#102)                                  |
+| **Missing arm in a relation**          | Does every constructor of a judgment have a rule?                          | `isSubtype` had no `FamilyType` arm (§12.14)                                |
 | **Silent permissiveness**              | Does the checker accept what it should reject?                             | unknown type names minted a `TypeVar` (§12.29, #116)                        |
 | **Stale evidence**                     | Does the issue's claimed failing case still fail?                          | `Cons(Nil())` became legal; #102's premise expired                          |
 

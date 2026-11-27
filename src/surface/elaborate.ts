@@ -23,7 +23,14 @@ import {
     Variant,
 } from "../core/types.ts"
 
-import { LCTypeCheck, OpDeclarationError, OpRegistry, OpSig, type Type } from "../core/index.ts"
+import {
+    isSubtype,
+    LCTypeCheck,
+    OpDeclarationError,
+    OpRegistry,
+    OpSig,
+    type Type,
+} from "../core/index.ts"
 
 import { TypeRegistry } from "../core/grammar.ts"
 
@@ -51,6 +58,18 @@ export interface ElaboratedOperation {
     readonly definition: string
     /** The surface declaration this operation came from. */
     readonly source: FoldDecl
+    /**
+     * Why this operation cannot be installed, when the failure is decided during
+     * elaboration rather than by `Ω`'s own check.
+     *
+     * Two ways an arm or a result can be wrong are only visible with the arm
+     * bodies in hand: an inferred `out:` whose join is `Any` because the arms
+     * disagree, and a declared `out:` that some arm does not produce. Both are
+     * reported here so the diagnostic names the case; the signature/definition
+     * check sees only the fixpoint's `Any` and can say no more than "returns
+     * Any", which names neither the arm nor the type that disagreed.
+     */
+    readonly error?: string
 }
 
 /**
@@ -141,8 +160,8 @@ export function elaborateProgram(program: SurfaceProgram): ElaborationResult {
     // against it; a self-reference or forward reference is still rejected by
     // `declare`'s acyclicity check, and surfaces here as `not-well-formed`.
     for (const decl of dataDecls) {
-        for (const operation of elaborateFolds(decl, types)) {
-            const verdict = installOperation(operation, registry, opRegistry)
+        for (const operation of elaborateFolds(decl, types, registry)) {
+            const verdict = operation.error ?? installOperation(operation, registry, opRegistry)
             if (verdict === undefined) {
                 operations.push(operation)
             } else {
@@ -298,12 +317,13 @@ function handleFor<T>(name: string, handles: ReadonlyMap<string, T>): T {
 function elaborateFolds(
     decl: DataDecl,
     types: readonly DataType[],
+    registry: TypeRegistry,
 ): ElaboratedOperation[] {
     const self = types.find((t) => t.name === decl.name)
     if (self === undefined) return []
     const published = publishedHandles(types)
     return decl.items.flatMap((item) =>
-        item.kind === "foldDecl" ? [elaborateFold(item, decl, self, published)] : []
+        item.kind === "foldDecl" ? [elaborateFold(item, decl, self, published, registry)] : []
     )
 }
 
@@ -344,8 +364,8 @@ function elaborateFold(
     decl: DataDecl,
     self: DataType,
     published: ReadonlyMap<string, Type>,
+    registry: TypeRegistry,
 ): ElaboratedOperation {
-    const outType = specType(fold, "out", self, decl.name, published)
     const hasParameter = fold.spec?.entries.some((e) => e.key === "in" && e.kind === "type") ??
         false
     // The carrier is the first parameter and always present; `in:` is a second
@@ -358,13 +378,167 @@ function elaborateFold(
     const parameters = hasParameter ? [ctx.inBinding] : []
     const definition = lambdaChain(decl.name, parameters, paramTypes.slice(1)) +
         `fold [${decl.name}] e { ${handlers.join(", ")} }`
-    return {
-        name: fold.name,
-        paramTypes,
-        resultType: outType,
-        definition,
-        source: fold,
+    const declared = declaredSpecType(fold, "out", decl.name, published)
+    const shape = { name: fold.name, paramTypes, definition, source: fold }
+    // What typing one arm needs: its variant's fields at their declared types
+    // (a recursive field bound to the carrier), the fold's extra parameters, and
+    // the registry the body's own names resolve against.
+    const context: FoldContext = {
+        registry,
+        carrier: self,
+        parameterTypes: paramTypes.slice(1),
+        render: ctx,
     }
+
+    // An undeclared `out:` is the LUB of the arm bodies' types — which is what
+    // `T-Fold`'s σ fixpoint already computes, so it is read off the emitted term
+    // rather than re-derived here. `Any` is never a fallback: an inference that
+    // lands on `Any` from disagreement is reported instead, because an entry
+    // typed `Any` describes none of its arms — `Any` is the top, so it is
+    // substitutable into no narrower position.
+    if (declared === undefined) {
+        const inferred = inferResultType(fold, paramTypes, definition, context)
+        return inferred.kind === "ambiguous"
+            ? { ...shape, resultType: Any, error: ambiguousOutMessage(fold) }
+            : { ...shape, resultType: inferred.type }
+    }
+
+    // A declared `out:` means every arm must produce it. The verdict also
+    // compares the definition against the signature, but it sees the fixpoint's
+    // `Any` — the join of two unrelated arm types — and can only say "returns
+    // Any", naming no arm and no type. This check runs first so the diagnostic
+    // points at the case that disagreed.
+    const armError = firstArmNotProducing(fold, declared, context)
+    return armError === undefined
+        ? { ...shape, resultType: declared }
+        : { ...shape, resultType: declared, error: armError }
+}
+
+/** The result of reading a fold's result type off its definition. */
+type InferredResult =
+    | { readonly kind: "typed"; readonly type: Type }
+    | { readonly kind: "ambiguous" }
+
+/**
+ * The LUB of a fold's arm bodies, read from the emitted term.
+ *
+ * `T-Fold`'s σ fixpoint already computes this: the term's residue after peeling
+ * the declared parameters *is* the join of the arms, seeded at `⊥` (`lc.md`
+ * §5.2). Re-deriving it from the arm bodies would be a second implementation of
+ * the same rule, so it is read through the core's own peel.
+ *
+ * `Any` is the LUB only when an arm is itself `Any`-typed; otherwise it means no
+ * common supertype exists below `Any` — `join` collapses both cases into one
+ * value, so the arms are consulted to tell them apart. An arm that cannot be
+ * typed alone is left to the verdict, which reports it.
+ */
+function inferResultType(
+    fold: FoldDecl,
+    paramTypes: readonly Type[],
+    definition: string,
+    context: FoldContext,
+): InferredResult {
+    const peeled = new LCTypeCheck().setRegistry(context.registry)
+        .peelDeclaredParameters(new OpSig(fold.name, [...paramTypes], Any, definition))
+    if (typeof peeled === "string") return { kind: "ambiguous" }
+    if (!(peeled.residue instanceof AnyType)) return { kind: "typed", type: peeled.residue }
+    return fold.arms.some((arm) => isAnyTypedArm(arm, context))
+        ? { kind: "typed", type: Any }
+        : { kind: "ambiguous" }
+}
+
+/**
+ * The first arm whose body does not produce the declared `out:`, as a
+ * diagnostic, or `undefined` when every arm does.
+ *
+ * This is `T-Fold`'s premise `Γ ⊢ tᵢ : σ` read case by case. It exists because
+ * the signature/definition verdict sees the σ fixpoint's *result*, and when two
+ * arms disagree that result is `Any` — the lattice TOP, which satisfies any
+ * declared `out:` at the result position, so the verdict accepts the fold saying
+ * only "returns Any", naming neither the case nor the type that disagreed.
+ * Checking each case first makes the diagnostic point at the mistake.
+ *
+ * An arm typed `Any` is skipped: `Any` is `<:` nothing but itself, so the verdict
+ * reports it against a narrower declaration either way, and that report is the
+ * accurate one — the arm genuinely produces a value that is not the declared
+ * type. This check's job is to name *which* arm disagreed.
+ */
+function firstArmNotProducing(
+    fold: FoldDecl,
+    declared: Type,
+    context: FoldContext,
+): string | undefined {
+    for (const arm of fold.arms) {
+        const produced = armBodyType(arm, context)
+        if (produced === undefined || produced instanceof AnyType) continue
+        if (isSubtype(produced, declared)) continue
+        return `the arm for "${arm.head.variant ?? "_"}" returns ${produced}, ` +
+            `which is not <: the declared \`out: ${declared}\``
+    }
+    return undefined
+}
+
+/** Whether the arm's body is `Any`-typed — the case an inferred `Any` is honest. */
+function isAnyTypedArm(arm: CaseArm, context: FoldContext): boolean {
+    return armBodyType(arm, context) instanceof AnyType
+}
+
+/**
+ * One fold arm body's type, with the arm's bindings in scope.
+ *
+ * The bindings are the variant's fields at their **declared** types, plus the
+ * fold's `in:` parameter. A recursive (`Family`) field is bound to the carrier:
+ * the fixpoint rebinds it to `σ`, and `σ` is what the arm's own result
+ * contributes, so the carrier is the seed reading — enough to tell an `Any` arm
+ * from a disagreeing one, which is all this is used for. The typing rule itself
+ * is `T-Fold`'s fixpoint and is unchanged; this never decides a fold's type.
+ *
+ * `undefined` means the body does not type-check on its own, which the
+ * signature/definition verdict reports.
+ */
+function armBodyType(arm: CaseArm, context: FoldContext): Type | undefined {
+    const variant = context.carrier.findVariant(arm.head.variant ?? "")
+    if (variant === undefined) return undefined
+    // A recursive field arrives already folded, so it is the carrier here. The
+    // same list is the lambda chain's annotations and the declared parameters, so
+    // `peelDeclaredParameters` sees them agree and the residue is the body's type.
+    const fieldTypes = variant.fields.map((field) =>
+        field.type instanceof FamilyType ? context.carrier as Type : field.type
+    )
+    // The binder names are the arm's own — the body references what the author
+    // wrote, and resolution has already checked the count against the variant.
+    const binders = fieldTypes.map((type, i) =>
+        `\\${arm.head.bindings[i] ?? variant.fields[i]?.name ?? "_"}:${type}. `
+    )
+    const parameters = context.parameterTypes.map((type) =>
+        `\\${context.render.inBinding}:${type}. `
+    )
+    const body = renderExpr(arm.body, context.render)
+    const peeled = new LCTypeCheck().setRegistry(context.registry)
+        .peelDeclaredParameters(
+            new OpSig(
+                `arm_${arm.head.variant ?? "wild"}`,
+                [...fieldTypes, ...context.parameterTypes],
+                Any,
+                `${binders.join("")}${parameters.join("")}${body}`,
+            ),
+        )
+    return typeof peeled === "string" ? undefined : peeled.residue
+}
+
+/** What an arm-body typing needs beyond the renderer. */
+interface FoldContext {
+    readonly registry: TypeRegistry
+    /** The carrier — what a recursive field is bound to. */
+    readonly carrier: DataType
+    readonly parameterTypes: readonly Type[]
+    readonly render: RenderCtx
+}
+
+/** The diagnostic for an omitted `out:` whose arms have no common type. */
+function ambiguousOutMessage(fold: FoldDecl): string {
+    return `\`fold ${fold.name}\` declares no \`out:\`, and its arms have no common type — ` +
+        `an \`Any\` result describes none of them, so declare \`out: Any\` if that is intended`
 }
 
 /**
@@ -425,19 +599,36 @@ function lambdaChain(
  *
  * `in:` defaults to the declaring type — a fold over a `Stack` takes a `Stack`,
  * which is also what the arm-beyond-field bindings refer to. `out:` has no
- * defensible default beyond the lattice top, which every type is a subtype of.
+ * default here: an omitted `out:` is **inferred** from the arms
+ * (`inferResultType`), so `declaredSpecType` is what tells the two cases apart.
  */
 function specType(
     fold: FoldDecl,
-    key: "in" | "out",
+    key: "in",
     self: DataType,
     ownerName: string,
     published: ReadonlyMap<string, Type>,
 ): Type {
+    return declaredSpecType(fold, key, ownerName, published) ?? self
+}
+
+/**
+ * The type a spec entry declares, or `undefined` when the fold omits it.
+ *
+ * The distinction is what makes `out:` inference possible: a fold that does not
+ * state its result has one *computed*, so a caller must be able to tell "declared
+ * `Any`" from "declared nothing". Collapsing the two would substitute the lattice
+ * top for every fold that did not answer the question, and an inferred result is
+ * never reached.
+ */
+function declaredSpecType(
+    fold: FoldDecl,
+    key: "in" | "out",
+    ownerName: string,
+    published: ReadonlyMap<string, Type>,
+): Type | undefined {
     const entry = fold.spec?.entries.find((e) => e.key === key && e.kind === "type")
-    if (entry === undefined || entry.kind !== "type") {
-        return key === "in" ? self : Any
-    }
+    if (entry === undefined || entry.kind !== "type") return undefined
     // A published handle map yields `Type`, so the signature needs no cast.
     return elaborateType(entry.type, ownerName, published)
 }
