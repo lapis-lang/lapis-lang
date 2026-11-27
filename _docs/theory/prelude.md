@@ -247,9 +247,10 @@ exercises. Five things about the spelling are load-bearing:
 
 > **Runnable.** `Succ pred: pred` needs no self-reference, so `Ω`'s acyclicity rule (`lc.md` §2.5)
 > does not apply: the recursion is the fold's induction. `size <out: Nat>` over `List` reaches the
-> same conclusion (`Cons head rest -> Succ pred: rest`), but is blocked for an unrelated reason —
-> the type checker's capture parse binds a recursive field at the carrier. A binder named `in` has
-> no core spelling (`LC_RESERVED_WORDS`), so the emitter renames it (§12.63).
+> same conclusion (`Cons head rest -> Succ pred: rest`) and installs the same way: a recursive field
+> binds the fold's result, so the arm's use of it under a non-carrier σ is a normal typing premise
+> of `T-Fold` (`lc.md` §5.2), not a restriction on what may be written. A binder named `in` has no
+> core spelling (`LC_RESERVED_WORDS`), so the emitter renames it (§12.63).
 
 ### 3.3 `Bool` — connectives
 
@@ -415,11 +416,11 @@ The last two rows are the point: the core calculus runs folds and unfolds over `
 through the builder API, and `test/fixtures.ts` already constructs `Nat`, `Bool`, `Stack`, `Queue`,
 and `Stream`. The surface `data` production now parses and builds those types, so source reaches the
 core. What is missing is the rest of the operation pipeline — an operation's emitted definition does
-not enter `Ω` unless it checks against its declared signature, and a recursive one is rejected when
-it tries (`overview.md` §12.47 closed, §12.48 open, §12.50 open). A fold whose declaration and
-definition agree now elaborates, checks, and installs; the recursive folds this document declares
-(`add`, `size`) are blocked by `Ω`'s acyclicity and flat keying, not by elaboration. `add` is
-blocked twice: §12.48, because its `in:` declares a second operand the emitter does not yet curry.
+not enter `Ω` unless it checks against its declared signature. A fold whose declaration and
+definition agree now elaborates, checks, and installs; this document's own recursive folds (`add`,
+`size`) are among them. What remains open is `Ω`'s **keying**: two types may not each declare an
+operation of the same name (`overview.md` §12.50), which is what an `Int`/`Nat` pair of `add`s
+needs. Recursion and currying are not obstructions today.
 
 So the executable tier is `Nat` + `List` _in the core_: a fixture can declare them and fold over
 them, with no new evaluation machinery. Source-level folds do not yet run. The documented tier is

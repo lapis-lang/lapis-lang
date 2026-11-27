@@ -22,6 +22,7 @@ import {
     type Type,
     TypeEnv,
     Variant,
+    VariantVal,
 } from "../src/index.ts"
 import { Any, Family, ValueEnv } from "../src/index.ts"
 
@@ -989,4 +990,62 @@ Deno.test("pipeline: `parseToTree` still yields trees for diagnostics and unpars
     const { trees } = new SurfaceParse().parseToTree(STACK)
     assert(trees.length >= 1)
     assertEquals(trees[0]?.source, STACK)
+})
+
+// ── A fold whose result is not its carrier ──────────────────────────────────
+//
+// The capture parse that locates an arm's body span is a scan, not the fold's
+// typing judgement: `evalFoldFixpoint` re-parses the body under the real σ. A
+// scan that binds a recursive `Family` field to the CARRIER decides the question
+// anyway — a body reading that field under any other σ is rejected before the
+// fixpoint runs, so a fold into a non-carrier type cannot be stated from source.
+
+const SIZE_LIST = `data Nat
+    Zero
+    Succ pred: Family
+
+data List
+    Nil
+    Cons head: Nat rest: Family
+
+    fold size <out: Nat>
+        Nil -> Zero
+        Cons head rest -> Succ pred: rest
+`
+
+Deno.test("elaborate: a fold whose result is not its carrier installs", () => {
+    // `rest` holds the folded sub-list — a Nat under the fold's σ — so
+    // `Succ pred: rest` is well typed. The scan must reach that verdict without
+    // deciding it: the emitted text and the declared signature are what agree.
+    const result = pipeline(SIZE_LIST)
+    assertEquals(result.operations.length, 1)
+    assertEquals(result.opRegistry.lookup("size")?.resultType.toString(), "Nat")
+    assertEquals(
+        result.operations[0]?.definition,
+        "\\e:List. fold [List] e { Nil() -> Zero(), Cons(head rest) -> Succ(rest) }",
+    )
+})
+
+Deno.test("elaborate: a non-carrier size computes by structural recursion", () => {
+    // The end-to-end property: not "the emission is the right string" but the
+    // operation type-checks and evaluates at each size. The recursion is the
+    // fold's own induction — no arm names `size`.
+    const { registry, opRegistry } = pipeline(SIZE_LIST)
+
+    /** A `Nat` value read back as its unary magnitude. */
+    const magnitude = (value: unknown): number => {
+        if (!(value instanceof VariantVal)) throw new Error("not a variant")
+        return value.variantName === "Zero" ? 0 : 1 + magnitude([...value.fields.values()][0])
+    }
+    const size = (term: string) => {
+        const [value] = [
+            ...new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(term, new ValueEnv()),
+        ]
+        return value === undefined ? undefined : magnitude(value)
+    }
+
+    assertEquals(size("size(Nil())"), 0)
+    assertEquals(size("size(Cons(Zero(), Nil()))"), 1)
+    assertEquals(size("size(Cons(Zero(), Cons(Zero(), Nil())))"), 2)
 })
