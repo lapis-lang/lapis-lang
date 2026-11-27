@@ -159,8 +159,11 @@ operations, a scanner looking for operation references may exclude them without 
 installed **before** it, so self-reference, forward reference, and cycles are all rejected at
 declaration. This is a stratification of `Ω` by declaration order, and it is what makes E-Op's
 unfolding terminate without a fuel argument (§6.1's progress argument relies on it). Its cost is
-that no operation may be recursive — see `overview.md` §12.50 for the open question of whether that
-is the right rule.
+that no operation may be recursive **by name** — which is not a restriction on what a program can
+compute, because a data fold's recursion is its own induction rather than a self-call (§5.2), and
+`unfold` is productive rather than recursive. The remaining question is identity, not recursion:
+`Ω`'s keys are operation names, so two types cannot each declare an operation of the same name — see
+see `overview.md` §12.50.
 
 **Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
 `primitive` (pinned by the language definition — builtin operations with fixed law sets, authority
@@ -456,6 +459,19 @@ The seed's second job is why `⊥` is admissible at all: a `Family` field is reb
 arm body can be re-parsed, which needs `σₙ` to be a real type from the first round. `⊥` is one
 (`Nothing <: t` for every `t`, so a first-round body cannot fail for want of a binding), and the
 next round's join replaces it with the bodies' own types.
+
+**A capture scan is not a premise.** An implementation locates each arm's body before it knows `σ`,
+and the body's type must not be read at that point: the binding a scan gives a `Family` field is a
+placeholder for the fixpoint's `σₙ`, never a claim about the field. Binding the placeholder to the
+carrier is the tempting choice and it is wrong for exactly the reason the seed is not the carrier —
+it makes the carrier an upper bound on every use of a recursive field, so
+`Cons(head rest) ->
+Succ(rest)` fails while `σ` is still unknown even though the fixpoint assigns it
+`Nat`. The placeholder must satisfy every premise the eventual `σₙ` could satisfy, which is `⊥`'s
+property and `Any`'s is not: `Any` is the wrong direction, since a premise that needs a `Nat` cannot
+accept `Any`, whereas `S-Bot` puts `⊥` below every type. Both the acceptance and the rejection of an
+arm therefore remain the fixpoint's: a body that cannot type under the converged `σ` is still
+rejected (§5.2's `reparseFailed`), and no arm is admitted that `T-Fold` would not admit.
 
 ### 5.3 Observation (codata elimination)
 

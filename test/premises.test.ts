@@ -404,7 +404,59 @@ Deno.test("T-Fold: a fold whose bodies agree under refinement is unaffected", ()
     assertEquals(result.size, 1)
     assertEquals([...result][0], stack)
 })
+// ── T-Fold: the capture scan does not decide what the fixpoint decides ──────
+//
+// The capture parse that locates a variant arm's body span is not the fold's
+// typing judgement — `evalFoldFixpoint` re-parses the body under each σ. A scan
+// that binds a `Family` field to the CARRIER is decisive anyway: it rejects
+// every body reading a recursive field under a σ other than the carrier, so a
+// fold into a non-carrier type cannot be stated.
+//
+// The scan binds the field to ⊥. `S-Bot` places ⊥ below every type, so the scan
+// admits any use the fixpoint could later justify, and it is ⊥ rather than `Any`
+// because `Any` fails the reverse direction: `Succ(Any)` is not a `Nat`, so the
+// arms that rebuild `Succ` around their recursive field would be rejected too.
+//
+// `Stack` is the carrier throughout: its recursive field is `rest` and its
+// `value` field is `Any`, so an arm can produce a `Nat` while the fold's result
+// is a `Nat` and not a `Stack`. That shape is the whole point — the recursive
+// field must be readable at a σ other than the carrier.
 
+Deno.test("T-Fold: a recursive field read under a non-carrier σ types as that σ", () => {
+    // `rest` is the fold's result (a Nat under σ = Nat), so `Succ(rest)` is
+    // well typed. The capture scan sees `rest` before σ is known; binding it to
+    // the carrier here would demand `Succ(Stack)` and reject the fold.
+    const forest = typeForestOf(
+        "fold [Stack] Empty() { Empty() -> Zero(), Push(v rest) -> Succ(rest) }",
+    )
+    assertEquals(forest.size, 1, "a recursive field under a non-carrier σ must type")
+    assertEquals([...forest][0]?.toString(), "Nat")
+})
+
+Deno.test("T-Fold: a recursive field used at the carrier still types", () => {
+    // The control: σ IS the carrier here, so rebinding `rest` at the carrier is
+    // correct and binding the scan to ⊥ must not disturb it. The forest size is
+    // asserted, not just the first derivation's type: two derivations that agree
+    // on the type still double every enclosing forest.
+    const forest = typeForestOf(
+        "fold [Stack] Empty() { Empty() -> Empty(), Push(v rest) -> Push(Zero(), rest) }",
+    )
+    assertEquals(forest.size, 1)
+    assertEquals([...forest][0]?.toString(), "Stack")
+})
+
+Deno.test("T-Fold: an ill-typed recursive use is still rejected by the fixpoint", () => {
+    // The negative control that keeps the scan honest. ⊥ in the scan is not ⊥ in
+    // the result: here σ = Stack (both arms are Stack), and the body needs `rest`
+    // to be a `Nat`, so the fixpoint's reparse fails and the fold is rejected.
+    // The scan is permissive; the judgement is not.
+    assertEquals(
+        typeForestOf("fold [Stack] Empty() { Empty() -> Empty(), Push(v rest) -> Succ(rest) }")
+            .size,
+        0,
+        "a body that cannot type under the refined σ must be rejected",
+    )
+})
 // ── T-Cofold: the scrutinee premise is enforced ──────────────────────────────
 
 Deno.test("T-Cofold: a scrutinee that is not a codata subtype is rejected", () => {

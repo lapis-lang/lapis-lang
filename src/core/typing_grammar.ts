@@ -784,10 +784,23 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                     return empty<SpanFoldRecord>()
                 }
                 const bindingList = (bindings as string[] | undefined) ?? []
-                // Build the handler context: non-recursive fields at their
-                // declared types, Family fields at σ (initially the carrier —
-                // the fixpoint rebinds Family fields to the current σ each
-                // iteration).
+                // Build the handler context for the CAPTURE parse: a
+                // non-recursive field binds at its declared type, and a
+                // Family field binds at ⊥.
+                //
+                // The capture parse exists only to locate the body's span; its
+                // resulting type is discarded, and `evalFoldFixpoint` re-parses
+                // the body under the real σ. A scan that binds the field to the
+                // CARRIER decides the fold's shape: it requires every use of a
+                // recursive field to already be the carrier (`Succ(rest)` is
+                // rejected because `Succ` expects a number and the scan handed
+                // it a List), which is the fixpoint's question, not the scan's.
+                //
+                // ⊥ is what makes the scan non-deciding: `S-Bot` puts ⊥ below
+                // every type, so any premise the converged σₙ could satisfy is
+                // satisfiable during the scan. `Any` fails the reverse
+                // direction — `Succ(Any)` is not a `Nat` — so it would reject
+                // the very arms whose recursive field σₙ later types.
                 let handlerCtx = ctx
                 for (let i = 0; i < bindingList.length; i++) {
                     const field = variant.fields[i]
@@ -795,14 +808,15 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
                         handlerCtx = new TypeCheckCtx(
                             handlerCtx.gamma.extend(
                                 bindingList[i]!,
-                                field.type.resolveFamily(dataType),
+                                field.type instanceof FamilyType ? Nothing : field.type,
                             ),
                             handlerCtx.delta,
                         )
                     }
                 }
-                // Parse the body to capture the span (the type is discarded —
-                // it was computed under the placeholder σ = Any)
+                // Parse the body to capture the span. The type is discarded:
+                // it was computed under the placeholder binding above, not
+                // under the fixpoint's σ.
                 return this.exprProd(handlerCtx)
                     .map((_body, span) => ({
                         kind: "variant" as const,

@@ -52,6 +52,14 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
   Reading one orientation into the other is the defect this records — a top-down reading of data
   makes recursive fields subterms (so `Succ(pred)` would rebuild a list), and a bottom-up reading of
   codata makes a generator's `self` an already-observed value rather than the seed.
+- **An implementation's capture scan binds a `Family` field to `⊥`, never to the carrier.** Before
+  `σ` is known the body's type is not available to decide anything, so whatever an arm's scan binds
+  a recursive field to is a placeholder for `σₙ` and not a premise. `⊥` is the only admissible
+  placeholder: `S-Bot` puts it below every type, so every premise the converged `σₙ` could satisfy
+  is satisfiable during the scan, while the carrier (an upper bound on the field, which rejects
+  `Succ(rest)` before the fixpoint runs) and `Any` (the wrong direction, since a `Nat` premise
+  cannot accept it) both decide the fold early. Acceptance and rejection stay the fixpoint's — a
+  body that cannot type under the converged `σ` is still rejected (`lc.md` §5.2).
 - **A fold's result type is declared or inferred; it is never defaulted to `Any`.** `T-Fold`'s `σ`
   is the fixpoint `⨆ᵢ type of tᵢ` seeded at `⊥` (`lc.md` §5.2) — the join's identity, so the arms'
   common type is the result. The limit is the **join**, so arms with no common supertype below `Any`
