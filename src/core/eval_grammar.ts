@@ -608,11 +608,12 @@ export class LCEval extends AbstractLC<EvalShape> {
                 const fieldValue = scrutinee.fields.get(field.name)
                 if (fieldValue !== undefined) {
                     // E-Fold: a Family-typed field (the μ-bound) binds the
-                    // *folded* result — vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ} — matching
-                    // the type checker, which binds it to σ (the fold's result
-                    // type). Non-recursive fields bind raw.
-                    // The recursion terminates: fieldValue is a proper
-                    // subterm of the scrutinee (structural recursion).
+                    // *folded* result — vⱼ' = fold [T] vⱼ {Cᵢ → tᵢ}. Data folds
+                    // are bottom-up (`lc.md` §5.2), so the arm runs after its
+                    // children: the binding is a value of the fold's result
+                    // type, never the subterm. Non-recursive fields bind raw.
+                    // The recursion terminates because the fold descends on
+                    // proper subterms, and T is a μ-type (finite).
                     const boundValue = field.type instanceof FamilyType &&
                             fieldValue instanceof VariantVal
                         ? this.evalFold(dataType, fieldValue, handlers, ambientEnv)

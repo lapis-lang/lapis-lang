@@ -411,6 +411,20 @@ join every round at no cost). A pattern-arm group keeps the strict one-common- �
 patterns-only carrier degenerates to that group's σ, a variants-only carrier to the variant
 fixpoint's σ.
 
+**Data folds are bottom-up; codata unfolds are top-down.** This orientation is what `Fᵢ(σ)[α := σ]`
+means and it is the whole content of the word _catamorphism_ here: a variant arm runs **after** its
+recursive children have been folded, so a `Family` binding holds the **already-computed result** of
+the subterm, never the subterm itself. `Succ pred: Family` is therefore bound to a value of the
+fold's _result_ type σ — which is why `Succ(pred) -> Succ(pred)` is the recursion for `add` and
+`size`: the arm rebuilds `Succ` around a field that is already a number.
+
+The dual holds for `unfold` (§5.3): a generator runs at the observation that demands it, so a
+recursive observer position is the seed's _own_ type, and the codata value is produced lazily,
+outermost-observer first. Reading one orientation into the other is the defect this paragraph exists
+to prevent — a top-down reading of data makes recursive fields subterms (so `Succ(pred)` would
+rebuild a _list_), and a bottom-up reading of codata makes a generator's `self` an already-observed
+value rather than the seed.
+
 **The σ-fixpoint.** The rule above is a recursive premise: `σ` appears both in each arm's type and
 in the conclusion, so it is read as the limit of
 
