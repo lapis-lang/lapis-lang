@@ -67,7 +67,7 @@ export type Primary =
     | Paren
     | OpRef
 
-/** A literal: whatever text a declared pattern matched (§2.4). */
+/** A literal: whatever text a declared pattern matched (`surface-grammar.md` §2.4). */
 export interface Lit {
     readonly kind: "lit"
     readonly text: string

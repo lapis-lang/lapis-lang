@@ -82,9 +82,12 @@ Point Point2D x: 3 y: 4
     asString                /* "(3, 4)" */
 ```
 
-Each handler case binds the variant's fields as named parameters on the left-hand side of `->`, in
-declaration order. `x` is the fold result for field `x`; for non-recursive fields that is the raw
-stored value.
+Each handler case binds the variant's fields on the left-hand side of `->`, in declaration order,
+and **each binding is written with its field's declared name**: `Point3D x y z` is the only spelling
+for a `Point3D x: Int y: Int z: Int`, and `Point3D p q r` is rejected. A case arm is a
+pattern-matching form, so it reads as a destructuring of the declared variant rather than as a fresh
+set of bindings that happens to have the right arity; `_` discards a field without naming it. For
+non-recursive fields the binding is the raw stored value. See `surface-grammar.md` §4.1.
 
 ---
 
@@ -111,8 +114,8 @@ data Stack
         Push value rest -> {value} , rest
 
     fold contains <in: Any, out: Bool>
-        Empty target -> false
-        Push value rest target -> value = target | (rest contains: target)
+        Empty in -> false
+        Push value rest in -> value = in | (rest contains: in)
 
     unfold FromArray <in: List>
         Empty arr -> arr isEmpty | {}
@@ -312,14 +315,14 @@ is a decision on a seed, and belongs here.
 protocol Eq
     fold equals <in: Self, out: Bool>
     fold notEquals <in: Self, out: Bool>
-        (self equals: other) not
+        (self equals: in) not
 
 protocol Ordered <: Eq
     fold compare <in: Self, out: Int>
     fold lessThan <in: Self, out: Bool>
-        (self compare: other) < 0
+        (self compare: in) < 0
     fold greaterThan <in: Self, out: Bool>
-        (self compare: other) > 0
+        (self compare: in) > 0
 
 /* Declare conformance */
 data Num
@@ -327,9 +330,9 @@ data Num
 
     satisfies: Ordered
     fold equals <in: Self, out: Bool>
-        N value other -> value = other value
+        N value -> value = in value
     fold compare <in: Self, out: Int>
-        N value other -> value - other value
+        N value -> value - in value
 
 (Num N: 3) lessThan: (Num N: 5)    /* true */
 ```
@@ -341,9 +344,9 @@ member neither declared by the type nor carrying a default is a conformance erro
 
 The default body is an expression, not an arm list: a protocol cannot see its conformers' variants,
 so a default can only compose operations over `self`. Those bodies may read `self` and, when the
-member declares `in:`, `other` — the two names the machinery supplies. `notEquals` above derives
-from `equals`, and `lessThan`/`greaterThan` derive from `compare`, which is the whole point of a
-default: an operation a conformer gets for free from one it declared.
+member declares `in:`, `in` — the two names the machinery supplies. `notEquals` above derives from
+`equals`, and `lessThan`/`greaterThan` derive from `compare`, which is the whole point of a default:
+an operation a conformer gets for free from one it declared.
 
 `Unfold` members declare a constructor each conformer must supply, so they take no default;
 `merge`/`scan` are fusion directives and take none either.
@@ -373,8 +376,8 @@ data Nat
     unfold Identity
         Zero -> true
     fold combine <in: Self, out: Self>
-        Zero other -> other
-        Succ pred other -> Succ pred combine: other
+        Zero -> in
+        Succ pred -> Succ pred: (pred combine: in)
 ```
 
 Two things are load-bearing here.
@@ -402,10 +405,10 @@ data Num
     N value: Int
 
     fold add <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 0))>
-        N value other -> Num N: value + other value
+        N value -> Num N: value + in value
 
     fold multiply <in: Self, out: Self, properties: (commutative, associative, identity: (Num N: 1), distributive: #add)>
-        N value other -> Num N: value * other value
+        N value -> Num N: value * in value
 ```
 
 Declared properties trigger `LawError` at runtime when violated on random samples, and enable the
@@ -433,10 +436,10 @@ data Stack
         Push value rest -> value , old rest
 
     fold append <in: Any, out: Family>
-        demands: self | val notNil
+        demands: self | in notNil
         ensures: self old result | result size = old size + 1
-        Empty val -> Family Push value: val rest: Family Empty
-        Push value rest val -> Family Push value: value rest: (rest append: val)
+        Empty in -> Family Push value: in rest: Family Empty
+        Push value rest in -> Family Push value: value rest: (rest append: in)
 ```
 
 | Clause       | Meaning                                            |
@@ -540,23 +543,23 @@ asynchronously.
 
 ## Syntax Summary
 
-| Lapis construct                            | Description                                                                                                     |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `data` + indented body                     | Algebraic data type: variants and operations                                                                    |
-| `behavior` + indented body                 | Final coalgebra: observers, unfolds, folds, maps, merges                                                        |
-| `fold name <spec>` + indented cases        | Structural dispatch — catamorphism; arms dispatch on variants, so the arm keying is the decision                |
-| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism; arms decide on a seed by `guard \| payload`                              |
-| `merge name <#a, #b>`                      | Fold-fold fusion (single-traversal composition)                                                                 |
-| `protocol` + indented body                 | Trait / interface with optional default method bodies                                                           |
-| `relation` + indented body                 | Data ADT with allegory / Datalog operations                                                                     |
-| `query` + indented body                    | Behavior with cospan structure / Prolog-style search                                                            |
-| `io` + indented body                       | Mealy machine: state fields + PascalCase step handlers                                                          |
-| `double` / `Int double`                    | Function value — an operation reference, optionally type-qualified; no block literal                            |
-| `(key: val, ...)`                          | Inline spec or named-argument record                                                                            |
-| `Variant fields -> body`                   | Pattern case: `->` separates pattern from body; single-expression bodies inline, multi-line bodies indent below |
-| `in: Type`                                 | Names the `in:` argument's type; the arm binds the value as a trailing binding                                  |
-| `old fieldName`                            | Raw pre-fold sub-node (paramorphism)                                                                            |
-| `prev fieldName`                           | Previous fold result, one step back (histomorphism)                                                             |
-| `aux foldName`                             | Auxiliary fold result (zygomorphism)                                                                            |
-| `self`                                     | Current instance, always in scope                                                                               |
-| `Family` / `Self`                          | Recursive self-reference (data / behavior)                                                                      |
+| Lapis construct                            | Description                                                                                                                                                                               |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data` + indented body                     | Algebraic data type: variants and operations                                                                                                                                              |
+| `behavior` + indented body                 | Final coalgebra: observers, unfolds, folds, maps, merges                                                                                                                                  |
+| `fold name <spec>` + indented cases        | Structural dispatch — catamorphism; arms dispatch on variants, so the arm keying is the decision                                                                                          |
+| `unfold Name <spec>` + indented generators | Corecursion constructor — anamorphism; arms decide on a seed by `guard \| payload`                                                                                                        |
+| `merge name <#a, #b>`                      | Fold-fold fusion (single-traversal composition)                                                                                                                                           |
+| `protocol` + indented body                 | Trait / interface with optional default method bodies                                                                                                                                     |
+| `relation` + indented body                 | Data ADT with allegory / Datalog operations                                                                                                                                               |
+| `query` + indented body                    | Behavior with cospan structure / Prolog-style search                                                                                                                                      |
+| `io` + indented body                       | Mealy machine: state fields + PascalCase step handlers                                                                                                                                    |
+| `double` / `Int double`                    | Function value — an operation reference, optionally type-qualified; no block literal                                                                                                      |
+| `(key: val, ...)`                          | Inline spec or named-argument record                                                                                                                                                      |
+| `Variant fields -> body`                   | Pattern case: `->` separates pattern from body; single-expression bodies inline, multi-line bodies indent below                                                                           |
+| `in: Type`                                 | Declares the fold's one extra argument (the carrier is always the first). The arm names it with a binding after the variant's fields; the name is a curried lambda, not a handler binding |
+| `old fieldName`                            | Raw pre-fold sub-node (paramorphism)                                                                                                                                                      |
+| `prev fieldName`                           | Previous fold result, one step back (histomorphism)                                                                                                                                       |
+| `aux foldName`                             | Auxiliary fold result (zygomorphism)                                                                                                                                                      |
+| `self`                                     | Current instance, always in scope                                                                                                                                                         |
+| `Family` / `Self`                          | Recursive self-reference (data / behavior)                                                                                                                                                |

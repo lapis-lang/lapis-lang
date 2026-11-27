@@ -62,6 +62,7 @@ export interface ResolutionError {
         | "bad-qualifier"
         | "selector-mismatch"
         | "arity-mismatch"
+        | "duplicate-spec-key"
         | "wildcard-arm"
     readonly message: string
 }
@@ -332,10 +333,11 @@ function validateBodyItem(
 /**
  * Validate a fold: its spec's types, its contract clauses, and its arms.
  *
- * An arm head's bindings beyond the variant's field count bind the fold's `in:`
- * value (`grammar.ts`'s `armHead`, the bindings beyond a variant's fields), so the *minimum* binding
- * count is enforced here — a head with fewer bindings than its variant's fields
- * is an arity error.
+ * An arm head binds exactly the variant's fields. The fold's `in:` parameter is
+ * not one of them: it is machinery-supplied and read from the body as `in`, in
+ * the same way `self` is (`surface-grammar.md` §4.1). That is why the core's
+ * handler list and the arm head agree on the field count — `E-Fold` walks
+ * `variant.fields` (`lc.md` §3.1) and the head names no more than that.
  */
 function validateFold(
     decl: DataDecl,
@@ -394,25 +396,67 @@ function validateArm(
                 `name one of its type's variants`,
         })
     }
-    if (variant !== undefined && arm.head.bindings.length < variant.fields.length) {
-        errors.push({
-            reason: "arity-mismatch",
-            message: `the arm for "${variant.name}" binds ${arm.head.bindings.length} ` +
-                `name(s) but the variant has ${variant.fields.length} field(s)`,
-        })
+    if (variant !== undefined) {
+        validateArmBindings(fold, variant, arm, errors)
     }
 
     validateExpression(arm.body, table, errors)
 }
 
-/** Validate every type in a spec record (`in:`/`out:` are the only typed keys). */
+/**
+ * An arm head binds exactly the variant's fields.
+ *
+ * The count is exact, not a minimum. Too few leaves a field unnamed; too many
+ * names a slot the emitted handler does not have, which the emitter would
+ * silently drop — the failure mode that made a two-parameter fold elaborate to
+ * a one-parameter definition.
+ */
+function validateArmBindings(
+    fold: FoldDecl,
+    variant: ResolvedVariant,
+    arm: CaseArm,
+    errors: ResolutionError[],
+): void {
+    const bound = arm.head.bindings.length
+    const fields = variant.fields.length
+    if (bound === fields) return
+    errors.push({
+        reason: "arity-mismatch",
+        message: bound < fields
+            ? `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
+                `${fields} field(s) — every field must be named`
+            : `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
+                `${fields} field(s) and \`fold ${fold.name}\` binds no extra argument — ` +
+                `the \`in:\` value is read from the body as \`in\``,
+    })
+}
+
+/**
+ * Validate a spec record: every entry's type, and the key's multiplicity.
+ *
+ * `specRecord` is a keyword *list*, so nothing in the grammar stops a key
+ * appearing twice, and `specType` reads the first match — the second would be
+ * silently dropped. A repeated `in:` is the dangerous case: it *looks* like the
+ * way to declare a second operand, resolves cleanly, and then elaborates to a
+ * one-parameter operation. It is rejected here instead.
+ */
 function validateSpec(
     spec: SpecRecord,
     owner: string,
     table: DeclarationTable,
     errors: ResolutionError[],
 ): void {
+    const seen = new Set<string>()
     for (const entry of spec.entries) {
+        if (seen.has(entry.key)) {
+            errors.push({
+                reason: "duplicate-spec-key",
+                message: `${owner} declares "${entry.key}" more than once in its spec record — ` +
+                    `each key may appear once, and a repeated one is silently dropped`,
+            })
+        }
+        seen.add(entry.key)
+
         if (entry.kind === "type") {
             const context = `the "${entry.key}" of ${owner}`
             validateType(entry.type, context, table, errors)

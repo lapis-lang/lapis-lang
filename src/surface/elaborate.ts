@@ -63,10 +63,10 @@ export interface ElaboratedOperation {
 export interface ElaborationError {
     /**
      * The emitted definition does not type as the declared signature —
-     * `paramTypes → resultType` (`lc.md` §2.4). Every way the two can disagree
-     * is this one reason, because they are one condition: the signature comes
-     * from the spec (`in:` value, `out:` result) and the definition from the
-     * arms, and `Ω` requires them to agree component-wise.
+     * `paramTypes → resultType`. Every way the two can disagree is this one
+     * reason, because they are one condition: the signature comes from the spec
+     * (`in:` value, `out:` result) and the definition from the arms, and `Ω`
+     * requires them to agree component-wise (`lc.md` §2.5, well-formedness).
      */
     readonly reason: "not-well-formed"
     /** The operation whose elaboration failed. */
@@ -324,11 +324,20 @@ function publishedHandles(types: readonly DataType[]): ReadonlyMap<string, Type>
 /**
  * `fold size <in: S, out: T>` → an operation over the declaring type.
  *
- * The definition is a lambda over the fold's `in:` value whose body is the core
- * fold. Arms become the core's comma-separated handler list, keyed by variant
- * name with positional bindings — the arm head's bindings *are* the handler's
- * binding list, in order, which is why §5.1's "bindings beyond the field count
- * bind the input" needs no translation.
+ * The definition is a curried lambda chain whose body is the core fold. The
+ * **carrier** is always the first parameter — the arms destructure the declaring
+ * type's variants, so the fold's receiver is fixed by where it is declared. An
+ * `in:` adds exactly one more (`surface-syntax.md` §2.3: an operation takes the
+ * receiver and at most one `in:` value), which is what makes `add` an operation
+ * of two arguments while `size` has one.
+ *
+ * Arms become the core's comma-separated handler list, keyed by variant name
+ * with positional bindings. The parameter's name comes from the arms: a head
+ * binds the variant's fields, and the binding beyond that is the author's name
+ * for the extra lambda (`surface-grammar.md` §4.1). That is why `Zero other ->
+ * other` works with no core change — `other` is a lambda the emitter introduces,
+ * never a handler binding, so `E-Fold`'s walk over `variant.fields` (`lc.md`
+ * §3.1) never has to reach it.
  */
 function elaborateFold(
     fold: FoldDecl,
@@ -336,18 +345,79 @@ function elaborateFold(
     self: DataType,
     published: ReadonlyMap<string, Type>,
 ): ElaboratedOperation {
-    const inType = specType(fold, "in", self, decl.name, published)
     const outType = specType(fold, "out", self, decl.name, published)
+    const hasParameter = fold.spec?.entries.some((e) => e.key === "in" && e.kind === "type") ??
+        false
+    // The carrier is the first parameter and always present; `in:` is a second
+    // argument, never a replacement for it (`elaboration.md` §3.1).
+    const paramTypes: Type[] = [self]
+    if (hasParameter) paramTypes.push(specType(fold, "in", self, decl.name, published))
 
-    const ctx: RenderCtx = { decl, published }
+    const ctx: RenderCtx = { decl, published, inBinding: emittedInBinding(fold) }
     const handlers = fold.arms.map((arm) => renderArm(arm, ctx))
+    const parameters = hasParameter ? [ctx.inBinding] : []
+    const definition = lambdaChain(decl.name, parameters, paramTypes.slice(1)) +
+        `fold [${decl.name}] e { ${handlers.join(", ")} }`
     return {
         name: fold.name,
-        paramTypes: [inType],
+        paramTypes,
         resultType: outType,
-        definition: `\\e:${decl.name}. fold [${decl.name}] e { ${handlers.join(", ")} }`,
+        definition,
         source: fold,
     }
+}
+
+/**
+ * The name the fold's extra argument is bound to in the emitted core term.
+ *
+ * The surface spells it `in` — a keyword, read from an arm body like `self`.
+ * The core reserves that word for its `let … in` delimiter (`LC_RESERVED_WORDS`)
+ * and admits only `[A-Za-z0-9_]` in an identifier, so the emitted binder needs a
+ * core-legal spelling; the reference sites render through the same value, so the
+ * two cannot drift.
+ *
+ * The name is made **hygienic** against the arm's own bindings: a field may be
+ * named `in_` (it is an ordinary identifier), so the first candidate that the
+ * variant's fields do not already use wins. The last candidate needs no check —
+ * only one field name is tried against it.
+ */
+function emittedInBinding(fold: FoldDecl): string {
+    const bound = new Set<string>()
+    for (const arm of fold.arms) {
+        for (const binding of arm.head.bindings) bound.add(binding)
+    }
+    for (const candidate of ["in_", "in__", "in___", "in____"]) {
+        if (!bound.has(candidate)) return candidate
+    }
+    // Four `in_`-suffixed fields in one variant is not a case worth carrying
+    // more candidates for; a collision here is a name the author chose.
+    return "in_____"
+}
+
+/**
+ * The emitted lambda chain: the carrier as `e`, then one lambda per `in:`
+ * parameter.
+ *
+ * The core's `E-Op` applies a definition by currying (`lc.md` §3.1, where
+ * `def(op) = λx₁:σ₁. … λxₙ:σₙ. t`), so the definition's shape must be a lambda
+ * per declared parameter — one short is a definition that does not type as its
+ * signature, which is what made a two-parameter fold elaborate to a
+ * one-parameter term.
+ *
+ * Every binder is annotated. The core's `T-Abs` reads the type from the binder,
+ * so an unannotated `\other.` has no type and the definition fails to parse —
+ * the annotation is syntax, not decoration.
+ */
+function lambdaChain(
+    carrier: string,
+    parameters: readonly string[],
+    parameterTypes: readonly Type[],
+): string {
+    let chain = `\\e:${carrier}. `
+    for (let i = 0; i < parameters.length; i++) {
+        chain += `\\${parameters[i]}:${parameterTypes[i]!.toString()}. `
+    }
+    return chain
 }
 
 /**
@@ -377,6 +447,8 @@ interface RenderCtx {
     readonly decl: DataDecl
     /** The program's published types, for a construction's declared field order. */
     readonly published: ReadonlyMap<string, Type>
+    /** The core spelling of the fold's extra argument — see `emittedInBinding`. */
+    readonly inBinding: string
 }
 
 /**
@@ -384,6 +456,12 @@ interface RenderCtx {
  * and handlers with **commas** — `{ Empty() -> 0, Push(v rest) -> rest }`. Getting
  * this wrong is silent: the parse just fails, with no hint that a separator is the
  * cause.
+ *
+ * Only the variant's fields appear in the handler's binding list. An arm head's
+ * bindings beyond that count *name* the fold's `in:` parameter, which is a
+ * curried lambda around the whole fold (`surface-grammar.md` §4.1) — emitting
+ * the name here would rebind it inside the handler, and `E-Fold`'s walk over
+ * `variant.fields` (`lc.md` §3.1) would never supply a value for it.
  *
  * A wildcard arm is rejected rather than expanded: `_` means exhaustiveness over an
  * *open* variant set, and expanding it against the current set would be wrong the
@@ -394,7 +472,24 @@ function renderArm(arm: CaseArm, ctx: RenderCtx): string {
     const body = renderExpr(arm.body, ctx)
     // The resolver guarantees a named variant; `_` is rejected there because the
     // core's fold form cannot express an open wildcard.
-    return `${arm.head.variant}(${arm.head.bindings.join(" ")}) -> ${body}`
+    const bindings = arm.head.bindings.slice(0, fieldCount(arm, ctx))
+    return `${arm.head.variant}(${bindings.join(" ")}) -> ${body}`
+}
+
+/**
+ * How many fields the arm's variant declares — the number of head bindings that
+ * belong to the handler rather than naming the fold's parameter.
+ *
+ * A miss falls back to the written count, so a caller bug yields the pre-existing
+ * behaviour instead of dropping a binding that had a slot.
+ */
+function fieldCount(arm: CaseArm, ctx: RenderCtx): number {
+    for (const type of ctx.published.values()) {
+        if (!(type instanceof DataType)) continue
+        const variant = type.findVariant(arm.head.variant ?? "")
+        if (variant !== undefined) return variant.fields.length
+    }
+    return arm.head.bindings.length
 }
 
 // ── Expressions ──────────────────────────────────────────────────────────────
@@ -458,6 +553,9 @@ function renderPrimary(primary: Primary, ctx: RenderCtx): string {
             // `Family`/`Self` in expression position denote the recursive
             // position; the core spells that as the enclosing type's name.
             if (primary.name === "Family" || primary.name === "Self") return ctx.decl.name
+            // The fold's extra argument: same rename as its binder, or the two
+            // would disagree.
+            if (primary.name === "in") return ctx.inBinding
             return primary.name
         case "variantRef":
             // A zero-field variant is a *construction* in the core, not a bare

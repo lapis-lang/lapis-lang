@@ -116,7 +116,7 @@ Deno.test("elaborate: the elaborated registry rejects a wrong arity", () => {
 const STACK_TOP = `data Stack
     Empty
     Push value: Any rest: Family
-    fold top <in: Stack, out: Stack>
+    fold top <out: Stack>
         Empty -> Empty
         Push x rest -> rest
 `
@@ -148,6 +148,157 @@ Deno.test("elaborate: the fold's definition type-checks in the core", () => {
     assertEquals(forest[0]?.toString(), "(Stack → Stack)")
 })
 
+// ── A fold's `in:` is its second parameter ──────────────────────────────────
+//
+// The carrier is always the first parameter, so `in:` adds one and the
+// definition is a lambda per declared parameter. The parameter's name comes from
+// the machinery name read from a body — the curried lambda, never a handler
+// binding, because the core's `E-Fold` supplies values for the variant's fields
+// only.
+
+const NAT_PICK = `data Nat
+    Zero
+    Succ pred: Family
+    fold pick <in: Self, out: Self>
+        Zero -> in
+        Succ pred -> in
+`
+
+Deno.test("elaborate: `in:` adds a second parameter after the carrier", () => {
+    const { operations, types } = pipeline(NAT_PICK)
+    const op = operations[0]!
+    assertEquals(op.paramTypes.length, 2)
+    assertEquals(op.paramTypes[0], types[0])
+    assertEquals(op.paramTypes[1], types[0])
+})
+
+Deno.test("elaborate: an `in:` parameter is a curried lambda, not a handler binding", () => {
+    // The binding list holds the variant's fields only. The parameter appears in
+    // the lambdas and in the bodies, never inside `Zero(…)` — a handler binding
+    // for it would be a position `E-Fold` never fills. The emitted name is the
+    // core-legal spelling of the surface keyword, which the core reserves.
+    const { operations } = pipeline(NAT_PICK)
+    assertEquals(
+        operations[0]?.definition,
+        "\\e:Nat. \\in_:Nat. fold [Nat] e { Zero() -> in_, Succ(pred) -> in_ }",
+    )
+})
+
+Deno.test("elaborate: a fold with `in:` installs, types and evaluates", () => {
+    // The load-bearing property: the two-parameter signature and the two-lambda
+    // definition agree, so the operation enters `Ω` and runs. A one-lambda
+    // emission would fail the verdict instead — `Nat → Nat` against the declared
+    // `Nat → Nat → Nat`.
+    const { operations, registry, opRegistry } = pipeline(NAT_PICK)
+    assertEquals(operations.length, 1)
+    assertEquals(opRegistry.lookup("pick")?.paramTypes.length, 2)
+
+    const def = operations[0]!.definition
+    const value = evalOf(`(${def}) Zero() Succ(Zero())`, registry)[0]
+    assert(value !== undefined)
+    assertEquals((value as { variantName?: string }).variantName, "Succ")
+})
+
+Deno.test("resolve: an arm may not bind more names than the variant has fields", () => {
+    // The `in:` value is read from the body, so a head binding beyond the field
+    // count names a slot the emitted handler does not have — and the emitter,
+    // which keeps only the variant's fields, would drop it silently.
+    assertEquals(
+        reasonsOf(`data Box
+    Empty
+    Fill a: Any b: Any
+    fold f <out: Any>
+        Empty extra -> Empty
+        Fill a b extra -> a
+`),
+        ["arity-mismatch", "arity-mismatch"],
+    )
+})
+
+Deno.test("resolve: an arm head cannot bind the machinery's `in`", () => {
+    // `in` is read from the body like `self`, and it is a keyword, so an arm
+    // head cannot bind it at all — the declaration fails to parse.
+    assertEquals(
+        reasonsOf(`data Box
+    Empty
+    fold f <in: Any, out: Any>
+        Empty in -> in
+`),
+        ["parse-failure"],
+    )
+})
+
+Deno.test("resolve: `in` cannot name a variant field", () => {
+    // With `in` a keyword it is un-nameable, so the collision between a field and
+    // the fold's extra argument cannot arise.
+    assertEquals(
+        reasonsOf(`data Foo
+    Bar in: Any
+`),
+        ["parse-failure"],
+    )
+})
+
+Deno.test("elaborate: the emitted `in` binder is hygienic against the fields", () => {
+    // A field may be named `in_` — an ordinary identifier — so the binder is
+    // chosen to avoid colliding with it. A fixed name would shadow the field and
+    // change what `in_` means between the head and the body.
+    const { operations } = pipeline(`data P
+    Z
+    M in_: Any a: Any
+    fold f <in: Self, out: Any>
+        Z -> in
+        M in_ a -> in_
+`)
+    assertEquals(
+        operations[0]?.definition,
+        "\\e:P. \\in__:P. fold [P] e { Z() -> in__, M(in_ a) -> in_ }",
+    )
+})
+
+Deno.test("resolve: a fold declaring `in:` binds nothing extra in the head", () => {
+    // The `in:` value is machinery-supplied, so an arm whose head names only the
+    // fields is complete — `Empty` has no fields, so an empty head is correct.
+    assertEquals(
+        reasonsOf(`data Box
+    Empty
+    fold f <in: Any, out: Any>
+        Empty -> Empty
+`),
+        [],
+    )
+})
+
+Deno.test("resolve: every arm must name the `in:` parameter the same", () => {
+    // One lambda encloses the whole fold, so two names for it would leave one
+    // unbound in the arms that use it — and it is a keyword, so neither arm can
+    // name it at all.
+    assertEquals(
+        reasonsOf(`data N
+    Z
+    S pred: Family
+    fold f <in: Self, out: Self>
+        Z other -> other
+        S p alt -> p
+`),
+        ["arity-mismatch", "arity-mismatch"],
+    )
+})
+
+Deno.test("resolve: a spec record may not repeat a key", () => {
+    // `specRecord` is a keyword list and `specType` reads the first match, so a
+    // second `in:` would be dropped with no diagnostic — and it is exactly the
+    // spelling an author reaches for when trying to declare a second operand.
+    assertEquals(
+        reasonsOf(`data N
+    Z
+    fold f <in: Self, in: Self, out: Self>
+        Z -> Z
+`),
+        ["duplicate-spec-key"],
+    )
+})
+
 Deno.test("elaborate: the fold evaluates through the core", () => {
     const { operations, registry } = pipeline(STACK_TOP)
     const def = operations[0]?.definition ?? ""
@@ -164,7 +315,7 @@ Deno.test("elaborate: a fold's arm bindings are positional in field order", () =
     const { operations, registry } = pipeline(`data Box
     Empty
     Fill a: Any b: Any
-    fold first <in: Box, out: Any>
+    fold first <out: Any>
         Empty -> Empty
         Fill x y -> x
 `)
@@ -178,15 +329,19 @@ Deno.test("elaborate: a fold's arm bindings are positional in field order", () =
 
 Deno.test("elaborate: `Self` means the declaring type, not the μ-bound", () => {
     // `Self` in a spec is the declaring type — what makes `Num add <in: Self,
-    // out: Self>` return its operand's type. `Family` is a *different*
-    // reference: the μ-bound α, written in field position.
+    // out: Self>` return its operand's type. The carrier is the *first*
+    // parameter and `in: Self` adds a second of the same type, so both are the
+    // declaring type. `Family` is a *different* reference: the μ-bound α,
+    // written in field position.
     const { operations, types } = pipeline(`data N
     Z
     fold id <in: Self, out: Self>
-        Z -> Z
+        Z -> in
 `)
     const op = operations[0]!
+    assertEquals(op.paramTypes.length, 2)
     assertEquals(op.paramTypes[0], types[0])
+    assertEquals(op.paramTypes[1], types[0])
     assertEquals(op.resultType, types[0])
 })
 
@@ -200,13 +355,17 @@ Deno.test("elaborate: an operation's declared signature agrees with its definiti
     // A surface elaboration that produces both must therefore be self-consistent,
     // and only an assertion comparing them can catch a divergence — the
     // definition type-checking on its own says nothing about the declaration.
+    //
+    // The second fixture is the multi-parameter case: one lambda per declared
+    // parameter, so a one-lambda emission shows up here as `N → N` against the
+    // declared `N → N → N`.
     for (
         const source of [
             STACK_TOP,
             `data N
     Z
     fold id <in: Self, out: Self>
-        Z -> Z
+        Z -> in
 `,
         ]
     ) {
@@ -310,7 +469,7 @@ Deno.test("elaborate: a fold over a user's `data Token` type-checks", () => {
     const { operations, registry } = pipeline(`data Token
     Empty
     Wrap x: Any
-    fold size <in: Token, out: Any>
+    fold size <out: Any>
         Empty -> Empty
         Wrap x -> x
 `)
@@ -587,12 +746,12 @@ function elaborateVerdictOf(source: string) {
     return elaborateProgram(program)
 }
 
-Deno.test("elaborate: a fold whose `in:` disagrees with its definition is rejected", () => {
-    // The signature comes from the spec (`in: B`) and the definition from the
-    // arms plus the declaring type (`\e:Holder.`), so the two describe
-    // different operations. The emitted text type-checks on its own — a
-    // `Holder → Any` term is perfectly well typed — which is why only a verdict
-    // that compares the definition against the *declared* signature catches it.
+Deno.test("elaborate: a fold whose body does not produce its declared `out:` is rejected", () => {
+    // The signature comes from the spec (`out: B`) and the definition from the
+    // arms, so the two can describe different operations. The emitted text
+    // type-checks on its own — an `Any`-valued arm makes the fold `Any` — which
+    // is why only a verdict comparing the definition against the *declared*
+    // signature catches it.
     const result = elaborateVerdictOf(`data N
     Z
 data B
@@ -600,14 +759,13 @@ data B
 data Holder
     H
     fold pick <in: B, out: B>
-        H -> T
+        H other -> other
 `)
     assertEquals(result.ok, false)
     assertEquals(result.errors.map((e) => e.reason), ["not-well-formed"])
     assertEquals(result.errors[0]?.operation, "pick")
     // The message names the disagreement, or the author cannot tell what to fix.
     assert(result.errors[0]?.message.includes("B"), result.errors[0]?.message)
-    assert(result.errors[0]?.message.includes("Holder"), result.errors[0]?.message)
 })
 
 Deno.test("elaborate: a rejected operation never enters `Ω`", () => {
@@ -619,7 +777,7 @@ Deno.test("elaborate: a rejected operation never enters `Ω`", () => {
 data Holder
     H
     fold pick <in: B, out: B>
-        H -> T
+        H other -> other
 `)
     assertEquals(result.opRegistry.lookup("pick"), undefined)
     assertEquals(result.operations.length, 0)
@@ -639,14 +797,16 @@ Deno.test("elaborate: a well-formed fold enters `Ω`", () => {
 
 Deno.test("elaborate: the verdict is per-operation, not per-program", () => {
     // One bad declaration must not make its siblings unusable: the good fold
-    // elaborates and installs, the bad one is named in `errors`.
+    // elaborates and installs, the bad one is named in `errors`. `bad` returns
+    // `Holder` where `B` is declared — a mismatch the carrier-seeded σ can
+    // neither mask nor manufacture.
     const result = elaborateVerdictOf(`data B
     T
 data Holder
     H
-    fold good <in: Self, out: Self>
+    fold good <out: Self>
         H -> H
-    fold bad <in: B, out: Any>
+    fold bad <out: B>
         H -> H
 `)
     assertEquals(result.ok, false)
@@ -664,7 +824,7 @@ Deno.test("elaborate: an operation the core cannot install is `not-well-formed`"
     const result = elaborateVerdictOf(`data Stack
     Empty
     Cons value: Any rest: Family
-    fold size <in: Self, out: Any>
+    fold size <out: Any>
         Empty -> Empty
         Cons v r -> (r size)
 `)

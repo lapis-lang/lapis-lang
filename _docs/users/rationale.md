@@ -131,8 +131,8 @@ data Nat
     Succ pred: Family
 
     fold add <in: Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
-        Zero other -> other
-        Succ pred other -> Succ (pred other)
+        Zero -> in
+        Succ pred -> Succ pred: (pred add: in)
 ```
 
 The `properties: (associative, commutative, identity: Zero)` is not a comment. It is a
@@ -300,8 +300,8 @@ data Nat
     Succ pred: Family
 
     fold add <in: Nat, out: Nat, properties: (associative, commutative, identity: Zero)>
-        Zero other -> other
-        Succ pred other -> Succ (pred other)
+        Zero -> in
+        Succ pred -> Succ pred: (pred add: in)
 
 (Nat Succ pred: (Nat Succ pred: (Nat Succ pred: Nat Zero))) add (Nat Zero)
     /* three — the identity guard fires, no traversal */

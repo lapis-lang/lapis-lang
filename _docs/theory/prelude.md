@@ -45,8 +45,9 @@ types").
 
 ### 2.1 `Token` is not a prelude name
 
-The calculus has exactly one non-μ/ν type, `@Token` — the raw matched text (`lc.md` §2.1, §2.5). It
-is **not** in the prelude and is **not user-spellable**: a program never names it.
+The calculus has exactly one non-μ/ν type, `@Token` — the raw matched text (`lc.md` §2.1 and its
+notation table, §2.6). It is **not** in the prelude and is **not user-spellable**: a program never
+names it.
 
 **The sigil is what makes that total.** `typeName` is `[A-Z][A-Za-z0-9_]*`, so `@Token` is not a
 name in the grammar at all. That is deliberate: it means `Token` is an ordinary identifier, a user
@@ -210,29 +211,43 @@ data Nat
     Succ pred: Family
 
     fold add <in: Self, out: Self>
-        Zero other -> other
-        Succ p other -> Succ value: (p add: other)
+        Zero -> in
+        Succ pred -> Succ pred: (pred add: in)
 ```
 
 This is `users/rationale.md` §4's worked example, and it is the shape the law suite already
-exercises. Three things about the spelling are load-bearing:
+exercises. Five things about the spelling are load-bearing:
 
-- **A recursive field binds the fold's result, not a continuation.** `p` is the already-folded
-  `pred`, so `add`'s recursion is `p add: other` — the operation applied again to the folded field
-  as receiver, with the second operand as the keyword argument.
+- **An arm head is a pattern, so it spells the fields' names.** The arm head's first bindings are
+  the variant's fields, in declaration order, and each is written with that field's own name — that
+  is what makes `Succ pred in` read as a destructuring of `Succ pred: Family`. `Succ p i` is not an
+  alternative spelling, it is an error, and `_` is the only way to discard a field
+  (`Cons _ rest -> rest`). A head binds nothing else; the `in:` value is read from the body.
+- **The extra argument is read as `in`.** It is machinery-supplied, so it appears in no arm head —
+  the body reads it the way it reads `self`. The word matches the spec record's key and a protocol
+  default body's scope (`elaboration.md` §3.3), and being a keyword it can also name no variant
+  field, so no field can collide with it.
+- **The carrier is the first argument; `in` is the second.** `add` is declared inside `data Nat`, so
+  its first parameter is the `Nat` being folded and `in: Self` declares a second one of the same
+  type. The definition is `λe:Nat. λ<core-name>:Nat. fold_Nat e {…}` — a lambda enclosing every arm,
+  never a handler binding.
+- **A recursive field binds the fold's result, not a continuation.** `Succ`'s `pred` field holds the
+  already-folded `pred`, so `add`'s recursion is `pred add: in` — the operation applied again to the
+  folded field as receiver, with the second operand as the keyword argument.
 - **The recursive call is not a continuation application.** `eval_grammar.ts`'s variant arm binds a
   `Family` field to `fold [T] vⱼ {…}` (`lc.md` §3.1, `E-Fold`), which is a value of the fold's
   result type. There is no partially applied continuation to apply, and no `value:` form in the data
   path.
-- **A construction's fields are its selector.** `Succ` declares one field, `value`, so `Succ value:`
-  is the only spelling of a `Succ` construction; `Succ pred: …` is a different, undeclared
+- **A construction's fields are its selector.** `Succ` declares one field, `pred`, so `Succ pred:`
+  is the only spelling of a `Succ` construction; `Succ value: …` is a different, undeclared
   constructor.
 
-> **Not yet runnable.** `p add: other` — an operation applied to a _non-construction_ receiver with
-> a keyword part — elaborates to `add(p, other)`, which is the form the core reads. But an `add`
+> **Not yet runnable.** `pred add: in` — an operation applied to a _non-construction_ receiver with
+> a keyword part — elaborates to `add(pred, in)`, which is the form the core reads. But an `add`
 > whose body re-sends `add` is self-referential, and `OpRegistry.declare` rejects that (`lc.md`
-> §2.4). The surface spelling above is right; the pipeline cannot install it yet. See `overview.md`
-> §12.48 and §12.50.
+> §2.5, acyclicity). The surface spelling above is right; the pipeline cannot install it yet. See
+> `overview.md` §12.48 and §12.50. A binder named `in` also has no core spelling
+> (`LC_RESERVED_WORDS`), so the emitter must rename it — §12.63.
 
 ### 3.3 `Bool` — connectives
 

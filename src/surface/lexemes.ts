@@ -32,6 +32,7 @@ export const SURFACE_KEYWORDS: readonly string[] = [
     "old",
     "prev",
     "aux",
+    "in",
     "Family",
     "Self",
 ] as const
@@ -123,7 +124,7 @@ export const specialValue: Parser<string> = or(
 )
 
 /**
- * A quoted string literal — `'"' ( char | escape )* '"'` (§2.4).
+ * A quoted string literal — `'"' ( char | escape )* '"'` (`surface-grammar.md` §2.4).
  *
  * The delimiter escapes are pinned; the fuller escape vocabulary is open (§9.1).
  */
@@ -131,7 +132,7 @@ export const stringLiteral: Parser<string> = char('"').bind(() =>
     quotedBody('"').map((body) => `"${body}"`)
 )
 
-/** A quoted character literal — `"'" ( char | escape ) "'"` (§2.4). */
+/** A quoted character literal — `"'" ( char | escape ) "'"` (`surface-grammar.md` §2.4). */
 export const charLiteral: Parser<string> = char("'").bind(() =>
     quotedBody("'").map((body) => `'${body}'`)
 )
@@ -154,7 +155,7 @@ function quotedBody(delimiter: string): Parser<string> {
 }
 
 /**
- * `literal` from §2.4: whatever text a declared pattern matched.
+ * `literal` from `surface-grammar.md` §2.4: whatever text a declared pattern matched.
  *
  * A pattern-driven lexer needs the declaration table, which the pipeline does
  * not yet thread into the lexer. The digits-only form below is the subset the

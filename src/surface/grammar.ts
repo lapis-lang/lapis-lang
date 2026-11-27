@@ -242,6 +242,30 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         )
     }
 
+    /**
+     * A name an arm head may bind.
+     *
+     * An arm head's bindings are the variant's field names, so a keyword is
+     * admissible only where a variant could have declared one (it cannot — a
+     * field is an `ident`). The machinery-supplied names are therefore excluded
+     * here: `in`, `self`, `old`, `prev`, and `aux` are read from a body, never
+     * declared in a head, which is what keeps a field from colliding with one.
+     */
+    private armBindingName(): Parser<string> {
+        return or(
+            ident,
+            or(...this.bindableKeywords().map((word) => keyword(word))),
+        )
+    }
+
+    /** The keywords a field may be named with — i.e. none of the machinery's. */
+    private bindableKeywords(): readonly string[] {
+        return SURFACE_KEYWORDS.filter((word) =>
+            word !== "in" && word !== "self" && word !== "old" && word !== "prev" &&
+            word !== "aux"
+        )
+    }
+
     // ── Program and declarations (§4) ────────────────────────────────────────
 
     /** `program ::= declaration*` — declarations only, no expression statements. */
@@ -536,7 +560,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     /** The bindings an arm head carries, each preceded by horizontal space. */
     private bindings(): Parser<string[]> {
         return or(
-            seq(hws1, this.nameOrKeyword()).map(([, name]) => name as string),
+            seq(hws1, this.armBindingName()).map(([, name]) => name as string),
             seq(hws1, char("_")).map(() => "_"),
         ).many().map((names: string[]) => names)
     }
@@ -837,10 +861,13 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
             .many()
     }
 
-    /** `self` | `Family` | `Self` | `old x` | `prev x` | `aux x` */
+    /** `self` | `in` | `Family` | `Self` | `old x` | `prev x` | `aux x` */
     private referenceProd(): Parser<Primary> {
         return or(
             keyword("self").map(() => ({ kind: "ref", name: "self" }) as Primary),
+            // The fold's extra argument, read like `self`: machinery-supplied, so
+            // it is never declared in an arm head (see `bindings`).
+            keyword("in").map(() => ({ kind: "ref", name: "in" }) as Primary),
             keyword("Family").map(() => ({ kind: "ref", name: "Family" }) as Primary),
             keyword("Self").map(() => ({ kind: "ref", name: "Self" }) as Primary),
             seq(keyword("old"), hws1, ident).map(([, , n]) =>

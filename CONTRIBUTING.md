@@ -86,3 +86,34 @@ manual steps are needed — container rebuilds will pull the models automaticall
 - Format: `deno fmt`
 - Lint: `deno lint`
 - Tests: `deno test`
+
+## Citing the specification
+
+Comments and documents cite the theory under `_docs/theory/` by section number. **Every citation
+must name its document**, because section numbers are not unique across the corpus — six documents
+have a `§2.4`, and each means something different:
+
+| Citation                  | `§2.4` is                       |
+| ------------------------- | ------------------------------- |
+| `lc.md` §2.4              | Contexts (`Γ`, `Δ`, `Ω`, `E`)   |
+| `surface-grammar.md` §2.4 | Literals                        |
+| `surface-syntax.md` §2.4  | Railroad diagram: message chain |
+| `elaboration.md` §2.4     | Binary operators                |
+| `prelude.md` §2.4         | `Int` — the surface integer     |
+| `semantics.md` §2.4       | The observation semantics       |
+
+So write `` `lc.md` §2.5 `` or `` `surface-grammar.md` §2.4 ``, never a bare `§2.4`. Inside a single
+document a bare number is fine when it clearly refers to that document; inside a code comment it is
+not, because the reader has no enclosing document.
+
+**Citing a section by number alone is not enough when the title does not name the content.** Cite
+the thing, not just the number:
+
+- **Do** cite a named paragraph — _"`lc.md` §2.5, well-formedness"_ — so the reader can check it.
+- **Do not** cite a section whose title and content disagree. Split the section so each topic has
+  one heading, rather than attaching a warning to every citation that lands in it. A citation that
+  needs explaining is a documentation defect.
+
+A citation is a claim like any other. Before citing a section, open it and confirm it says what you
+are saying it says; before rewriting one that looks wrong, do the same — a plausible-looking
+correction is how a correct citation becomes an incorrect one.
