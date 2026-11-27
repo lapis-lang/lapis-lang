@@ -106,4 +106,9 @@ export {
 } from "./resolve.ts"
 
 // Elaboration to the core.
-export { type ElaboratedOperation, elaborateProgram, type ElaborationResult } from "./elaborate.ts"
+export {
+    type ElaboratedOperation,
+    elaborateProgram,
+    type ElaborationError,
+    type ElaborationResult,
+} from "./elaborate.ts"

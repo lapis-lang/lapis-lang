@@ -573,6 +573,106 @@ data Later
     assertEquals(types[0]?.findVariant("Wrap")?.fields[0]?.name, "inner")
 })
 
+// ── Elaboration has a verdict ───────────────────────────────────────────────
+//
+// The pipeline's contract is "elaborate, then the core checks"
+// (`elaboration.md` §1.2). These tests assert the second half happens *inside*
+// elaboration: an operation whose definition does not type as its declared
+// signature is reported, and never enters `Ω`.
+
+/** Run the pipeline and return the elaboration verdict — no throwing. */
+function elaborateVerdictOf(source: string) {
+    const program = new SurfaceParse().parseProgram(source)
+    if (program === undefined) throw new Error(`did not parse:\n${source}`)
+    return elaborateProgram(program)
+}
+
+Deno.test("elaborate: a fold whose `in:` disagrees with its definition is rejected", () => {
+    // The signature comes from the spec (`in: B`) and the definition from the
+    // arms plus the declaring type (`\e:Holder.`), so the two describe
+    // different operations. The emitted text type-checks on its own — a
+    // `Holder → Any` term is perfectly well typed — which is why only a verdict
+    // that compares the definition against the *declared* signature catches it.
+    const result = elaborateVerdictOf(`data N
+    Z
+data B
+    T
+data Holder
+    H
+    fold pick <in: B, out: B>
+        H -> T
+`)
+    assertEquals(result.ok, false)
+    assertEquals(result.errors.map((e) => e.reason), ["not-well-formed"])
+    assertEquals(result.errors[0]?.operation, "pick")
+    // The message names the disagreement, or the author cannot tell what to fix.
+    assert(result.errors[0]?.message.includes("B"), result.errors[0]?.message)
+    assert(result.errors[0]?.message.includes("Holder"), result.errors[0]?.message)
+})
+
+Deno.test("elaborate: a rejected operation never enters `Ω`", () => {
+    // The property that matters: `ElaborationResult.operations` and the `Ω`
+    // entry are the same judgement, so a caller cannot install what was
+    // reported. A rejected operation is *absent*, not an unchecked entry.
+    const result = elaborateVerdictOf(`data B
+    T
+data Holder
+    H
+    fold pick <in: B, out: B>
+        H -> T
+`)
+    assertEquals(result.opRegistry.lookup("pick"), undefined)
+    assertEquals(result.operations.length, 0)
+    // The types are still published — the failure is per-operation.
+    assertEquals(result.registry.lookup("Holder"), result.types.find((t) => t.name === "Holder"))
+})
+
+Deno.test("elaborate: a well-formed fold enters `Ω`", () => {
+    const result = elaborateVerdictOf(STACK_TOP)
+    assertEquals(result.ok, true)
+    assertEquals(result.errors, [])
+    const sealed = result.opRegistry.lookup("top")
+    assert(sealed !== undefined)
+    assertEquals(sealed.name, "top")
+    assertEquals(sealed.definition, result.operations[0]?.definition)
+})
+
+Deno.test("elaborate: the verdict is per-operation, not per-program", () => {
+    // One bad declaration must not make its siblings unusable: the good fold
+    // elaborates and installs, the bad one is named in `errors`.
+    const result = elaborateVerdictOf(`data B
+    T
+data Holder
+    H
+    fold good <in: Self, out: Self>
+        H -> H
+    fold bad <in: B, out: Any>
+        H -> H
+`)
+    assertEquals(result.ok, false)
+    assertEquals(result.errors.map((e) => e.operation), ["bad"])
+    assertEquals(result.operations.map((o) => o.name), ["good"])
+    assert(result.opRegistry.lookup("good") !== undefined)
+    assertEquals(result.opRegistry.lookup("bad"), undefined)
+})
+
+Deno.test("elaborate: an operation the core cannot install is `not-well-formed`", () => {
+    // A recursive fold's body names itself, which `Ω`'s acyclicity rule rejects
+    // — an operation may only reference operations declared before it. The
+    // failure surfaces against the operation rather than being emitted as text
+    // that no consumer could install.
+    const result = elaborateVerdictOf(`data Stack
+    Empty
+    Cons value: Any rest: Family
+    fold size <in: Self, out: Any>
+        Empty -> Empty
+        Cons v r -> (r size)
+`)
+    assertEquals(result.ok, false)
+    assertEquals(result.errors.map((e) => e.reason), ["not-well-formed"])
+    assertEquals(result.errors[0]?.operation, "size")
+})
+
 // ── AST shape ───────────────────────────────────────────────────────────────
 
 Deno.test("pipeline: the AST is what the passes consume, not the token tree", () => {

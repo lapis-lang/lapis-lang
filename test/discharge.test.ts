@@ -1493,17 +1493,21 @@ Deno.test("certified screen: an 18-Bool record's min class exceeds the prefix bu
         )
         .build()
     h.registry.register(wide)
+    // The definition's `Nat` annotation is read off the registry, so the type
+    // must be registered *before* the declaration is checked — otherwise it
+    // mints a `TypeVar` and the declared parameter no longer matches itself.
+    const nat = createNatType()
+    h.registry.register(nat)
     const bindings = Array.from({ length: 18 }, (_, i) => `v${i}`).join(" ")
     h.opRegistry.declare(
         new OpSig(
             "wideId",
-            [wide, createNatType()],
+            [wide, nat],
             wide,
             `\\x:Wide. \\n:Nat. fold [Wide] x { MkWide(${bindings}) -> x }`,
         ),
         h.tc.opWellFormedness,
     )
-    h.registry.register(createNatType())
     assertThrows(
         () =>
             screenLaw(

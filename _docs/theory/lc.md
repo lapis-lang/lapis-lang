@@ -137,6 +137,14 @@ declaration would type-check as one type and evaluate as another: a Preservation
 rather than through a step. Checking a definition requires the typing machinery, which is why the
 condition is a side condition on `Ω`'s construction rather than a rule in §5.
 
+The agreement is **component-wise, not merely arity-and-result**: each of `def(op)`'s parameter
+types must equal its declared `σᵢ` (in the lattice, mutual subtyping — a parameter _is_ the declared
+type, not merely compatible with it), and the residue must be the declared `τ`. A function-typed `τ`
+is legal and is the one case where `def(op)` has more lambdas than `n`
+(`mkAdder : <1> → Nat → Nat`); there the residue must equal `τ`, not merely be `<: τ`, since `τ` is
+what T-Op reports to callers. `FunType <: Any` by S-Top, so a result of `Any` cannot distinguish an
+over-applied definition from a correct one — the residue check is what does.
+
 **Law authority (provenance ladder).** Laws in `E` are **axioms carrying a provenance tag**:
 `primitive` (pinned by the language definition — builtin operations with fixed law sets, authority
 by fiat), `discharged` (established by the compiler — finite-domain exhaustion for finite types,

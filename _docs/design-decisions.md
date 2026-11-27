@@ -448,6 +448,34 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   literally. E.g., `[0-9]+\+[0-9]+j` for complex numbers — the `\+` is a literal `+` inside the
   token, while the unescaped `+` after `[0-9]` is the quantifier.
 
+## Elaboration has a verdict
+
+Elaboration is not a text emitter that leaves correctness to a later stage. `elaborateProgram`
+returns a verdict: `ok`, a per-operation `errors` list, and an `Ω` holding **only** the operations
+that passed. The checks are the core's own (`LCTypeCheck.opWellFormedness`, through
+`OpRegistry.declare`), so the verdict and the `Ω` entry are one judgement — a second implementation
+of "is this well formed" is the defect, not the fix.
+
+- **Per-operation, not per-program.** A declaration that fails is absent from `Ω` and named in
+  `errors`; its siblings still elaborate and install. This mirrors resolution's `ok` + `errors`
+  shape, and it matters because a program's declarations are independent by design (no ordering
+  rule).
+- **`not-well-formed` covers everything `declare` rejects.** The signature comes from the spec
+  (`in:` value, `out:` result) and the definition from the arms, so an `in:` that names something
+  other than what the emitted lambda takes is the same failure as a mismatched result type; one
+  reason, because `Ω` requires agreement component-wise. It also covers a recursive body, whose
+  self-reference `Ω`'s acyclicity rule forbids (#131). Reporting recursion as an elaboration failure
+  is honest — the operation genuinely cannot be installed — but it is not the language's answer for
+  recursion; that is a separate decision. Honouring a multi-parameter `in:` in the emitted
+  definition is §12.48's work, not `in:`'s meaning: `in:` names the fold's value argument and an arm
+  binds it as a trailing binding.
+- **Parameter types are compared by mutual subtyping.** A parameter _is_ the declared type, not
+  merely compatible with it: one-way contravariance would admit `Any → τ` against a declared
+  `N → τ`, leaving the signature and the definition describing different operations. A
+  function-typed _result_ is legal and is the one case where the definition has more lambdas than
+  the declared arity; there the residue must equal the declared result, since that is what callers
+  are promised.
+
 ## Attribute grammars + lang-forma
 
 - Parser library published to JSR as `@lapis-lang/lang-forma`.

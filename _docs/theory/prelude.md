@@ -397,8 +397,12 @@ document used to record is closed.
 The last two rows are the point: the core calculus runs folds and unfolds over `DataType`s built
 through the builder API, and `test/fixtures.ts` already constructs `Nat`, `Bool`, `Stack`, `Queue`,
 and `Stream`. The surface `data` production now parses and builds those types, so source reaches the
-core. What is missing is the rest of the operation pipeline — an operation's emitted definition
-never enters `Ω`, and a recursive one is rejected when it tries (`overview.md` §12.47–§12.48).
+core. What is missing is the rest of the operation pipeline — an operation's emitted definition does
+not enter `Ω` unless it checks against its declared signature, and a recursive one is rejected when
+it tries (`overview.md` §12.47 closed, §12.48 open, §12.50 open). A fold whose declaration and
+definition agree now elaborates, checks, and installs; the recursive folds this document declares
+(`add`, `size`) are blocked by `Ω`'s acyclicity and flat keying, not by elaboration. `add` is
+blocked twice: §12.48, because its `in:` declares a second operand the emitter does not yet curry.
 
 So the executable tier is `Nat` + `List` _in the core_: a fixture can declare them and fold over
 them, with no new evaluation machinery. Source-level folds do not yet run. The documented tier is
