@@ -71,8 +71,9 @@ Deno.test("elaborate: `Family` becomes the μ-bound, not a named type", () => {
 })
 
 Deno.test("elaborate: the elaborated type equals its DataTypeBuilder equivalent", () => {
-    // The #97 acceptance criterion, proven here first: the parsed-and-elaborated
-    // declaration and the hand-built fixture must agree structurally.
+    // The parsed-and-elaborated declaration and the hand-built fixture must agree
+    // structurally, which is what proves the surface pipeline produces the same
+    // type the builder API does.
     const { types } = pipeline(STACK)
     const built = DataType.define("Stack")
         .addVariant(
@@ -230,11 +231,11 @@ function reasonsOf(source: string): string[] {
     return resolveProgram(program).errors.map((e) => e.reason)
 }
 
-Deno.test("resolve: `Family` cannot name a declaration (#101)", () => {
+Deno.test("resolve: `Family` cannot name a declaration", () => {
     assertEquals(reasonsOf("data Family\n    Empty\n"), ["reserved-declaration-name"])
 })
 
-Deno.test("resolve: `Self` cannot name a declaration (#101)", () => {
+Deno.test("resolve: `Self` cannot name a declaration", () => {
     assertEquals(reasonsOf("data Self\n    Empty\n"), ["reserved-declaration-name"])
 })
 
@@ -246,14 +247,14 @@ Deno.test("resolve: a duplicate variant within a type is reported", () => {
     assertEquals(reasonsOf("data A\n    X\n    X\n"), ["duplicate-variant"])
 })
 
-Deno.test("resolve: an undeclared type name is rejected, never minted (#116)", () => {
+Deno.test("resolve: an undeclared type name is rejected, never minted", () => {
     // The surface has no type variables, so a typo has no legitimate reading.
     assertEquals(reasonsOf("data Box\n    Wrap x: Natt\n"), ["unknown-type"])
 })
 
 Deno.test("resolve: a function-typed FIELD is not even parseable", () => {
     // No surface form inhabits one — a function value is *only* an operation
-    // reference (`surface-grammar.md` §3.6.1). A type is `atomType` and nothing
+    // reference (`grammar.ts`'s `primary`). A type is `atomType` and nothing
     // more (§3.8), so the `->` never reaches resolution: there is no function
     // type to reject, which is stronger than rejecting it later.
     assertEquals(
@@ -286,9 +287,9 @@ Deno.test("resolve: `Token` is not a spellable surface type", () => {
 })
 
 Deno.test("elaborate: a declaration is never captured by a same-named core type", () => {
-    // The §12.13 class: a user type taking a language-defined name must resolve
-    // to *its own* declaration. `Token` is the one core type a surface name could
-    // otherwise shadow, so declaring it is the sharp case.
+    // A user type taking a language-defined name must resolve to *its own*
+    // declaration. `Token` is the one core type a surface name could otherwise
+    // shadow, so declaring it is the sharp case.
     const { types } = pipeline(`data Token
     Wrap x: Any
 data Uses
@@ -340,7 +341,7 @@ Deno.test("resolve: an arm binding fewer names than the variant has fields is re
     )
 })
 
-Deno.test("resolve: a wildcard arm is reported until comb inheritance lands (#86)", () => {
+Deno.test("resolve: a wildcard arm is reported until comb inheritance lands", () => {
     assertEquals(
         reasonsOf(`data A
     X
@@ -354,6 +355,208 @@ Deno.test("resolve: a wildcard arm is reported until comb inheritance lands (#86
 
 Deno.test("resolve: a well-formed program reports nothing", () => {
     assertEquals(reasonsOf(STACK_TOP), [])
+})
+
+// ── Constructor position ───────────────────────────────────────────────
+//
+// A constructor is a `pascalIdent` in expression position, and it is the one
+// naming position `unknown-type` cannot reach: a type name is checked at its
+// annotation, but a construction names its variant inside a body. These are the
+// cases that used to elaborate with `errors: []`.
+
+/** A fold over a two-field type, so a construction can be spelled in the body. */
+const withBody = (body: string) =>
+    `data P
+    P1
+    P2 x: Any y: Any
+    fold f <out: Any>
+        P1 -> ${body}
+`
+
+Deno.test("resolve: a bare construction naming no declared variant is rejected", () => {
+    assertEquals(
+        reasonsOf(`data P
+    P1
+    fold f <out: Any>
+        P1 -> TotallyUnknown
+`),
+        ["unknown-constructor"],
+    )
+})
+
+Deno.test("resolve: a construction inside a field position is walked", () => {
+    // The walk is recursive: `TotallyUnknown` is the *value* of a field here, not
+    // the body itself. `P2` is the two-field variant, so only the inner name is
+    // at fault.
+    assertEquals(
+        reasonsOf(`data P
+    P1
+    P2 x: Any y: Any
+    fold f <out: Any>
+        P1 -> (P2 x: TotallyUnknown y: P1)
+`),
+        ["unknown-constructor"],
+    )
+})
+
+Deno.test("resolve: a bare construction declared by two unrelated types is ambiguous", () => {
+    const errors = resolveProgram(
+        new SurfaceParse().parseProgram(`data A
+    Same
+data B
+    Same
+    fold f <out: Any>
+        Same -> (Same)
+`)!,
+    ).errors
+    assertEquals(errors.map((e) => e.reason), ["ambiguous-constructor"])
+    // The diagnostic must name *both* candidates, or it cannot tell the author
+    // which qualification to write.
+    assert(errors[0]?.message.includes("A"), errors[0]?.message)
+    assert(errors[0]?.message.includes("B"), errors[0]?.message)
+})
+
+Deno.test("resolve: a qualifier naming no declaration is rejected", () => {
+    assertEquals(
+        reasonsOf(`data P
+    P1
+    fold f <out: Any>
+        P1 -> (Ghost One)
+`),
+        ["bad-qualifier"],
+    )
+})
+
+Deno.test("resolve: a qualifier naming a type that declares no such variant is rejected", () => {
+    assertEquals(
+        reasonsOf(`data A
+    One
+    fold f <out: Any>
+        One -> (A Two)
+`),
+        ["bad-qualifier"],
+    )
+})
+
+Deno.test("resolve: a construction may name its fields in any order", () => {
+    // Field names bind by name, so the written order carries no meaning: the
+    // caller names each slot, and a reordered construction is the same
+    // constructor. Elaboration emits the declared order (asserted below, where a
+    // transposition would be visible).
+    assertEquals(reasonsOf(withBody("(P2 y: P1 x: P1)")), [])
+})
+
+Deno.test("elaborate: a reordered construction emits the declared field order", () => {
+    // The fields have different types, so a transposition cannot hide: `A1` is an
+    // `A` and `B1` is a `B`. Writing `y:` before `x:` must still emit `(A1(), B1())`
+    // — declaration order — never `(B1(), A1())`.
+    const { operations } = pipeline(`data A
+    A1
+data B
+    B1
+data P
+    P2 x: A y: B
+    fold f <out: Any>
+        P2 a b -> (P2 y: B1 x: A1)
+`)
+    assertEquals(
+        operations[0]?.definition,
+        "\\e:P. fold [P] e { P2(a b) -> (P2(A1(), B1())) }",
+    )
+})
+
+Deno.test("resolve: a construction with an undeclared field is rejected", () => {
+    assertEquals(reasonsOf(withBody("(P2 bogus: P1 y: P1)")), ["selector-mismatch"])
+})
+
+Deno.test("resolve: a construction naming one field twice is rejected", () => {
+    assertEquals(reasonsOf(withBody("(P2 x: P1 x: P1)")), ["selector-mismatch"])
+})
+
+Deno.test("resolve: a construction omitting a field is rejected", () => {
+    assertEquals(reasonsOf(withBody("(P2 x: P1)")), ["selector-mismatch"])
+})
+
+Deno.test("resolve: an inherited variant is not ambiguous", () => {
+    // A child re-declaring an inherited variant narrows it (comb inheritance), so
+    // the two declarations are one constructor. The prelude's own
+    // `IntList <: List` is this shape; flagging it would make the prelude
+    // unelaboratable.
+    const program = new SurfaceParse().parseProgram(`data List
+    Nil
+    Cons head: Any rest: Family
+data IntList <: List
+    Cons head: Any rest: Family
+`)!
+    const { table, errors } = resolveProgram(program)
+    assertEquals(table.ambiguousVariants.size, 0)
+    assertEquals([...table.variants.get("Cons") ?? []], ["List", "IntList"])
+    assertEquals(errors.map((e) => e.reason), [])
+})
+
+Deno.test("resolve: an unrelated third declarer keeps an inherited name ambiguous", () => {
+    // The ancestry skip must not become a blanket amnesty: `Other` has no lineage
+    // relation to either, so bare `Cons` still names two constructors.
+    const program = new SurfaceParse().parseProgram(`data List
+    Nil
+    Cons head: Any rest: Family
+data IntList <: List
+    Cons head: Any rest: Family
+data Other
+    Cons
+`)!
+    assertEquals([...resolveProgram(program).table.ambiguousVariants], ["Cons"])
+})
+
+Deno.test("resolve: a contract clause's body is walked", () => {
+    // Clause bodies parse but are not otherwise resolved; a constructor in one
+    // is still this pass's to resolve.
+    assertEquals(
+        reasonsOf(`data P
+    P1
+    fold f
+        demands: guard | Ghost
+        P1 -> P1
+`),
+        ["unknown-constructor"],
+    )
+})
+
+Deno.test("resolve: a `map` transform's body is walked", () => {
+    assertEquals(
+        reasonsOf(`data P
+    P2 x: Any y: Any
+    map m
+        x x -> Ghost
+`),
+        ["unknown-constructor"],
+    )
+})
+
+Deno.test("resolve: a constructor in any expression position is walked", () => {
+    // `binop`, `unary`, a call's receiver, a call's part, and parentheses — a
+    // constructor can appear anywhere an expression can. Each body names one
+    // undeclared constructor, so each yields exactly one diagnostic.
+    for (
+        const body of [
+            "(Ghost add P1)",
+            "Ghost negate",
+            "Ghost add: P1",
+            "((Ghost))",
+        ]
+    ) {
+        assertEquals(reasonsOf(withBody(body)), ["unknown-constructor"], body)
+    }
+})
+
+Deno.test("resolve: a well-formed construction still reports nothing", () => {
+    // The no-false-positive half: a correctly qualified or unambiguous
+    // construction, a reordered one, and an arm binding that happens to share a
+    // variant's name.
+    assertEquals(reasonsOf(withBody("(P2 x: P1 y: P1)")), [])
+    assertEquals(reasonsOf(withBody("(P2 y: P1 x: P1)")), [])
+    assertEquals(reasonsOf(withBody("P P2 y: P1 x: P1")), [])
+    assertEquals(reasonsOf(withBody("P1")), [])
 })
 
 // ── Declaration independence ────────────────────────────────────────────────

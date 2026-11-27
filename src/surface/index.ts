@@ -63,7 +63,7 @@ export type {
 // The grammar (the AST-producing interpretation).
 export { AbstractSurface, SurfaceParse, type SurfaceShape } from "./grammar.ts"
 
-// Lexical productions, exposed for diagnostics and for #34's unparser.
+// Lexical productions, exposed for diagnostics and for the unparser.
 export {
     charLiteral,
     ident,
@@ -77,7 +77,7 @@ export {
     symbolicOp,
 } from "./lexemes.ts"
 
-// Layout primitives — `surface-grammar.md` §7's L1/L2 rules.
+// Layout primitives — `surface-grammar.md` §4's L1/L2 rules.
 export {
     ARM_BODY_COLUMN,
     ARM_COLUMN,

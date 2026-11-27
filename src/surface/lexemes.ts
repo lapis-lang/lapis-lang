@@ -104,7 +104,7 @@ export const pascalIdent: Parser<string> = pred(isUpperStart, "<pascal-start>")
  * name resolution; this production accepts any run. Resolution does **not** yet
  * report an undeclared operator, so an unknown symbol is currently passed
  * through into the emitted core text, where the core's own parse fails. See
- * `surface-grammar.md` §9 and `overview.md` §12.35.
+ * `surface-grammar.md` §5.
  */
 export const symbolicOp: Parser<string> = charsWhere(isSymbolicOpChar, "<symbolic-op>")
     .bind((op) => op === "" ? empty<string>() : epsilon(op))
@@ -157,9 +157,8 @@ function quotedBody(delimiter: string): Parser<string> {
  * `literal` from §2.4: whatever text a declared pattern matched.
  *
  * A pattern-driven lexer needs the declaration table, which the pipeline does
- * not yet thread into the lexer (the pattern carriers are #97's and #100's
- * scope). The digits-only form below is the subset this PBI's `examples/`
- * fixtures need; the general form arrives with the lexer work.
+ * not yet thread into the lexer. The digits-only form below is the subset the
+ * `examples/` fixtures need; the general form arrives with the lexer work.
  */
 export const patternLiteral: Parser<string> = pred(
     (c: string) => /[0-9-]/.test(c),

@@ -1,22 +1,27 @@
 /**
  * Name resolution for the surface language — the first tree-consuming pass.
  *
- * The pass walks the surface AST and answers the three questions elaboration
+ * The pass walks the surface AST and answers the four questions elaboration
  * cannot answer locally:
  *
  * 1. **Which declarations exist**, and what each contributes — declared type
  *    names, their variants and fields, and their operations. This is the
- *    declaration table, and it is what makes the bare-vs-qualified rule (#84)
+ *    declaration table, and it is what makes the bare-vs-qualified rule
  *    decidable: a bare name resolves iff it is unique in scope.
  * 2. **Whether every type name resolves.** The surface has no type variables
- *    and no type parameters, permanently (`surface-grammar.md` §3.8), so a name
+ *    and no type parameters, permanently (`grammar.ts`'s `atomType`), so a name
  *    that is neither built in nor declared has no legitimate meaning. It is an
- *    error at the annotation, not an opaque variable minted for later — that
- *    permissiveness is #116's defect, and the surface must not inherit it.
- * 3. **Whether a reserved reference was taken as a declaration name.**
+ *    error at the annotation, not an opaque variable minted for later: a minted
+ *    variable would fail somewhere else entirely, far from the misspelling.
+ * 3. **Whether every constructor resolves.** A construction names its variant
+ *    inside a body, where `unknown-type` cannot reach, so constructor position
+ *    gets its own walk: the name must denote a declared variant, a qualifier
+ *    must name the type that declares it, and the keyword sequence must equal
+ *    the variant's declared field sequence.
+ * 4. **Whether a reserved reference was taken as a declaration name.**
  *    `Family` and `Self` are the language-defined recursive references; a user
- *    declaration may not shadow them (#101), or the same spelling would flip
- *    the recursion discipline by what else happens to be in scope.
+ *    declaration may not shadow them, or the same spelling would flip the
+ *    recursion discipline by what else happens to be in scope.
  *
  * Resolution is a separate pass rather than grammar gates because every one of
  * these questions is *whole-program*: `data List` may declare `Cons` before
@@ -25,10 +30,14 @@
 
 import type {
     AtomType,
+    CaseArm,
+    Construction,
     DataBodyItem,
     DataDecl,
     Declaration,
+    Expr,
     FoldDecl,
+    Primary,
     SpecRecord,
     SurfaceProgram,
 } from "./ast.ts"
@@ -38,16 +47,20 @@ import type {
  * A resolution failure: a rule, the offending name, and a message that names
  * the remedy.
  *
- * The message *text* is provisional — #99 owns the pinned diagnostic vocabulary.
- * This pass fixes the *reasons*, so #99 has one place per rejection to pin.
+ * The message *text* is not yet pinned. This pass fixes the *reasons*: one
+ * place per rejection for the diagnostic vocabulary to be pinned against.
  */
 export interface ResolutionError {
     readonly reason:
         | "reserved-declaration-name"
         | "duplicate-declaration"
+        | "duplicate-variant"
         | "unknown-type"
         | "unknown-variant"
-        | "duplicate-variant"
+        | "unknown-constructor"
+        | "ambiguous-constructor"
+        | "bad-qualifier"
+        | "selector-mismatch"
         | "arity-mismatch"
         | "wildcard-arm"
     readonly message: string
@@ -74,14 +87,22 @@ export interface DeclarationTable {
     /** The declared types, in source order. */
     readonly types: ReadonlyMap<string, ResolvedData>
     /**
-     * Variant name → declaring type's name, for bare resolution.
+     * Variant name → **every** declaring type's name, for bare resolution.
      *
-     * A name mapping to more than one type is stored under
-     * `ambiguousVariants` instead: bare use is then an error and the qualified
-     * form is required (#84).
+     * Every candidate is kept so an ambiguity diagnostic can name each side.
+     * Bare use resolves only when exactly one candidate is unrelated to the
+     * others; see `ambiguousVariants`.
      */
-    readonly variants: ReadonlyMap<string, string>
-    /** Variant names declared by more than one type — bare use is ambiguous. */
+    readonly variants: ReadonlyMap<string, readonly string[]>
+    /**
+     * Variant names whose declarers are not all one lineage — bare use is
+     * ambiguous.
+     *
+     * A parent and a child that both declare a variant are *not* ambiguous: the
+     * child's declaration is the parent's, narrowed (comb inheritance), so a
+     * bare construction still denotes one constructor. Only declarers with no
+     * ancestry relation collide.
+     */
     readonly ambiguousVariants: ReadonlySet<string>
 }
 
@@ -94,7 +115,7 @@ export interface ResolutionResult {
 }
 
 /**
- * The names the language defines and no declaration may take (§3.5, §12.16).
+ * The names the language defines and no declaration may take.
  *
  * `Family` and `Self` are references, not types: `Family` is the μ-bound α of
  * the carrier being analyzed and `Self` is the declaring type itself.
@@ -141,8 +162,6 @@ function collectTable(
     errors: ResolutionError[],
 ): DeclarationTable {
     const types = new Map<string, ResolvedData>()
-    const variants = new Map<string, string>()
-    const ambiguous = new Set<string>()
 
     for (const decl of declarations) {
         switch (decl.kind) {
@@ -161,26 +180,69 @@ function collectTable(
                     })
                     continue
                 }
-                const resolved = resolveData(decl, errors)
-                types.set(decl.name, resolved)
-                for (const variant of resolved.variants) {
-                    // A variant declared by two types is ambiguous bare and
-                    // resolvable qualified (#84). Record both facts: the first
-                    // declaration keeps the index entry so a diagnostic can name
-                    // a candidate, and the ambiguity set forces qualification.
-                    const existing = variants.get(variant.name)
-                    if (existing !== undefined && existing !== decl.name) {
-                        ambiguous.add(variant.name)
-                    } else {
-                        variants.set(variant.name, decl.name)
-                    }
-                }
+                types.set(decl.name, resolveData(decl, errors))
                 break
             }
         }
     }
 
+    // The variant index needs every declaration before it can classify a
+    // collision, because "several declaring types" is not yet ambiguity: a
+    // parent and child that both declare a variant are one constructor.
+    const variants = new Map<string, string[]>()
+    for (const data of types.values()) {
+        for (const variant of data.variants) {
+            const candidates = variants.get(variant.name)
+            if (candidates === undefined) variants.set(variant.name, [data.name])
+            else if (!candidates.includes(data.name)) candidates.push(data.name)
+        }
+    }
+
+    const ambiguous = new Set<string>()
+    for (const [name, candidates] of variants) {
+        if (!allOneLineage(candidates, types)) ambiguous.add(name)
+    }
+
     return { types, variants, ambiguousVariants: ambiguous }
+}
+
+/**
+ * Whether every declarer of one variant name belongs to a single inheritance
+ * chain — i.e. whether they are one constructor rather than a collision.
+ *
+ * A child re-declaring an inherited variant is narrowing it (comb inheritance),
+ * so `List` and `IntList <: List` both declaring `Cons` is *not* ambiguous: bare
+ * `Cons` still denotes one constructor. Two types with no ancestry relation are
+ * a genuine collision, and the qualified form is required.
+ */
+function allOneLineage(
+    candidates: readonly string[],
+    types: ReadonlyMap<string, ResolvedData>,
+): boolean {
+    for (let i = 0; i < candidates.length; i++) {
+        for (let j = i + 1; j < candidates.length; j++) {
+            const a = candidates[i]!
+            const b = candidates[j]!
+            if (!isAncestorOf(a, b, types) && !isAncestorOf(b, a, types)) return false
+        }
+    }
+    return true
+}
+
+/** Whether `ancestor` is `name`'s parent, grandparent, … (declared names only). */
+function isAncestorOf(
+    ancestor: string,
+    name: string,
+    types: ReadonlyMap<string, ResolvedData>,
+): boolean {
+    const seen = new Set<string>()
+    let current = types.get(name)?.parent
+    while (current !== undefined && !seen.has(current)) {
+        if (current === ancestor) return true
+        seen.add(current)
+        current = types.get(current)?.parent
+    }
+    return false
 }
 
 /** Build one type's resolved form, reporting duplicate variant names. */
@@ -254,6 +316,16 @@ function validateBodyItem(
         case "foldDecl":
             validateFold(decl, item, table, errors)
             return
+        case "mapDecl":
+            // A `map` is otherwise unvalidated and dropped, but its transforms are
+            // still expressions, and a constructor may appear in one.
+            if (item.spec !== undefined) {
+                validateSpec(item.spec, `map "${item.name}"`, table, errors)
+            }
+            for (const transform of item.transforms) {
+                validateExpression(transform.body, table, errors)
+            }
+            return
     }
 }
 
@@ -261,7 +333,7 @@ function validateBodyItem(
  * Validate a fold: its spec's types, its contract clauses, and its arms.
  *
  * An arm head's bindings beyond the variant's field count bind the fold's `in:`
- * value (`surface-grammar.md` §5.1, overview §12.19), so the *minimum* binding
+ * value (`grammar.ts`'s `armHead`, the bindings beyond a variant's fields), so the *minimum* binding
  * count is enforced here — a head with fewer bindings than its variant's fields
  * is an arity error.
  */
@@ -276,39 +348,61 @@ function validateFold(
     }
     const resolved = table.types.get(decl.name)
 
-    for (const arm of fold.arms) {
-        if (arm.head.variant === undefined) {
-            // `_` is exhaustiveness over an *open* variant set (§5.1), which is
-            // comb inheritance's business (#86). The core's fold form has no
-            // open-wildcard handler, and expanding `_` against the current
-            // variant set would be wrong the moment a subtype adds one.
-            errors.push({
-                reason: "wildcard-arm",
-                message: `the wildcard arm \`_\` in \`fold ${fold.name}\` has no core ` +
-                    `counterpart yet — name each variant, or wait for comb inheritance ` +
-                    `(#86) to give \`_\` a semantics`,
-            })
-            continue
-        }
-        const variant = resolved?.variants.find((v) => v.name === arm.head.variant)
-        if (variant === undefined) {
-            errors.push({
-                reason: "unknown-variant",
-                message: `"${decl.name}" has no variant "${arm.head.variant}" — a fold arm must ` +
-                    `name one of its type's variants`,
-            })
-        }
-        if (variant !== undefined && arm.head.bindings.length < variant.fields.length) {
-            errors.push({
-                reason: "arity-mismatch",
-                message: `the arm for "${variant.name}" binds ${arm.head.bindings.length} ` +
-                    `name(s) but the variant has ${variant.fields.length} field(s)`,
-            })
-        }
-        // The arm body's references are elaboration's concern: which operation a
-        // bare name denotes depends on the receiver's type, and the bindings
-        // themselves are this pass's contribution to its scope.
+    for (const clause of fold.contractClauses) {
+        // A clause body is an expression like any other, so a constructor may
+        // appear in it and must be resolved there.
+        validateExpression(clause.body, table, errors)
     }
+
+    for (const arm of fold.arms) {
+        validateArm(decl, fold, arm, resolved, table, errors)
+    }
+}
+
+/**
+ * Validate one case arm: its head against the variant set, and its body's
+ * constructor references.
+ */
+function validateArm(
+    decl: DataDecl,
+    fold: FoldDecl,
+    arm: CaseArm,
+    resolved: ResolvedData | undefined,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): void {
+    if (arm.head.variant === undefined) {
+        // `_` is exhaustiveness over an *open* variant set, which is comb
+        // inheritance's business. The core's fold form has no open-wildcard
+        // handler, and expanding `_` against the current variant set would be
+        // wrong the moment a subtype adds one.
+        errors.push({
+            reason: "wildcard-arm",
+            message: `the wildcard arm \`_\` in \`fold ${fold.name}\` has no core ` +
+                `counterpart yet — name each variant, or wait for comb inheritance ` +
+                `to give \`_\` a semantics`,
+        })
+        validateExpression(arm.body, table, errors)
+        return
+    }
+
+    const variant = resolved?.variants.find((v) => v.name === arm.head.variant)
+    if (variant === undefined) {
+        errors.push({
+            reason: "unknown-variant",
+            message: `"${decl.name}" has no variant "${arm.head.variant}" — a fold arm must ` +
+                `name one of its type's variants`,
+        })
+    }
+    if (variant !== undefined && arm.head.bindings.length < variant.fields.length) {
+        errors.push({
+            reason: "arity-mismatch",
+            message: `the arm for "${variant.name}" binds ${arm.head.bindings.length} ` +
+                `name(s) but the variant has ${variant.fields.length} field(s)`,
+        })
+    }
+
+    validateExpression(arm.body, table, errors)
 }
 
 /** Validate every type in a spec record (`in:`/`out:` are the only typed keys). */
@@ -339,6 +433,242 @@ function validateType(
     requireTypeName(type.name, context, table, errors)
 }
 
+// ── Expressions ──────────────────────────────────────────────────────────────
+
+/**
+ * Validate an expression's constructor references.
+ *
+ * Constructor position is the one naming position `unknown-type` cannot reach,
+ * so it needs its own walk. A *constructor* is a `pascalIdent` in
+ * expression position — a `variantRef` or a `construction` — and nothing else:
+ * `camelCase` names are bindings or operation references, and a literal is
+ * whatever text a declared pattern matched. So the walk needs no scope: an arm
+ * binding is a `nameOrKeyword` (`ident` and keywords, never `pascalIdent`), and
+ * cannot shadow a constructor.
+ *
+ * Every expression form is covered, because a constructor can appear anywhere:
+ * a construction's field values, a call's receiver and parts, a `binop`'s
+ * operands, and a `unary`'s operand, through any depth of parentheses.
+ */
+function validateExpression(
+    expr: Expr,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): void {
+    switch (expr.kind) {
+        case "binop":
+            validateExpression(expr.lhs, table, errors)
+            validateExpression(expr.rhs, table, errors)
+            return
+        case "unary":
+            validatePrimary(expr.operand, table, errors)
+            return
+        case "call":
+            validatePrimary(expr.receiver, table, errors)
+            for (const part of expr.parts) validateExpression(part.value, table, errors)
+            return
+        default:
+            validatePrimary(expr, table, errors)
+    }
+}
+
+/** Validate one primary's constructor reference. */
+function validatePrimary(
+    primary: Primary,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): void {
+    switch (primary.kind) {
+        case "paren":
+            validateExpression(primary.inner, table, errors)
+            return
+        case "construction":
+            validateConstruction(primary, table, errors)
+            return
+        case "variantRef":
+            validateConstruction(
+                {
+                    kind: "construction",
+                    qualifier: primary.qualifier,
+                    variant: primary.name,
+                    fields: [],
+                },
+                table,
+                errors,
+            )
+            return
+        // A literal is matched text, a `ref` is a binding or an operation
+        // reference, and an `opRef` is a function value — none introduces a
+        // constructor, so none is this pass's to resolve.
+        case "lit":
+        case "ref":
+        case "opRef":
+            return
+    }
+}
+
+/**
+ * Validate a construction (or a nullary variant reference) against the variants
+ * in scope.
+ *
+ * Three rules:
+ *
+ * 1. **A qualifier must name a declared type that declares the variant.** An
+ *    undeclared qualifier, or a type whose member set lacks the variant, is
+ *    `bad-qualifier` — this is the `(Ghost One)` / `(A Two)` case.
+ * 2. **A bare name must be unambiguous.** No candidate anywhere is
+ *    `unknown-constructor`; several candidates unrelated by ancestry is
+ *    `ambiguous-constructor`, naming each. A parent and child that both declare
+ *    it are one constructor, not a collision.
+ * 3. **Every field must be named exactly once, and nothing else.** Field names
+ *    bind by name, so the order they are written in carries no meaning: a
+ *    construction supplies a set of `field: value` pairs, and elaboration emits
+ *    them in declaration order. A name that is missing, duplicated, or undeclared
+ *    leaves a slot unbound or a value without a slot — `selector-mismatch`.
+ */
+function validateConstruction(
+    construction: Construction,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): void {
+    const { qualifier, variant: name, fields } = construction
+
+    for (const field of fields) validateExpression(field.value, table, errors)
+
+    const declarers = qualifier === undefined
+        ? resolveBareConstructor(name, table, errors)
+        : resolveQualifiedConstructor(qualifier, name, table, errors)
+    if (declarers === undefined || declarers.length === 0) return
+
+    // The rule reads the *declared* field set. Several declarers of one lineage
+    // share it, so any candidate will do; a genuine collision was reported above.
+    const declared = table.types.get(declarers[0]!)?.variants.find((v) => v.name === name)
+    if (declared === undefined) return
+    requireSelector(
+        name,
+        qualifier,
+        fields.map((f) => f.key),
+        declared.fields.map((f) => f.name),
+        errors,
+    )
+}
+
+/**
+ * A bare construction's declaring types, or `undefined` when the name is
+ * unknown or ambiguous (each already reported).
+ */
+function resolveBareConstructor(
+    name: string,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): readonly string[] | undefined {
+    const candidates = table.variants.get(name)
+    if (candidates === undefined || candidates.length === 0) {
+        errors.push({
+            reason: "unknown-constructor",
+            message: `"${name}" is not a declared variant — a construction must name a variant ` +
+                `declared by a type in scope`,
+        })
+        return undefined
+    }
+    if (table.ambiguousVariants.has(name)) {
+        errors.push({
+            reason: "ambiguous-constructor",
+            message:
+                `"${name}" is ambiguous — declared by ${listOf(candidates)}; qualify it with ` +
+                `the declaring type, as in "${candidates[0]} ${name}"`,
+        })
+        return undefined
+    }
+    return candidates
+}
+
+/**
+ * A qualified construction's declaring type, or `undefined` when the qualifier
+ * or variant does not resolve (each already reported).
+ *
+ * A qualifier names the _declaring_ type, so the variant must be declared by it
+ * directly — not merely inherited into its member set. Which type constructs an
+ * inherited variant is a separate question, decided with comb inheritance.
+ */
+function resolveQualifiedConstructor(
+    qualifier: string,
+    name: string,
+    table: DeclarationTable,
+    errors: ResolutionError[],
+): readonly string[] | undefined {
+    const type = table.types.get(qualifier)
+    if (type === undefined) {
+        errors.push(
+            table.types.has(qualifier)
+                ? {
+                    reason: "bad-qualifier",
+                    message: `"${qualifier}" declares no variant "${name}" — a qualifier must ` +
+                        `name the type that declares the constructor`,
+                }
+                : {
+                    reason: "bad-qualifier",
+                    message: `"${qualifier}" (qualifying "${name}") is not a declared type`,
+                },
+        )
+        return undefined
+    }
+    if (!type.variants.some((v) => v.name === name)) {
+        errors.push({
+            reason: "bad-qualifier",
+            message: `"${qualifier}" declares no variant "${name}" — a qualifier must name the ` +
+                `type that declares the constructor`,
+        })
+        return undefined
+    }
+    return [qualifier]
+}
+
+/**
+ * Require that a construction names exactly the variant's declared fields.
+ *
+ * The comparison is on the **sets**: field names bind by name, so
+ * `P2 y: … x: …` supplies the same two slots as `P2 x: … y: …` and is equally
+ * well-formed. Order is not part of a construction's meaning — the caller names
+ * each slot, and elaboration emits the arguments in declaration order from the
+ * names. Only a name that is missing, duplicated, or undeclared leaves a slot
+ * unbound or a value with no slot, which is the rejection.
+ */
+function requireSelector(
+    variant: string,
+    qualifier: string | undefined,
+    written: readonly string[],
+    declared: readonly string[],
+    errors: ResolutionError[],
+): void {
+    const label = qualifier === undefined ? variant : `${qualifier} ${variant}`
+    const missing = declared.filter((field) => !written.includes(field))
+    const unknown = written.filter((field) => !declared.includes(field))
+    const duplicated = written.filter((field, i) => written.indexOf(field) !== i)
+
+    if (missing.length === 0 && unknown.length === 0 && duplicated.length === 0) return
+
+    const problems: string[] = []
+    if (unknown.length > 0) problems.push(`no field ${listOf(unknown)}`)
+    if (missing.length > 0) problems.push(`missing ${listOf(missing)}`)
+    if (duplicated.length > 0) problems.push(`${listOf(duplicated)} given twice`)
+    errors.push({
+        reason: "selector-mismatch",
+        message: `"${label}" declares ${fieldList(declared)}, but it is constructed with ` +
+            `${fieldList(written)} — ${problems.join(", ")}`,
+    })
+}
+
+/** `["a", "b"]` → `` `a`, `b` `` — for diagnostics. */
+function listOf(names: readonly string[]): string {
+    return names.map((n) => `\`${n}\``).join(", ")
+}
+
+/** A field sequence for a diagnostic, or "no fields" when empty. */
+function fieldList(names: readonly string[]): string {
+    return names.length === 0 ? "no fields" : `the fields ${listOf(names)}`
+}
+
 /**
  * Require that a type name is a built-in or a declared type.
  *
@@ -359,16 +689,6 @@ function requireTypeName(
             `variables, so every type name must be declared or built in`,
     })
 }
-
-/**
- * Validate the names an expression mentions against an arm's bindings.
- *
- * Resolution does not walk expressions: which declared operation a bare
- * `camelCase` name denotes, and whether a message chain's selector resolves,
- * both depend on the receiver's *type* — elaboration's material, reached
- * through Ω. The names this pass contributes to that scope are the arm head's
- * bindings, which it validates for arity above.
- */
 
 // ── Convenience ──────────────────────────────────────────────────────────────
 

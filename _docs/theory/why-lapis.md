@@ -256,7 +256,7 @@ library.
   exists; the parametricity cost and its recovery via `properties` is a consequence of that choice,
   not a motivation for the language. The choice is nonetheless **final**: there are no type
   variables or type parameters in the surface language and none are planned (`design-decisions.md`
-  §"Core calculus", `surface-grammar.md` §3.8).
+  §"Core calculus", `src/surface/grammar.ts`).
 
 **The honest answer to question 5:** Three things are essential — enforced fold/unfold, first-class
 exploitable laws, and the μ/ν duality. Everything else — the syntax, the sugar forms, the contracts,

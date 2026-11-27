@@ -54,9 +54,9 @@ may declare `data Token`, and the two are _different types_ rather than one cont
 decision reserves `Token`; the spelling settles it structurally.
 
 A pattern fold's handler binds the matched token under the fixed name `match`, and that binding's
-type is `@Token` (`lc.md` §5.2, `surface-grammar.md` §5.1). A program consumes the binding; it never
+type is `@Token` (`lc.md` §5.2, `src/surface/grammar.ts`) . A program consumes the binding; it never
 writes the type. This is why `@Token` is absent from §2's table while `Any` and `Nothing` are
-present: the bounds are admitted by `atomType` as _surface_ type syntax (`surface-grammar.md` §3.8),
+present: the bounds are admitted by `atomType` as _surface_ type syntax (`src/surface/grammar.ts`),
 and `@Token` is admitted by the same production only so the core's own terms can be written.
 
 **Decision.** `@Token` belongs to Lapis Core alone. Reflection or metaprogramming would be the first
@@ -164,7 +164,7 @@ data IntList <: List
 ### 2.7 `Any` and `Nothing`
 
 The lattice bounds, not declarations: `Nothing <: σ <: Any` for every type `σ` (`lc.md` §2.1). Both
-are admitted directly by `atomType` (`surface-grammar.md` §3.8) and are the only two type names that
+are admitted directly by `atomType` (`src/surface/grammar.ts`) and are the only two type names that
 resolve before the registry is consulted.
 
 Their _scope_ — whether a module sees them without a dependency — is the module system's decision
@@ -190,8 +190,10 @@ Symbolic and named operators are the same thing: a name for a declared fold (`su
 | `>`      | `greaterThan` | `<in: Self, out: Bool>` | —                                                                 |
 | `>=`     | `atLeast`     | `<in: Self, out: Bool>` | —                                                                 |
 
-`-` in prefix position is `negate`: `- expr` is `negate(expr)` (`elaboration.md` §2.5). Contiguity
-keeps the two disjoint — `-7` is one `Int` token, `- 7` is `negate` applied to `7`.
+`-` is infix subtraction and nothing else; `negate` is a **suffix** send. Prefix position belongs to
+constructors (which is why `-7` is one `Int` token and not an operation), so `- expr` is not a
+production and `b negate` is how a negation is written. `surface-syntax.md` §1.5's `not` row is
+corrected the same way.
 
 The law column is the **`primitive` tier**: the operations' law sets are language fiat, and they are
 the axiom base the derivation engine discharges composite claims from (`design-decisions.md`
@@ -209,18 +211,28 @@ data Nat
 
     fold add <in: Self, out: Self>
         Zero other -> other
-        Succ pred other -> Succ (pred value: other)
+        Succ p other -> Succ value: (p add: other)
 ```
 
 This is `users/rationale.md` §4's worked example, and it is the shape the law suite already
-exercises. The recursive field's folded result arrives as a **partially applied continuation**, so
-applying it is the ordinary function-type send — `pred value: other`, the third elimination form
-(`overview.md` §12.27c) — not a juxtaposition.
+exercises. Three things about the spelling are load-bearing:
 
-> **Open.** `overview.md` §3.1 spells the same move by re-sending the operation's own name
-> (`rest append: v`), while §12.27c spells it `value:`. Two spellings for "apply the continuation"
-> exist in the corpus and only one should survive; it is not this document's to pick, and the choice
-> does not change the prelude's membership.
+- **A recursive field binds the fold's result, not a continuation.** `p` is the already-folded
+  `pred`, so `add`'s recursion is `p add: other` — the operation applied again to the folded field
+  as receiver, with the second operand as the keyword argument.
+- **The recursive call is not a continuation application.** `eval_grammar.ts`'s variant arm binds a
+  `Family` field to `fold [T] vⱼ {…}` (`lc.md` §3.1, `E-Fold`), which is a value of the fold's
+  result type. There is no partially applied continuation to apply, and no `value:` form in the data
+  path.
+- **A construction's fields are its selector.** `Succ` declares one field, `value`, so `Succ value:`
+  is the only spelling of a `Succ` construction; `Succ pred: …` is a different, undeclared
+  constructor.
+
+> **Not yet runnable.** `p add: other` — an operation applied to a _non-construction_ receiver with
+> a keyword part — elaborates to `add(p, other)`, which is the form the core reads. But an `add`
+> whose body re-sends `add` is self-referential, and `OpRegistry.declare` rejects that (`lc.md`
+> §2.4). The surface spelling above is right; the pipeline cannot install it yet. See `overview.md`
+> §12.48 and §12.50.
 
 ### 3.3 `Bool` — connectives
 
@@ -228,10 +240,10 @@ applying it is the ordinary function-type send — `pred value: other`, the thir
 | -------- | ----- | ----------------------- | ------------------------------------------------------------- |
 | `&`      | `and` | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: true`  |
 | `\|`     | `or`  | `<in: Self, out: Self>` | `associative`, `commutative`, `idempotent`, `identity: false` |
-| `not`    | —     | `<out: Self>`           | keyword, prefix (`surface-syntax.md` §1.5)                    |
+| `not`    | —     | `<out: Self>`           | keyword; a suffix send — `b not`                              |
 
-`not` is a keyword and a getter (no `in:`), so `x not` is a unary send and `not x` is the prefix
-form the keyword table lists.
+`not` is a keyword and a getter (no `in:`), so `x not` is a unary send — the only form. There is no
+prefix `not x`.
 
 ### 3.4 `Int` — numeric helpers
 
@@ -320,7 +332,7 @@ behind it.
 
 ### 5.3 `Float`, `sqrt`, `squared`
 
-The quadratic example needs all three (`surface-grammar.md` §8.1), and `sqrt`'s partiality is a
+The quadratic example needs all three (`examples/quadratic.lapis`), and `sqrt`'s partiality is a
 `demands:` contract (§5.1). `Float`'s language (`-?[0-9]*\.[0-9]+`) is disjoint from `Int`'s, so
 adding it later costs no collision. **Owner:** the same contracts stage as §5.1, plus the numeric
 discussion below.
@@ -348,8 +360,8 @@ Two facts follow, both load-bearing:
 1. **A numeric literal is not spellable.** The bare-atom route fixes the token's text to the type
    name (`matchedToken(name, name)`), and `match("p")` requires `p` to be a _declared pattern
    source_ — `42` is a member of the language, not a source. There is no lexer that matches input
-   text and stamps it onto a token; `issue24-plan.md` §5 records that the grammar-based
-   realization's "matched text" is the atom convention, with the text chosen at evaluation time.
+   text and stamps it onto a token: the grammar-based realization's "matched text" is the atom's
+   convention, with the text chosen at evaluation time.
 2. **`Int` has two inhabitants, not infinitely many.** The type is _documented_ as its pattern
    language and _implemented_ as one token per introduction route.
 
@@ -367,25 +379,30 @@ the first-runnable-program critical path.
 
 What a program can use **today**, against `src/core/`:
 
-| Prelude entry                           | Parses                    | Type-checks | Evaluates       |
-| --------------------------------------- | ------------------------- | ----------- | --------------- |
-| `Any`, `Nothing`                        | yes                       | yes         | yes             |
-| Pattern types (`Char`, `String`, `Int`) | yes                       | yes         | yes — as tokens |
-| `Int` literals (`42`)                   | **no**                    | —           | —               |
-| `Int` operations (§3.1)                 | signatures only           | —           | **no**          |
-| Named types (`Bool`, `Nat`, `List`)     | no — no `data` production | —           | —               |
-| `Nat`/`List` operations                 | core syntax only          | yes         | yes             |
+| Prelude entry                           | Parses          | Type-checks | Evaluates       |
+| --------------------------------------- | --------------- | ----------- | --------------- |
+| `Any`, `Nothing`                        | yes             | yes         | yes             |
+| Pattern types (`Char`, `String`, `Int`) | yes             | yes         | yes — as tokens |
+| `Int` literals (`42`)                   | **no**          | —           | —               |
+| `Int` operations (§3.1)                 | signatures only | —           | **no**          |
+| Named types (`Bool`, `Nat`, `List`)     | yes — `data`    | yes         | yes             |
+| `Nat`/`List` operations                 | yes             | **no**      | **no**          |
 
 The core's `Token` is excluded from this table because it is not a prelude name (§2.1). The
-surface's `atomType` currently _does_ admit it, which is the gap §8 records.
+surface's `atomType` rejects it too, as it rejects any name nothing declares — verified:
+`P1 x:
+Token` is `unknown-type` at resolution (`src/surface/resolve.ts`), so the `Token` gap this
+document used to record is closed.
 
 The last two rows are the point: the core calculus runs folds and unfolds over `DataType`s built
 through the builder API, and `test/fixtures.ts` already constructs `Nat`, `Bool`, `Stack`, `Queue`,
-and `Stream`. What is missing is the **surface declaration** production (`#97`) that turns source
-into those types — not the semantics.
+and `Stream`. The surface `data` production now parses and builds those types, so source reaches the
+core. What is missing is the rest of the operation pipeline — an operation's emitted definition
+never enters `Ω`, and a recursive one is rejected when it tries (`overview.md` §12.47–§12.48).
 
-So the executable tier is `Nat` + `List`: a fixture can declare them and fold over them as soon as
-`data` parses, with no new evaluation machinery. The documented tier is `Int`, which needs §5.5.
+So the executable tier is `Nat` + `List` _in the core_: a fixture can declare them and fold over
+them, with no new evaluation machinery. Source-level folds do not yet run. The documented tier is
+`Int`, which needs §5.5.
 
 ## 7. What this document supersedes
 
@@ -420,8 +437,8 @@ name (§2.1).
 
 - [`lc.md`](./lc.md) §2.1, §2.5 — the calculus's type grammar and `Token`'s status as its one
   non-μ/ν type.
-- [`surface-grammar.md`](./surface-grammar.md) §3.8 — `atomType`, the resolution chain that admits
-  the bounds, and the no-type-variables decision.
+- `src/surface/grammar.ts` — `atomType`, the resolution chain that admits the bounds, and the
+  no-type-variables decision.
 - [`surface-syntax.md`](./surface-syntax.md) §1.3 — the built-ins table derived from §2.
 - [`elaboration.md`](./elaboration.md) §2.4 — how a symbolic operator elaborates to an operation
   application.

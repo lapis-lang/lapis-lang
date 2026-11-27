@@ -1,100 +1,62 @@
 /**
- * Surface layout primitives — `surface-grammar.md` §7's L1/L2 rules.
+ * Surface layout primitives.
  *
- * Layout is a grammar-level concern in Lapis, not a post-pass. Two rules:
+ * L1: a block's contents sit at exactly the introducing line's column + 4.
+ * L2: a newline separates body lines; blank lines and comments are eaten
+ * between them.
  *
- * - **L1 — Indentation.** A block's contents are indented exactly one indent
- *   unit (4 spaces) more than the line that introduces it. Continuation lines
- *   within a body line are indented further.
- * - **L2 — Newline.** A newline separates body lines. Blank lines and comments
- *   are consumed between them.
+ * Spaces only, never tabs — the indent unit is four spaces, so a tab would make
+ * a column a matter of the reader's tab width. Comments are the exception: their
+ * content is free text. The engine's own `ws` family is unusable here because it
+ * is newline-inclusive (a line would swallow its terminator) and admits tabs;
+ * this module supplies the newline-excluding, spaces-only counterparts.
  *
- * **Whitespace is spaces, never tabs.** A tab is not a whitespace character in
- * this grammar, so a file that mixes the two is rejected rather than silently
- * re-indented — the indent unit is four spaces, and a tab would make the column
- * a matter of the reader's tab width. Comments are the one exception: their
- * content is free text and may contain anything but an unbalanced `*\/`.
- *
- * The implementation is P4P-style: every block-introducing production takes the
- * child column as a parameter and `spaces(n)` matches exactly `n` spaces. There
- * is no pre-pass and no token rewriting — the column is threaded through
- * `@rule` method parameters, which the engine memoizes per `(instance, method,
- * arguments)`.
- *
- * The engine's own whitespace primitives (`ws`, `ws1`, `wsChar`) are unusable
- * here for two reasons: they are newline-inclusive, so `ws` would let a line
- * swallow the newline that terminates it; and they admit tabs. This module
- * supplies the newline-excluding, spaces-only counterparts.
+ * The column is threaded through `@rule` method parameters, which the engine
+ * memoizes per `(instance, method, arguments)` — no pre-pass, no token rewriting.
  */
 
 import { empty, epsilon, literal, or, type Parser, pred } from "@lapis-lang/lang-forma"
 
-/** The indent unit — `surface-grammar.md` §7 L1. */
+/** The indent unit. */
 export const INDENT_UNIT = 4
 
-/** The body column of a top-level declaration's contents (§7's table). */
+/** A top-level declaration's body column. */
 export const DECL_BODY_COLUMN = INDENT_UNIT
 
-/** The column of case arms and contracts inside a fold body (§7's table). */
+/** Case arms and contracts inside a fold body. */
 export const ARM_COLUMN = INDENT_UNIT * 2
 
-/** The column of a multi-line case arm body (§7's table). */
+/** A multi-line case arm body. */
 export const ARM_BODY_COLUMN = INDENT_UNIT * 3
 
-/**
- * Match exactly `n` spaces.
- *
- * `n === 0` yields the empty match — a top-level declaration starts at column 0
- * and therefore consumes no padding. Kept as `literal("")` rather than a
- * special case at each call site so block productions read uniformly.
- */
+/** Match exactly `n` spaces; `n === 0` is the empty match (a column-0 line). */
 export function spaces(n: number): Parser<string> {
     return literal(" ".repeat(n))
 }
 
-/**
- * A newline: `\r\n` or `\n` (L2 accepts both). Ordered longest-first so the
- * two-character form is not shadowed by the one-character form.
- */
+/** `\r\n` or `\n` — longest-first so the two-character form is not shadowed. */
 export const newline: Parser<string> = or(literal("\r\n"), literal("\n"))
 
-/**
- * One horizontal whitespace character.
- *
- * **Spaces only — never a tab.** A source file cannot mix the two, and the
- * indent unit is four spaces (§7 L1), so a tab is not whitespace here at all:
- * it is a rejected character wherever code appears. Comments are the sole
- * exception, because their content is free text (§2.4).
- */
+/** One horizontal whitespace character: a space, never a tab. */
 export const hwsChar: Parser<string> = pred(
     (c: string) => c === " ",
     "<space>",
 )
 
 /**
- * Zero or more horizontal whitespace characters.
- *
- * This is the separator *within* a line. A line's end is `newline`'s job, so a
- * production that ends a line must not expect this to reach it.
+ * Zero or more spaces — the separator *within* a line. A line's end is
+ * `newline`'s job, so a line-ending production must not expect this to reach it.
  */
 export const hws: Parser<string> = hwsChar.many().map((cs: string[]) => cs.join(""))
 
-/**
- * One or more horizontal whitespace characters — a required in-line gap.
- *
- * A zero-length match is rejected via `empty()`, so `Push value` and
- * `Pushvalue` are distinguished rather than both accepted.
- */
+/** One or more spaces — a required in-line gap, so `Push value` ≠ `Pushvalue`. */
 export const hws1: Parser<string> = hwsChar.many().bind(
     (cs: string[]) => cs.length === 0 ? empty<string>() : epsilon(cs.join("")),
 )
 
 /**
- * A block comment — `/* … *\/`, delimited and **nestable**.
- *
- * Nesting is counted rather than matched by a non-greedy pattern because the
- * delimiters are not distinguishable from content otherwise: a comment may not
- * contain an unbalanced `*\/`.
+ * A nestable block comment. Nesting is counted rather than pattern-matched:
+ * the delimiters are otherwise indistinguishable from content.
  */
 export const comment: Parser<string> = literal("/*").bind(() => commentBody(1))
 
@@ -117,15 +79,11 @@ function commentBody(depth: number): Parser<string> {
 }
 
 /**
- * A line's trailing horizontal space, an optional comment, then its newline.
- *
- * Every block line ends this way, so a trailing comment needs no special
- * handling at the call site. The whitespace and comment are interleaved rather
- * than ordered — `expr /* note *\/` and `expr/* note *\/` are both a trailing
- * comment (`surface-syntax.md` §1.4's result annotation, whose own example is
- * `Color Red toHex            /* "#FF0000" *\/`).
- *
- * Returns the newline so the caller can tell a line end from end-of-input.
+ * A line's trailing spaces, an optional comment, then its newline — every block
+ * line ends this way, so a trailing comment needs no per-site handling. The
+ * whitespace and comment interleave, so both `expr /* note *\/` and
+ * `expr/* note *\/` are trailing comments. Returns the newline, so a caller can
+ * tell a line end from end-of-input.
  */
 export const lineEnd: Parser<string> = hws
     .then(comment.opt())
@@ -137,11 +95,9 @@ export const lineEnd: Parser<string> = hws
 const blankLine: Parser<string> = hws.then(newline).map(() => "")
 
 /**
- * Zero or more blank lines and comment-only lines — what L2 consumes between
- * body items.
- *
- * Indentation is deliberately not consumed here: a blank line's leading spaces
- * belong to no block, so the next item's own `spaces(column)` still matches it.
+ * Zero or more blank and comment-only lines — what L2 consumes between items.
+ * Indentation is not consumed: a blank line's spaces belong to no block, so the
+ * next item's own `spaces(column)` still matches.
  */
 export const trivia: Parser<string> = or(
     blankLine,

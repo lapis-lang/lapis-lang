@@ -6,9 +6,9 @@
 > [`src/core/grammar.ts`](../../src/core/grammar.ts); this document is the human-readable
 > specification that the grammar implements.
 >
-> The **consolidated EBNF** for the surface language — every production in one place — is
-> [`surface-grammar.md`](./surface-grammar.md). This document is the narrative; that one is the
-> normative production set. Where they disagree on the _shape_ of the syntax, the EBNF wins.
+> The **consolidated EBNF** for the surface language is `src/surface/grammar.ts` (its header is the
+> production set; the `@rule` methods are the executable form). This document is the narrative.
+> Where they disagree on the _shape_ of the syntax, the code wins.
 
 ## 1. Lexical Structure
 
@@ -199,10 +199,10 @@ They cost nothing: no token, no budget, no rule participation.
 A comment's **position is its grade**:
 
 - **Trailing** (following an expression on the same line) — a _result annotation_: a record of what
-  that expression produces. Documentation-grade; the language never checks it. The checker for
-  annotations is the future doc-example harness (evaluate the fragment, compare the record), not the
-  compiler — see [`issue83-plan.md`](../issue83-plan.md) §5. In-source claims about results route to
-  contracts (`ensures:`/`invariant:`/`demands:`), which ARE checked.
+  that expression produces. Documentation-grade; the language never checks it. The checker is the
+  future doc-example harness (evaluate the fragment, compare the record), not the compiler —
+  comments are consumed at statement boundaries and appear in no semantic grammar. In-source claims
+  about results route to contracts (`ensures:`/`invariant:`/`demands:`), which ARE checked.
 - **Own-line** (above a construct) — a _prose comment_: it describes the construct below it (the
   next declaration or body line at greater-or-equal indent). The example's first line shows the
   prose grade: it describes the expression below; the second line's trailing comment is the result
@@ -236,7 +236,7 @@ spells the quoted forms the surface language recognizes.
 | `map`       | Map operation (field transformation)   |
 | `merge`     | Merge operation (deforestation)        |
 | `satisfies` | Protocol conformance clause            |
-| `not`       | Negation on `Bool` (prefix)            |
+| `not`       | Negation on `Bool` (suffix send)       |
 | `self`      | Current instance (always in scope)     |
 | `Family`    | Recursive self-reference in data       |
 | `Self`      | Corecursive self-reference in behavior |
@@ -395,7 +395,7 @@ Int double                — the same, qualified by its declaring type
 **A function value cannot be passed.** Because no declaration can state a function type, there is no
 surface position that receives one: an operation reference names a function value, and the core
 applies it by juxtaposition, but no `in:`, field, or result can be of function type. See
-`surface-grammar.md` §3.6.1.
+`src/surface/grammar.ts` (function values).
 
 **Why the literal goes away.** A block literal is an anonymous binder, and every other binder the
 language had was already removed (no top-level definition form, no `let … in`, no arm-level binding
@@ -567,6 +567,45 @@ flowchart TD
   - Unmentioned fields are inherited unchanged.
 - **No `Any`/`Nothing` extension.** `[<: Any]` is rejected (every data type is already an implicit
   subtype of `Any`); `[<: Nothing]` is rejected (the bottom type has no subtypes).
+
+### Construction and qualification
+
+A construction names its variant and spells its fields as **named arguments**:
+
+```lapis
+Point2D x: 1 y: 2
+Point2D y: 2 x: 1      /* the same value — the names bind, the order does not */
+```
+
+Each `field: value` pair binds that field by name, so the order the pairs are written in carries no
+meaning. This is what named arguments are for: the caller says which slot a value fills, and
+`Point2D y: 2 x: 1` is the same construction as `Point2D x: 1 y: 2`, not a different one. A
+variant's field names are unique within it, so there is no ambiguity to resolve — the two spellings
+denote one value.
+
+A construction is valid **iff** it names every declared field exactly once and nothing else. An
+omitted, duplicated, or undeclared field leaves a slot unbound or a value with no slot, and is
+rejected. Order is not part of that check.
+
+The core's construction is positional — `Cᵢ(t₁, …, tₙ)` — so **elaboration emits the arguments in
+declaration order**, resolving each name to its slot. That mapping is the whole point: the surface
+is order-insensitive, the core is positional, and elaboration is where the one becomes the other.
+
+A construction may also name the type whose constructor is meant — `Point Point2D x: 1 y: 2`. **Bare
+is the default; qualification is disambiguation**, and it does two distinct jobs:
+
+- **Collision.** Two types with no ancestry relation declaring the same variant make the bare form
+  ambiguous, and the qualifier selects.
+- **Selecting the constructing type.** The qualifier names the type that _declares_ the constructor.
+
+A parent and a child that both declare a variant are **not** a collision: the child's declaration is
+the parent's, narrowed (above). Which type constructs a bare _inherited_ variant is not decided in
+this section — see [overview §12.7](../overview.md) and
+[#86](https://github.com/lapis-lang/lapis-lang/issues/86).
+
+A construction in expression position is checked by resolution, which reports an unknown name, an
+ambiguous one (naming every candidate), a bad qualifier, or a mismatched selector. See
+[`surface-grammar.md`](./surface-grammar.md) §2.8 for the rule and its diagnostics.
 
 ### 4.2 `behavior` — Final Coalgebra (ν-type)
 
@@ -868,11 +907,12 @@ does not declare.
    separate escape sub-pattern. Need to decide: add escapes at the `Char` level, or handle them in
    the fold handler that processes the matched token.
 
-2. **Negative integer literals.** `-42` is now a pattern-matched constructor of
-   `Int = μ α. (-[0-9]+ | [0-9]+)`. The pattern `-[0-9]+` matches the negative form directly. This
-   resolves the old question: `-42` is a literal, not a prefix send. However, `a - b` (subtraction)
-   and `-42` (negative literal) must be disambiguated by context (infix vs prefix position). The
-   lexer's prefix/infix alternation handles this.
+2. **Negative integer literals.** `-42` is a pattern-matched constructor of `Int`. The pattern
+   `-[0-9]+` matches the negative form directly, so `-42` is a literal, not an operation
+   application. `a - b` (subtraction) and `-42` (negative literal) are disambiguated by **position
+   alone**: a symbol at the start of a token is a constructor, and between whitespace-delimited
+   tokens it is an operation. There is no prefix operation form to confuse it with — negation is the
+   suffix send `b negate`.
 
 3. **Uniform binary precedence and `,` (cons).** With uniform binary precedence, `a + b , c` parses
    as `(a + b) , c` (left-to-right). This is the same as every other binary operator. The question
@@ -889,9 +929,8 @@ does not declare.
    expression is broken up by **declaring** its pieces as sibling operations — a fold can be
    consumed by another fold, and `<aux: …>` fuses a companion computation into the same traversal
    (see the `quadratic`/`discriminant` example in
-   [`surface-grammar.md`](./surface-grammar.md#81-why-a-case-arm-has-no-bound-intermediate)). There
-   is no arm-level binding form (`overview.md` §12.6). Is that sufficient, or do we need a
-   continuation operator?
+   [`examples/quadratic.lapis`](../../examples/quadratic.lapis)). There is no arm-level binding form
+   (`overview.md` §12.6). Is that sufficient, or do we need a continuation operator?
 
 6. **Indented bodies inside nested contexts.** A declaration body (a fold arm, a contract clause, a
    map arm) contains an expression that may itself be an indented body. How does the child

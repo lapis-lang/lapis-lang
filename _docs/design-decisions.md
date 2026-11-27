@@ -30,8 +30,8 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
 - **No generics, no type parameters — permanently.** Subtyping is the _sole_ abstraction mechanism,
   not a substitute waiting to be swapped back (Meyer OOSC, Bracha). Comb inheritance + field
   narrowing is the mechanism, and the surface has **no type-variable production and no parameter
-  list on any declaration** (`surface-grammar.md` §3.8, §4.1). There is no `data List<a>`, no `t[τ]`
-  in type position, and no `typeParam:` spec key. This is a closed decision: the calculus stays F<:,
+  list on any declaration** (`src/surface/grammar.ts`). There is no `data List<a>`, no `t[τ]` in
+  type position, and no `typeParam:` spec key. This is a closed decision: the calculus stays F<:,
   and no future proposal reopens it. Where a generic type would appear, one of three existing forms
   does the work instead — a **subtype** with narrowed fields, the declaring type itself (`Self`), or
   the lattice top **`Any`**.
@@ -304,7 +304,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   ties broken by declaration order. Named constructors take precedence over patterns when both could
   match (more specific).
 
-## Comments and result annotations (see `issue83-plan.md`)
+## Comments and result annotations
 
 - **Comments are `/* ... */` — nested block form.** Delimiters balance by counting (a comment may
   contain further `/* ... */` pairs); no escapes inside comments; the one writer rule: prose cannot
@@ -340,7 +340,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   `(x = y) + 1`). Trailing comments in the docs are documentation fragments — a doc-example harness
   device, never source (`surface-syntax.md` §1.4).
 - **Names are declared, never bound.** A value name is introduced by a zero-field variant
-  (`variantRef`, `surface-grammar.md` §3.4). A computation name is introduced by an operation
+  (`variantRef`, `src/surface/grammar.ts`). A computation name is introduced by an operation
   declaration — which is what makes it carry a declared type, membership in `Ω`, a law set
   (`properties:`), and a memoized cost summary. Nothing introduces a name by assignment: the core
   has `let` and no store (`lc.md` §3, `E-Let` and no `E-Assign`).
@@ -361,7 +361,7 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   workaround: the declared form is strictly stronger (declared type, reuse, laws, cost summary,
   identity preserved through elaboration by `E-Op`). The quadratic formula is the canonical case —
   the discriminant is a `fold discriminant <out: Float>` and `roots` is `<aux: #discriminant>`
-  (`surface-grammar.md` §8.1). The corpus supports the rule: no worked example in `_docs/` needs a
+  (`examples/quadratic.lapis`). The corpus supports the rule: no worked example in `_docs/` needs a
   local except the two-root case, which `aux` already serves.
 - **Revisit trigger.** Reifiable binding (a `Let` _value_, programs-as-data) is a Stage-7
   metaprogramming question, not a surface-syntax one. Any such proposal must first answer name
@@ -389,9 +389,9 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   receiver, then apply the arguments" (`elaboration.md` §2.5): `fold` eliminates data, **observation
   eliminates codata**, and **application eliminates a function type**. Application is therefore
   _derived_ rather than _added_ — there is no `expr expr` production and no `value:` suffix. **The
-  surface cannot in fact reach it:** a surface type is `atomType` (§2.1 of `surface-grammar.md`), so
-  no declaration can state a function type and no expression can acquire a receiver of one.
-  Application stays a core rule, reached by elaboration and never written.
+  surface cannot in fact reach it:** a surface type is `atomType` (`src/surface/grammar.ts`), so no
+  declaration can state a function type and no expression can acquire a receiver of one. Application
+  stays a core rule, reached by elaboration and never written.
 - **Parentheses re-open the message chain.** `(f k: x) k: y` is two sends, not one two-part selector
   — the same mechanism that keeps uniform binary precedence unambiguous. The core's application is
   single-argument, so multi-argument function values are curried by nesting, matching the core's

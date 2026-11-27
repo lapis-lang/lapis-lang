@@ -12,12 +12,14 @@
  * A local would have been strictly weaker than the declared fold: `discriminant`
  * carries a declared result type, a place in the operation environment (so it
  * can hold `properties:` laws and a cost summary), and it is callable elsewhere.
- * See `_docs/theory/surface-grammar.md` §8.1 and `_docs/design-decisions.md`
+ * See `_docs/theory/surface-grammar.md` §4.1 and `_docs/design-decisions.md`
  * §"Program shape and name introduction".
  *
- * Status: not yet runnable. The surface grammar has no `data`/`fold` productions
- * yet (#97), and `Number`, `sqrt`, `-`, `*`, `/` have no declarations yet (#93).
- * This file is the spelling the implementation is aimed at.
+ * Status: parses as of the `data` production, but does not yet run. `Number`,
+ * `sqrt` and the arithmetic operators have no declarations yet (#93, #119), and
+ * the operation pipeline cannot install a fold whose body calls another fold
+ * (overview §12.48–§12.49). This file is the spelling the implementation is
+ * aimed at.
  */
 
 /* Both roots together, so one traversal of the coefficients yields both. */
@@ -54,13 +56,14 @@ data Quadratic
     fold roots <aux: #discriminant, out: QuadraticRoots>
         demands: self | self hasRealRoots
         Coeffs a b c -> Roots
-            plus: ((- b + ((aux discriminant) sqrt)) / (2 * a))
-            minus: ((- b - ((aux discriminant) sqrt)) / (2 * a))
+            plus: (((b negate) + ((aux discriminant) sqrt)) / (2 * a))
+            minus: (((b negate) - ((aux discriminant) sqrt)) / (2 * a))
 
 /*
- * Note the spaces in `- b`. Contiguity is position-meaningful: `-b` at the start
- * of a token is a pattern-matched `Int` constructor (the `-[0-9]+` member), while
- * `- expr` in prefix position is the `negate` operation. `- b` is the latter.
+ * Note why `-b` is never written. A symbol at the start of a token introduces
+ * data: `-b` is the `Int` pattern `-[0-9]+` applied to `b`, which is not a
+ * negation but a failed match. Prefix position belongs to constructors, so
+ * there is no prefix `negate`; negation is the suffix send `b negate`.
  */
 
 /*

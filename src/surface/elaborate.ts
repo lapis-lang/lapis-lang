@@ -1,33 +1,15 @@
 /**
  * Elaboration: surface declarations → core μ-types + `Ω` operations.
  *
- * The core represents terms as **concrete LC syntax**: `OpSig.definition` is
- * "the operation's defining LC term, as concrete-syntax source text", parsed and
- * applied on demand by `LCEval.evalOp`. There is no shared core AST to construct,
- * so elaboration emits source text and hands it to the existing one-pass grammar.
- * That is the same contract `Ω` already honours for every operation definition,
- * so elaborated text is checked by exactly the machinery that checks hand-written
- * core terms.
+ * The core represents terms as concrete LC syntax — `OpSig.definition` is source
+ * text, parsed and applied on demand by `LCEval.evalOp`. So elaboration emits
+ * source text rather than constructing a core AST, and the result is checked by
+ * exactly the machinery that checks hand-written core terms:
  *
- * The mapping is `elaboration.md` §3.1:
- *
- * ```
- * data Stack
- *     Empty
- *     Push value: Any rest: Family
- *     fold size <in: Stack, out: Any>
- *         Empty -> 0
- *         Push _ rest -> 1 + rest
- * ```
- *
- * becomes a `DataType` whose `Push` has a `Family`-typed `rest` field — `Family`
- * is the μ-bound α, so a recursive field needs no type-name lookup — and an
- * operation whose LC definition is
- *
- * ```
- * \e:Stack. fold [Stack] e { Empty() -> 0, Push(_, rest) -> (1 + rest) }
- * ```
+ *   data Stack / Empty / Push value: Any rest: Family / fold size
+ *     →  \e:Stack. fold [Stack] e { Empty() -> 0, Push(_, rest) -> (1 + rest) }
  */
+
 import {
     Any,
     AnyType,
@@ -44,7 +26,16 @@ import {
 
 import { TypeRegistry } from "../core/grammar.ts"
 
-import type { AtomType, CaseArm, DataDecl, Expr, FoldDecl, Primary, SurfaceProgram } from "./ast.ts"
+import type {
+    AtomType,
+    CaseArm,
+    Construction,
+    DataDecl,
+    Expr,
+    FoldDecl,
+    Primary,
+    SurfaceProgram,
+} from "./ast.ts"
 
 // ── Result ───────────────────────────────────────────────────────────────────
 
@@ -129,31 +120,20 @@ function buildDeclaration(
 }
 
 /**
- * A surface type expression → a core `Type` slot.
+ * A surface type name → a core `Type` slot. `Family` and `Self` must not collapse:
  *
- * The input is an `AtomType`, which is the whole surface type grammar — a type
- * is always a name, never a shape. `Family` and `Self` are **different
- * references** and must not collapse:
+ * - `Family` is the μ-bound α, written in field position. It stays the symbolic
+ *   `FamilyType`, resolved per carrier at point of use, so a recursive field is
+ *   open by construction.
+ * - `Self` is the *declaring* type, which is what makes `Num add <in: Self, out:
+ *   Self>` return its operand's type. It resolves to the owner's handle — the
+ *   builder during construction, the published instance after.
  *
- * - **`Family`** is the μ-bound α, written in *field* position
- *   (`surface-grammar.md` §3.5). It stays the symbolic `FamilyType`, which the
- *   core resolves per carrier at the point of use (`resolveFamily`), so a
- *   recursive field is open by construction.
- * - **`Self`** is the *declaring type*, written in a spec's `in:`/`out:` — which
- *   is what makes `Num add <in: Self, out: Self>` return its operand's type. It
- *   resolves to the owner's own handle: during construction that is the builder
- *   (which the slot type admits, so the group knots it), and after publication
- *   it is the real instance.
- *
- * A declared name yields that declaration's **handle**, not a copy. The slot type
- * admits a builder precisely so the build group can resolve a forward or mutual
- * reference into the real published instance; handing back a name-only
- * placeholder instead would make every cross-type field a distinct object and
- * break structural comparison.
- *
- * The handle map's value type is a parameter, so a *builder* map yields
- * `TypeSlot` (what construction needs) and a *published* map yields `Type` (what
- * a spec's signature needs) — one set of name rules, no cast to bridge them.
+ * A declared name yields its handle, not a copy: the slot type admits a builder so
+ * the build group can knot forward and mutual references, and a name-only
+ * placeholder would make every cross-type field a distinct object. The map's value
+ * type is a parameter, so a builder map yields `TypeSlot` and a published map
+ * yields `Type` — no cast between them.
  */
 function elaborateType<T extends TypeSlot>(
     type: AtomType,
@@ -242,7 +222,8 @@ function elaborateFold(
     const inType = specType(fold, "in", self, decl.name, published)
     const outType = specType(fold, "out", self, decl.name, published)
 
-    const handlers = fold.arms.map((arm) => renderArm(arm, decl))
+    const ctx: RenderCtx = { decl, published }
+    const handlers = fold.arms.map((arm) => renderArm(arm, ctx))
     return {
         name: fold.name,
         paramTypes: [inType],
@@ -273,27 +254,27 @@ function specType(
     // A published handle map yields `Type`, so the signature needs no cast.
     return elaborateType(entry.type, ownerName, published)
 }
+/** What the renderer needs besides the expression: the program's declared types. */
+interface RenderCtx {
+    /** The enclosing declaration, for `Family`/`Self` in expression position. */
+    readonly decl: DataDecl
+    /** The program's published types, for a construction's declared field order. */
+    readonly published: ReadonlyMap<string, Type>
+}
 
 /**
- * One case arm → one core handler: `Variant(x y) -> body`.
- *
- * The core separates a handler's **bindings with spaces** and its **handlers
- * with commas** — `{ Empty() -> 0, Push(v rest) -> rest }`. Getting this wrong is
- * silent: the parse simply fails, with no indication that a separator is the
+ * One case arm → one core handler. The core separates bindings with **spaces**
+ * and handlers with **commas** — `{ Empty() -> 0, Push(v rest) -> rest }`. Getting
+ * this wrong is silent: the parse just fails, with no hint that a separator is the
  * cause.
  *
- * A wildcard arm (`_`) would need the declaring type's complete variant set to
- * expand into named handlers. The core's merged fold form has a pattern arm that
- * could carry it, but a pattern source is not what `_` means — `_` is
- * exhaustiveness over an *open* variant set (`surface-grammar.md` §5.1), which is
- * comb inheritance's business (#86). An arm that names no variant therefore
- * cannot be elaborated faithfully here, and silently expanding it against the
- * *current* variant set would be wrong the moment a subtype adds one. It is
- * rejected instead — the resolver reports it, and this function is only reached
- * on the resolved path.
+ * A wildcard arm is rejected rather than expanded: `_` means exhaustiveness over an
+ * *open* variant set, and expanding it against the current set would be wrong the
+ * moment a subtype adds a variant. The resolver reports it, so this function is
+ * only reached on the resolved path.
  */
-function renderArm(arm: CaseArm, decl: DataDecl): string {
-    const body = renderExpr(arm.body, decl)
+function renderArm(arm: CaseArm, ctx: RenderCtx): string {
+    const body = renderExpr(arm.body, ctx)
     // The resolver guarantees a named variant; `_` is rejected there because the
     // core's fold form cannot express an open wildcard.
     return `${arm.head.variant}(${arm.head.bindings.join(" ")}) -> ${body}`
@@ -310,46 +291,41 @@ function renderArm(arm: CaseArm, decl: DataDecl): string {
  * therefore becomes positional here (`elaboration.md` §2.7) — the whole point of
  * elaboration.
  */
-function renderExpr(expr: Expr, decl: DataDecl): string {
+function renderExpr(expr: Expr, ctx: RenderCtx): string {
     switch (expr.kind) {
         case "binop":
-            return `(${renderExpr(expr.lhs, decl)} ${expr.op} ` +
-                `${renderExpr(expr.rhs, decl)})`
+            return `(${renderExpr(expr.lhs, ctx)} ${expr.op} ` +
+                `${renderExpr(expr.rhs, ctx)})`
         case "unary":
-            return `${expr.op} ${renderPrimary(expr.operand, decl)}`
+            return `${expr.op} ${renderPrimary(expr.operand, ctx)}`
         case "call":
-            return renderCall(expr.receiver, expr.parts, expr.messages, decl)
+            return renderCall(expr.receiver, expr.parts, expr.messages, ctx)
         default:
-            return renderPrimary(expr, decl)
+            return renderPrimary(expr, ctx)
     }
 }
-
 /**
- * Render a message chain.
+ * A selector's parts are the operation's keyword sequence, which the core spells by
+ * applying: `receiver size` is `size(receiver)`. A keyword send eliminates its
+ * receiver, so the receiver is the operation's argument, not its owner — hence the
+ * positional pass.
  *
- * A selector's parts are the operation's keyword sequence, which the core spells
- * by applying the operation: `receiver size` is `size(receiver)`. The surface's
- * receiver-taking rule (§3.3: a keyword send eliminates its receiver) means the
- * receiver is the operation's argument, not the operation's owner — so the
- * rendered form passes it positionally.
- *
- * The reverse holds for an unlabelled send: §3.1's `unaryExpr ::= unaryExpr ␣
- * ident` makes `Succ p` a send of `p` **to** `Succ`, which the core spells
- * `p(Succ)` — `p` applied to `Succ`, not the other way round. That is why the
- * order below is `message(receiver)`.
+ * The reverse holds for an unlabelled send: `Succ p` is a send of `p` **to** `Succ`,
+ * which the core spells `p(Succ)`. That is why the order below is
+ * `message(receiver)`.
  */
 function renderCall(
     receiver: Primary,
     parts: readonly { key: string; value: Expr }[],
     messages: readonly string[],
-    decl: DataDecl,
+    ctx: RenderCtx,
 ): string {
-    let rendered = renderPrimary(receiver, decl)
+    let rendered = renderPrimary(receiver, ctx)
     for (const message of messages) {
         rendered = `${message}(${rendered})`
     }
     if (parts.length > 0) {
-        const args = parts.map((p) => renderExpr(p.value, decl))
+        const args = parts.map((p) => renderExpr(p.value, ctx))
         const selector = parts.map((p) => p.key).join(":")
         rendered = `${selector}(${[rendered, ...args].join(", ")})`
     }
@@ -357,31 +333,60 @@ function renderCall(
 }
 
 /** Render a primary as core concrete syntax. */
-function renderPrimary(primary: Primary, decl: DataDecl): string {
+function renderPrimary(primary: Primary, ctx: RenderCtx): string {
     switch (primary.kind) {
         case "lit":
             return primary.text
         case "ref":
             // `Family`/`Self` in expression position denote the recursive
             // position; the core spells that as the enclosing type's name.
-            if (primary.name === "Family" || primary.name === "Self") return decl.name
+            if (primary.name === "Family" || primary.name === "Self") return ctx.decl.name
             return primary.name
         case "variantRef":
             // A zero-field variant is a *construction* in the core, not a bare
             // name: `Empty` in the core's syntax is a variable reference, and
             // `Empty()` is the nullary constructor (`lc.md` §2.2's
             // `variantProd`). The surface spells the constructor by name alone
-            // (`surface-grammar.md` §3.4), so elaboration supplies the parens.
+            // (`grammar.ts`'s `construction`), so elaboration supplies the parens.
             return `${primary.name}()`
         case "construction": {
-            const args = primary.fields.map((f) => renderExpr(f.value, decl))
+            // The core's construction is positional, so the named arguments are
+            // emitted in the variant's **declaration** order. The caller wrote
+            // each field by name and the order they wrote it in carries no
+            // meaning; resolution has already ensured the names are exactly the
+            // declared set, so every field finds its slot.
+            const declared = declaredFieldOrder(primary, ctx)
+            const values = new Map(primary.fields.map((f) => [f.key, f.value]))
+            const args = declared.map((name) => {
+                const value = values.get(name)
+                return value === undefined ? "" : renderExpr(value, ctx)
+            })
             return `${primary.variant}(${args.join(", ")})`
         }
         case "paren":
-            return `(${renderExpr(primary.inner, decl)})`
+            return `(${renderExpr(primary.inner, ctx)})`
         case "opRef":
             return primary.qualifier === undefined
                 ? primary.name
                 : `${primary.qualifier} ${primary.name}`
     }
+}
+
+/**
+ * A construction's declared field order, as the core will emit it.
+ *
+ * The variant is looked up among the program's published types. Resolution has
+ * already rejected an undeclared variant and a field set that is not the
+ * declared one, so a miss here is a caller bug — elaboration invoked on an
+ * unresolved program. The field list falls back to the written order in that
+ * case rather than dropping arguments.
+ */
+function declaredFieldOrder(construction: Construction, ctx: RenderCtx): readonly string[] {
+    for (const type of ctx.published.values()) {
+        const variant = type instanceof DataType
+            ? type.findVariant(construction.variant)
+            : undefined
+        if (variant !== undefined) return variant.fields.map((f) => f.name)
+    }
+    return construction.fields.map((f) => f.key)
 }

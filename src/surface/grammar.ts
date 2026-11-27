@@ -1,26 +1,110 @@
 /**
  * The Lapis surface grammar — an executable grammar producing the surface AST.
  *
- * Scope is one `data` declaration with its `fold`: enough for a *complete*
- * program, because the surface has no top-level expression form (a program is
- * `declaration*`, overview §12.6). Patterns, captures, inheritance, `unfold` in
- * data, and the other five declaration kinds are later production sets that
- * plug into this same shape.
+ * Implemented: one `data` declaration with named variants and an in-body
+ * `fold`. Not implemented (no production): `behavior`, `protocol`, `relation`,
+ * `query`, `io`, `unfold`/`merge`/`scan`/`satisfies:` body items, pattern
+ * members, variant inheritance.
  *
- * Two structural notes that differ from the core grammar:
+ * ## Concrete syntax
  *
- * 1. **Layout is significant** (`surface-grammar.md` §7). Block-introducing
- *    productions take the child column as a parameter (`@rule item(column)`),
- *    so the engine memoizes one slot per column — the documented answer for
- *    context-sensitive grammars. `src/surface/layout.ts` supplies the
- *    newline-excluding primitives the engine's `ws` family cannot provide.
- * 2. **There is no application production** (§3.2). Application is *derived*: a
- *    keyword send eliminates its receiver and applies the arguments, and a
- *    receiver of function type applies through `value:` (§3.3).
+ * ```
+ * program        ::= declaration*
+ * declaration    ::= dataDecl
  *
- * Rejection is the production path's job, not a contract's: a failed `@requires`
- * yields `undefined` in the forest, which is not a rejection. Premises are
- * therefore checked inline and a failed branch yields `empty()`.
+ * dataDecl       ::= "data" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ dataBody
+ * dataBody       ::= ␣(4) dataBodyItem+
+ * dataBodyItem   ::= variantDecl | foldDecl          (* mapDecl is parsed, not elaborated *)
+ *
+ * variantDecl    ::= pascalIdent ( ␣ ident ":" ␣ typeExpr )*   (* fields, in declaration order *)
+ * fieldDecl      ::= ident ":" ␣ typeExpr
+ *
+ * foldDecl       ::= "fold" ident specRecord? ⏎ foldBody
+ * foldBody       ::= ␣(8) foldItem+
+ * foldItem       ::= contractClause | caseArm
+ * contractClause ::= clauseKind ":" ␣ ident* ( "|" ␣ )? ⏎ ␣(12) expr
+ * clauseKind     ::= "demands" | "ensures" | "invariant" | "rescue"
+ * caseArm        ::= armHead "->" armBody
+ * armHead        ::= pascalIdent ( ␣ binding )* | "_" ( ␣ binding )*
+ * binding        ::= ident | "_"
+ * armBody        ::= expr | ⏎ ␣(12) expr
+ *
+ * mapDecl        ::= "map" ident specRecord? ⏎ mapBody
+ * mapBody        ::= ␣(8) fieldTransform+
+ * fieldTransform ::= ident ␣ binding "->" ␣ expr
+ *
+ * specRecord     ::= "<" ( specEntry ( "," ␣ specEntry )* )? ">"
+ * specEntry      ::= "in"  ":" ␣ typeExpr
+ *                  | "out" ":" ␣ typeExpr
+ *                  | "para" | "histo" | "aux"            (* bare flags *)
+ *                  | "aux" ":" ␣ "#" ident
+ *                  | ident ":" ␣ expr                    (* e.g. properties; unvalidated *)
+ *
+ * typeExpr       ::= atomType
+ * atomType       ::= "(" typeExpr ")"
+ *                  | pascalIdent                          (* a declared type *)
+ *                  | "Family" | "Self" | "Any" | "Nothing"
+ *
+ * expr           ::= keywordExpr
+ * keywordExpr    ::= binaryExpr ( ␣ keywordPart )+
+ *                  | binaryExpr
+ * keywordPart    ::= ident ":" ␣ expr
+ * binaryExpr     ::= binaryExpr ␣ binaryOp ␣ unaryExpr
+ *                  | unaryExpr
+ * binaryOp       ::= symbolicOp | ident
+ * unaryExpr      ::= unaryExpr ␣ ident                   (* unary send *)
+ *                  | primary
+ * primary        ::= literal
+ *                  | "(" expr ")"
+ *                  | reference
+ *                  | "nil" | "true" | "false"
+ *                  | construction | variantRef
+ *                  | ident                              (* operation reference *)
+ *
+ * construction   ::= pascalIdent ( ␣ ident ":" ␣ expr )+
+ * variantRef     ::= pascalIdent
+ * reference      ::= "self" | "Family" | "Self"
+ *                  | "old" ident | "prev" ident | "aux" ident
+ *
+ * literal        ::= patternLiteral | stringLiteral | charLiteral
+ * stringLiteral  ::= '"' .* '"'                          (* no escapes beyond \" *)
+ * charLiteral    ::= "'" . "'"
+ *
+ * ident          ::= alphaLower alnum*                  (* excludes keywords *)
+ * pascalIdent    ::= alphaUpper alnum*                  (* excludes Family, Self *)
+ * symbolicOp     ::= ( "+" | "-" | "*" | "/" | "<" | ">" | "=" | "!" | "?" | "&"
+ *                    | "|" | "," | "." )+
+ * comment        ::= opener ( comment | notCloser )* closer   (* nests; metasyntax *)
+ *                                                      (* opener "*" "/", closer "/" "*" *)
+ * hws            ::= " "*        hws1 ::= " "+       (* spaces only — never tabs *)
+ * ```
+ *
+ * ## Layout (§7)
+ *
+ * L1: a block's contents sit at exactly the introducing line's column + 4.
+ * L2: a newline separates body lines; blank lines and comments are eaten
+ * between them.
+ *
+ *            0  declaration          8  fold item / arm
+ *            4  declaration body    12  multi-line arm body
+ *
+ * The column is a `@rule` *parameter* (`item(column)`), not a pre-pass: the
+ * engine memoizes one slot per column, which is its documented answer for
+ * context-sensitive grammars. `layout.ts` supplies the newline-excluding
+ * `hws`/`hws1`, since the engine's `ws` family matches newlines too.
+ *
+ * ## Three structural decisions
+ *
+ * 1. **No application production.** There is no `expr expr` and no `value:`
+ *    suffix. Application is a *core* rule: a send to a function-typed receiver
+ *    applies it. The surface can never produce such a receiver — `atomType`
+ *    has no function-type form — so the rule is reached by elaboration only.
+ * 2. **Rejection is the production path's job.** A failed `@requires` yields
+ *    `undefined` in the forest, which is not a rejection. Premises are checked
+ *    inline; a failed branch yields `empty()`.
+ * 3. **Greedy keyword collection.** When `key: arg` pairs follow an expression
+ *    they all belong to one send — never nested. So a construction absorbs the
+ *    pairs after it, and a nested construction must be parenthesized.
  */
 
 import {
@@ -145,13 +229,10 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     // ── Shared productions ───────────────────────────────────────────────────
 
     /**
-     * A name in a position where the grammar admits a keyword.
+     * A name where the grammar also admits a keyword.
      *
-     * `ident` excludes keywords (§2.2), but several productions legitimately
-     * spell a keyword as a *name*: a contract clause's bindings are `self`,
-     * `old`, and the result (§5.1), a spec record's keys include `aux` and `in`
-     * (§3.7), and a binding may legitimately be named after any of them. In
-     * each case the keyword *is* the name, so the position admits it.
+     * `ident` excludes keywords, but some positions legitimately spell one as a
+     * name: a clause's bindings are `self`/`old`, a spec's keys include `in`/`aux`.
      */
     @rule
     protected nameOrKeyword(): Parser<string> {
@@ -163,12 +244,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
 
     // ── Program and declarations (§4) ────────────────────────────────────────
 
-    /**
-     * `program ::= declaration*` (§4).
-     *
-     * A program is declarations only — no expression statements, no binding
-     * form (overview §12.6, §12.21).
-     */
+    /** `program ::= declaration*` — declarations only, no expression statements. */
     @rule
     protected programProd(): Parser<S["program"]> {
         return seq(
@@ -181,35 +257,25 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         )
     }
 
-    /** `dataDecl | behaviorDecl | …` — this PBI implements `data` (§4.1). */
+    /** `declaration ::= dataDecl` — the other five forms have no production yet. */
     @rule
     protected declarationProd(): Parser<S["declaration"]> {
         return this.dataDeclProd()
     }
 
     /**
-     * ```
-     * dataDecl ::= "data" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ dataBody
-     * dataBody ::= ␣(4) dataBodyItem+
-     * ```
-     */
-    /**
      * A declaration's name position.
      *
-     * This admits `Family` and `Self`, which `pascalIdent` excludes as keywords:
-     * a declaration that *takes* a reserved name must parse, so resolution can
-     * report it with a remedy (#101). Failing to parse would give the author no
-     * indication of why the name is rejected.
+     * Admits `Family`/`Self`, which `pascalIdent` excludes: a declaration that
+     * *takes* a reserved name must parse, so resolution can report it with a
+     * remedy. A parse failure would give the author no reason.
      */
     @rule
     protected declarationName(): Parser<string> {
         return or(pascalIdent, keyword("Family"), keyword("Self"))
     }
 
-    /**
-     * `dataDecl ::= "data" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ dataBody`
-     * `dataBody ::= ␣(4) dataBodyItem+`
-     */
+    /** `dataDecl ::= "data" pascalIdent ( "<:" ␣ pascalIdent )? ⏎ dataBody`, body at 4. */
     @rule
     protected dataDeclProd(): Parser<S["declaration"]> {
         return seq(
@@ -233,13 +299,11 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * A block: one or more items at exactly `column`, interleaved with trivia
-     * (§7 L1/L2).
+     * A block: items at exactly `column`, interleaved with trivia.
      *
-     * Each item consumes its own line terminator, so a line that dedents past
-     * `column` ends the block rather than being absorbed into it. The column is
-     * the production's parameter, so an item at any other column fails the
-     * branch instead of being silently accepted.
+     * Each item consumes its own line end, so a dedent ends the block rather
+     * than being absorbed. The column is a parameter, so a misplaced item fails
+     * the branch instead of being silently accepted.
      */
     @rule
     protected body<T>(column: number, item: (column: number) => Parser<T>): Parser<T[]> {
@@ -250,7 +314,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         ).map(([, first, rest]) => [first, ...(rest as T[])])
     }
 
-    /** `variantDecl | foldDecl | …` — this PBI implements the first two (§4.1). */
+    /** `dataBodyItem ::= variantDecl | foldDecl` — `mapDecl` parses but is not elaborated. */
     @rule
     protected dataBodyItem(column: number): Parser<DataBodyItem> {
         return or<DataBodyItem>(
@@ -325,21 +389,10 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * ```
-     * mapDecl         ::= "map" ident specRecord? ⏎ mapBody
-     * mapBody         ::= ␣(8) fieldTransform+
-     * fieldTransform  ::= ident ␣ binding "->" ␣ expr
-     * ```
-     *
-     * A map's body is **field-keyed**, not variant-keyed (§5.3): each transform
-     * names a *field* and binds its own parameter, so the structure is preserved and
-     * only the named fields change. Recursion through `Family`/`Self` fields is
-     * automatic — that is what makes a map a map rather than a fold that happens to
-     * rebuild, and only a map is eligible for pipeline fusion.
-     *
-     * The production reuses a fold arm's shape, keyed on a field name instead of a
-     * variant name, so a transform needs no lambda form: `head x -> (x + 1)` binds
-     * the field's current value to `x`.
+     * A map is **field-keyed**, not variant-keyed: each transform names a field
+     * and binds its own parameter, so only the named fields change. Recursion
+     * through `Family` descends automatically — that is what makes it a map
+     * rather than a fold that happens to rebuild, and what makes it fusible.
      */
     @rule
     protected mapDeclProd(column: number): Parser<MapDecl> {
@@ -361,7 +414,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         )
     }
 
-    /** `fieldTransform ::= ident ␣ binding "->" ␣ expr` (§5.3). */
+    /** `fieldTransform ::= ident ␣ binding "->" ␣ expr` — the field's value binds to `param`. */
     @rule
     protected fieldTransformProd(column: number): Parser<FieldTransform> {
         return seq(
@@ -381,18 +434,9 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * ```
-     * contractClause ::= clauseKind ":" ␣ ident* ( "|" ␣ )? ⏎ ␣(12) expr
-     * clauseKind ::= "demands" | "ensures" | "invariant" | "rescue"
-     * ```
-     *
-     * Two body forms, matching §7's "inline vs. indented bodies" rule: the body
-     * follows the `|` separator on the head's own line (`ensures: self old result
-     * | result`), or it is indented to `ARM_BODY_COLUMN` on the next. §5.1's
-     * examples use the first; the production above reads as the second.
-     *
-     * The bindable-name set per clause kind and the head arity are #110's scope;
-     * this production accepts any `ident*`.
+     * Two body forms: inline after `|` on the head's line, or indented to 12 on
+     * the next. Any `ident*` head is accepted — the bindable-name set per clause
+     * kind is a resolution rule, not a parse rule.
      */
     @rule
     protected contractClauseProd(column: number): Parser<ContractClause & { itemKind: "clause" }> {
@@ -430,18 +474,12 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * One or more binding names separated by whitespace — a clause's parameter
-     * list.
+     * A clause's parameter list. Keywords are admitted — the machinery supplies
+     * `self`, `old`, `result`, `err`, `args`, `retry`, all of which are keywords.
      *
-     * Keywords are admitted: a clause's bindings are supplied by the machinery
-     * and are literally `self`, `old`, `result`, `err`, `args`, `retry`
-     * (`surface-grammar.md` §5.1), every one of which is a keyword in §2.5.
-     *
-     * The separator is `hws1`, not `hws`: a separator that may match the empty
-     * string and sits inside a repetition makes the *segmentation* ambiguous —
-     * three names separated by optional whitespace have hundreds of derivations,
-     * all yielding the same list. Requiring a non-empty gap between names makes
-     * the reading unique.
+     * The separator is `hws1`, not `hws`: an empty-matching separator inside a
+     * repetition makes the segmentation ambiguous (n names, hundreds of
+     * derivations, one list).
      */
     private identRun(): Parser<string[]> {
         return seq(
@@ -464,14 +502,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         )
     }
 
-    /**
-     * ```
-     * caseArm ::= armHead "->" armBody
-     * armHead ::= pascalIdent ( ␣ binding )* | "_" ( ␣ binding )*
-     * binding  ::= ident | "_"
-     * armBody  ::= expr | ⏎ ␣(12) expr
-     * ```
-     */
+    /** `caseArm ::= armHead "->" armBody` */
     @rule
     protected caseArmProd(column: number): Parser<CaseArm & { itemKind: "arm" }> {
         return seq(
@@ -511,14 +542,8 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * An arm body: an expression on the arm's own line, or one indented to
-     * `ARM_BODY_COLUMN` on the next (`surface-grammar.md` §7's "inline vs.
-     * indented bodies").
-     *
-     * The indented form is tried first — §7's "longer match" rule — so an arm
-     * whose body continues on the next line is not misread as an inline body.
-     * There is no separator: the production is `armHead "->" armBody`, and §5.2's
-     * `guard | payload` form belongs to `unfold` arms alone.
+     * An arm body: inline, or indented to 12 on the next line. The indented form
+     * is tried first (longer match) so a continued body is not misread as inline.
      */
     private armBody(): Parser<Expr> {
         return or(
@@ -554,15 +579,10 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * One spec entry (§3.7).
-     *
-     * The value's shape **follows the key** (§3.7's table), so the key selects the
-     * production rather than the value being tried against every shape. A
-     * key-blind alternation would have two consequences, and both are defects: a
-     * type-shaped key could silently accept a value that is not a type (`in: 5`,
-     * `in: (Any -> Any)` both parse as expressions), and a value that is both a
-     * type and an expression would parse twice (`Any` is a declared name _and_ a
-     * variant reference), doubling every forest that declares a spec.
+     * The value's shape follows the key, so the key selects the production. A
+     * key-blind alternation would let `in: 5` parse as a type entry, and would
+     * give `Any` two derivations (declared name and variant reference), doubling
+     * every forest that declares a spec.
      */
     @rule
     protected specEntryProd(): Parser<SpecEntry> {
@@ -574,13 +594,10 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * A spec entry's value, chosen by its key (§3.7's table).
-     *
-     * `in`/`out` carry a type (and nothing else — a non-type value is a parse
-     * failure rather than a silently accepted expression), `aux` carries a `#name`
-     * reference, and `properties` carries an expression. An unrecognized key falls
-     * back to an expression so it reaches the resolver with a name to report;
-     * `para` and `histo` are bare flags and so never take a value at all.
+     * `in`/`out` take a type and nothing else — a non-type value is a parse
+     * failure, not a silently accepted expression. `aux` takes a `#name`;
+     * `properties` takes an expression; `para`/`histo` are bare flags. An
+     * unrecognized key falls back to an expression so the resolver can report it.
      */
     private specValue(key: string): Parser<Omit<SpecEntry, "key">> {
         switch (key) {
@@ -600,21 +617,14 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     // ── Types (§3.8) ─────────────────────────────────────────────────────────
 
     /**
-     * `atomType ::= "(" typeExpr ")" | pascalIdent | "Family" | "Self" | "Any" |
-     * "Nothing"` (§3.8), where `typeExpr` *is* `atomType`.
+     * The entire type grammar: a type is a name, never a shape. There is no
+     * function-type production, so nothing here builds a type a later pass must
+     * reject. The parenthesised branch re-enters this production, so `((Any))`
+     * parses and the inner value is an `AtomType` by construction, not by cast.
      *
-     * This is the entire type grammar: there is no function-type production, so
-     * nothing here can build a type that some later pass has to reject. Because
-     * the parenthesised branch re-enters this same production, `((Any))` parses
-     * exactly as the spec's recursion says it should, and the inner value is an
-     * `AtomType` by construction rather than by cast.
-     *
-     * The built-in names are matched *before* `pascalIdent`, and `pascalIdent`
-     * then rejects them: `Any` and `Nothing` are not keywords (§2.5 reserves
-     * only `Family` and `Self`), so the PascalCase production would otherwise
-     * match them as declared names and yield a second, structurally identical
-     * parse — an ambiguity with no semantic difference, but one that doubles
-     * every forest containing a bound.
+     * `Any`/`Nothing` are matched before `pascalIdent` because they are not
+     * keywords: otherwise they would also match as declared names, yielding a
+     * second, structurally identical parse.
      */
     @rule
     protected atomTypeProd(): Parser<S["atomType"]> {
@@ -642,17 +652,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         return this.keywordExprProd()
     }
 
-    /**
-     * ```
-     * keywordExpr ::= binaryExpr ( ␣ keywordPart )+
-     *               | binaryExpr
-     * binaryExpr  ::= binaryExpr ␣ binaryOp ␣ unaryExpr | unaryExpr
-     * unaryExpr   ::= unaryExpr ␣ ident | primary
-     * ```
-     *
-     * The three levels are strictly ordered (§3.1) and binary is a *single*
-     * flat, left-associative level — there is no precedence ladder.
-     */
+    /** Three strictly ordered levels; binary is one flat left-associative level. */
     @rule
     protected keywordExprProd(): Parser<Expr> {
         return this.binaryExprProd().bind((receiver) =>
@@ -664,19 +664,10 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * The greedy keyword parts (§3.3): all `key: arg` pairs form one call.
-     *
-     * Two restrictions, both from §3.3's *greedy collection* rule — "when
-     * keyword suffixes are present, _all_ `key: arg` pairs are collected into a
-     * single `KeywordCall` — they are not nested sends":
-     *
-     * - A part's **value is a `binaryExpr`**, not a full `expr`. Parsing it at the
-     *   `expr` level would let `a: b c: d` nest as `a: (b c: d)`, which is exactly
-     *   the reading the greedy rule forbids.
-     * - A receiver that is a **variant reference or construction takes no parts**:
-     *   §3.4's `construction ::= pascalIdent ( ␣ ident ":" ␣ expr )+` has this same
-     *   shape, so a PascalCase receiver followed by `key: value` pairs _is_ a
-     *   construction. Only a `camelCase` receiver (an operation or binding) sends.
+     * All `key: arg` pairs form one call, never nested sends. So a part's value is
+     * a `binaryExpr`, not an `expr` — at `expr` level `a: b c: d` would nest as
+     * `a: (b c: d)`, the reading the greedy rule forbids. And a construction
+     * receiver takes no parts: its own production has this same shape.
      */
     private keywordParts(receiver: S["expr"]): Parser<KeyArg[]> {
         if (takesNoKeywordParts(receiver)) return epsilon([])
@@ -737,12 +728,9 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * The postfix unary messages of §3.1 level 3, one or more `␣ ident` sends.
-     *
-     * A message stops before a `key:` pair: `nil rest: Empty` is a *keyword call*
-     * whose receiver is `nil` (§3.3's greedy collection), not the unary send
-     * `nil rest:` applied to `Empty`. Without the guard both readings parse and
-     * mean different things.
+     * A unary message stops before a `key:` pair: `nil rest: Empty` is a keyword
+     * call whose receiver is `nil`, not a send of `Empty` to `rest:`. Without the
+     * guard both readings parse and mean different things.
      */
     private unaryMessages(): Parser<string[]> {
         return seq(hws1, this.nameOrKeyword(), seq(hws, char(":")).opt())
@@ -753,34 +741,22 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * `primary ::= literal | "(" expr ")" | arrayLiteral | recordLiteral |
-     *              specRecord | reference | "nil" "true" "false" |
-     *              variantRef | ident`
-     *
-     * The construction and variant-reference forms are §3.4's; array, record
-     * and spec-record primaries arrive with #97.
+     * Ordered by specificity. A parenthesized expression re-opens the message
+     * chain; `nil`/`true`/`false` are excluded from `ident` or every such literal
+     * would have two parses.
      */
     @rule
     protected primaryProd(): Parser<S["primary"]> {
         return or(
-            // A parenthesized expression re-opens the message chain (§3.3) or
-            // is a record literal (§3.6). Parenthesized first: the record form
-            // needs the `key:` head, which an expression cannot produce.
             this.parenOrRecord(),
-            // Construction and variant reference — PascalCase-led (§3.4).
             this.constructionOrVariantRef(),
-            // References (§3.5).
             this.referenceProd(),
-            // Literals (§2.4).
             this.literalProd(),
-            // A bare operation reference or binding (§3.6.1). `nil`/`true`/`false`
-            // are excluded: they are values, not references (§2.5), and letting
-            // `ident` match them would give every such literal two parses.
             ident.bind((name) => isSpecialValue(name) ? empty<Primary>() : epsilon(opRef(name))),
         )
     }
 
-    /** `( expr )` — a parenthesized expression (§3.2). */
+    /** `( expr )` — parentheses re-open the message chain. */
     private parenOrRecord(): Parser<Primary> {
         return seq(char("("), hws, this.exprProd(), hws, char(")"))
             .map(([, , inner]) => ({ kind: "paren", inner: inner as Expr }) as Primary)
@@ -791,7 +767,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
      * `Variant field: v …` (bare construction), or `Variant` (bare reference).
      *
      * One production: the qualified form is `pascalIdent ␣ pascalIdent …`, and
-     * bare/qualified is a resolution concern, not a syntactic one (#84).
+     * bare/qualified is a resolution concern, not a syntactic one.
      */
     private constructionOrVariantRef(): Parser<Primary> {
         return seq(pascalIdent, this.qualifierOrFields())
@@ -845,23 +821,11 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * The named fields of a construction: `( ␣ ident ":" ␣ expr )+` (§3.4).
-     */
-    /**
-     * The named fields of a construction: `( ␣ ident ":" ␣ expr )+` (§3.4).
-     *
-     * A field's value cannot itself be an unparenthesized construction. §3.3's
-     * greedy collection decides it: "when keyword suffixes are present, _all_
-     * `key: arg` pairs are collected into a single `KeywordCall` — they are not
-     * nested sends." A construction has that same shape (§3.4), so in
-     * `Push value: Empty rest: Empty` every pair belongs to `Push`. Allowing the
-     * value to absorb `rest:` would give the input a second reading, and the two
-     * readings mean different things.
-     *
-     * A nested construction is therefore written in parentheses — which is how
-     * the corpus always writes it: `Cons head: 1 rest: (Cons head: 2 rest: Nil)`.
-     * The gate below rejects the absorbing reading outright rather than letting
-     * it through as an ambiguous branch.
+     * A field's value cannot be an unparenthesized construction. `key: arg` pairs
+     * are collected greedily, so in `Push value: Empty rest: Empty` every pair
+     * belongs to `Push`; letting the value absorb `rest:` would give the input a
+     * second reading meaning something else. A nested construction is therefore
+     * parenthesized, and the gate rejects the absorbing reading outright.
      */
     private namedFields(): Parser<KeyArg[]> {
         return seq(hws1, ident, hws, char(":"), hws, this.binaryExprProd())
@@ -873,7 +837,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
             .many()
     }
 
-    /** §3.5's references: `self`, `Family`, `Self`, `old x`, `prev x`, `aux x`. */
+    /** `self` | `Family` | `Self` | `old x` | `prev x` | `aux x` */
     private referenceProd(): Parser<Primary> {
         return or(
             keyword("self").map(() => ({ kind: "ref", name: "self" }) as Primary),
@@ -892,8 +856,8 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * The literal spellings of §2.4: a quoted string or char, a pattern-matched
-     * text, or one of §2.5's special values.
+     * A pattern literal is tried last: it is a permissive numeric form and must
+     * not shadow a symbolic operator.
      */
     private literalProd(): Parser<Primary> {
         return or(

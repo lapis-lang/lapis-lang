@@ -5,13 +5,13 @@
 > example-first — every claim ends in a runnable block.
 >
 > This document is the **10,000ft view** — a gut-check on the syntax. The **normative production
-> set** is [`theory/surface-grammar.md`](./theory/surface-grammar.md): the consolidated EBNF for the
-> surface language, every production in one place. The authoritative specifications remain
+> set** is the header of [`src/surface/grammar.ts`](../src/surface/grammar.ts): the executable
+> grammar, whose `@rule` methods _are_ the productions. The authoritative specifications remain
 > [`theory/surface-syntax.md`](./theory/surface-syntax.md) (syntax) and
 > [`theory/semantics.md`](./theory/semantics.md) (meaning); each section links to its backing spec
 > rather than duplicating it. Formal vocabulary (initial algebra, coalgebra, and friends) lives in
-> those specs; this page keeps to plain language. Where this document and the EBNF disagree on the
-> _shape_ of the syntax, the EBNF wins — and the findings in §12 record which questions the grammar
+> those specs; this page keeps to plain language. Where this document and the code disagree on the
+> _shape_ of the syntax, the code wins — and the findings in §12 record which questions the grammar
 > still leaves open.
 >
 > Sources consolidated here: `surface-syntax.md`, `surface-grammar.md`, `syntax-design.md`,
@@ -1076,9 +1076,8 @@ is a real finding for the spec:
    decision: no `let … in`, no `::=`/`:=` header, no initialised-slot block, no default-valued block
    parameter — an intermediate an arm needs is a declared sibling operation (or `<aux: …>`), which
    is strictly stronger. Design record: `design-decisions.md` §"Program shape and name
-   introduction"; worked case: `surface-grammar.md` §8.1 (the quadratic formula's discriminant).
-   Spec impact: `surface-grammar.md` §4 + §7 (the `topExpr` production deleted), `surface-syntax.md`
-   §8.
+   introduction"; worked case: `examples/quadratic.lapis` (the quadratic formula's discriminant).
+   Spec impact: `src/surface/grammar.ts` (the `topExpr` production deleted), `surface-syntax.md` §8.
 
 7. **Variant qualification at construction — reframed while drafting: qualification is
    disambiguation, for both constructor kinds.** The first draft flagged the asymmetry
@@ -1406,17 +1405,17 @@ is a real finding for the spec:
 
 21. **Comments & result annotations — pinned by
     [#83](https://github.com/lapis-lang/lapis-lang/issues/83)'s survey; the annotation position is a
-    fragment convention, not a source-level pairing.** The decision (recorded in
-    [`issue83-plan.md`](./issue83-plan.md) and `surface-syntax.md` §1.4): comments are `/* ... */`
-    (nesting; no escapes), strings stay `"..."`, char values are `'a'`; a comment's position is its
-    grade — trailing after an expression records that expression's result, an own-line comment
-    describes the construct beneath it. The realization this survey surfaced: **top-level source has
-    no expression statements** — every trailing-annotation site in the docs (`xs sum /* 3 */`,
-    `s size /* 2 */`) is a documentation-fragment device (REPL / print-it / doctest lineage), not a
-    source pairing; a program's top level is declarations, and the language's checked answer for
-    "what does this produce" in real code is contracts (`ensures:`/`invariant:`/`demands:`). The
-    annotation checker is therefore a future doc-example harness (evaluate the fragment, compare the
-    record) — a `docs/`-CI job, never a surface-grammar feature.
+    fragment convention, not a source-level pairing.** The decision (recorded in `surface-syntax.md`
+    §1.4): comments are `/* ... */` (nesting; no escapes), strings stay `"..."`, char values are
+    `'a'`; a comment's position is its grade — trailing after an expression records that
+    expression's result, an own-line comment describes the construct beneath it. The realization
+    this survey surfaced: **top-level source has no expression statements** — every
+    trailing-annotation site in the docs (`xs sum /* 3 */`, `s size /* 2 */`) is a
+    documentation-fragment device (REPL / print-it / doctest lineage), not a source pairing; a
+    program's top level is declarations, and the language's checked answer for "what does this
+    produce" in real code is contracts (`ensures:`/`invariant:`/`demands:`). The annotation checker
+    is therefore a future doc-example harness (evaluate the fragment, compare the record) — a
+    `docs/`-CI job, never a surface-grammar feature.
 
 22. **`Char`'s pattern is `'.'` — the quoted spelling is the pattern, not value syntax around it.**
     The §2.3 table (and spec §1.3's) listed Char's pattern as the undelimited `.` with example `'a'`
@@ -1518,19 +1517,19 @@ is a real finding for the spec:
     Consequence: **the surface has no anonymous binder and no higher-order literal.** A function
     value is an operation reference, which carries a declared type, laws, and a cost summary — the
     same argument that made arm intermediates declared sibling operations (§12.6). Spec impact:
-    `surface-grammar.md` §3.2/§3.3/§3.6, `surface-syntax.md` §2.1/§3.1, `elaboration.md` §2.3/§2.5,
+    `src/surface/grammar.ts`, `surface-syntax.md` §2.1/§3.1, `elaboration.md` §2.3/§2.5,
     `design-decisions.md` §"Function values".
 
 26. **`aux`'s read spelling disagrees with itself: `aux d` vs. `aux #d`.** The declaration site
-    quotes the companion operation (`aux: #depth`, `overview.md` §3.1; `surface-grammar.md` §3.5's
+    quotes the companion operation (`aux: #depth`, `overview.md` §3.1; `src/surface/grammar.ts`
     `reference ::= … | "aux" ident`), while the corpus's read sites drop the `#` (`aux length` —
     `elaboration.md` §4.3's `average`; `aux discriminant` — the quadratic example in
-    `surface-grammar.md` §8.1). Two spellings for one reference form, neither marked. Under §7.4
+    `examples/quadratic.lapis`). Two spellings for one reference form, neither marked. Under §7.4
     `#name` is the _keyword-part reference_ spelling, which argues the declaration form is the odd
     one out (a `#`-quoted name in a spec record) OR that the read form should carry `#` for
     consistency (`aux #depth` — but then `aux` takes a reference where every other `reference`
     production takes an `ident`). Decide in one place and respell both sides. Spec impact:
-    `surface-grammar.md` §3.5 (the `AuxRef` production) and the `aux` rows in `overview.md` §3.1.
+    `src/surface/grammar.ts` and the `aux` rows in `overview.md` §3.1.
 
 27. **A function value is a plain function value; there is no block literal and no apply
     production.** Two linked decisions, and a correction to a third that was wrongly bundled with
@@ -1552,14 +1551,15 @@ is a real finding for the spec:
 
     **(c) Application is derived, not added.** A keyword send means "eliminate the receiver, then
     apply the arguments" (`elaboration.md` §2.5). Data eliminates by `fold`, codata by
-    **observation**, and a function type by **application** — its fixed selector is `value:`. The
-    surface has no `expr expr` production and no dedicated `value:` form; the derivation is the
-    core's, reached by elaboration. **The surface cannot reach it from a written position**: a type
-    is `atomType` (§12.34), so no declaration states `σ → τ` and no expression acquires a receiver
-    of one. The core stays single-argument, and multi-argument function values are curried by
-    nesting, matching the core's single-slot `Observer` and adding no product type.
-    Under-application is an arity error, not a silently produced function — uniform access is
-    unchanged.
+    **observation**, and a function type by **application**. The surface has no `expr expr`
+    production, and **no `value:` selector either** — a `value:` send in that position is read as a
+    construction field (`A1 value: x` parses as constructing `A1`), and the core has no `value:`
+    form. Application is therefore the core's, reached by elaboration. **The surface cannot reach it
+    from a written position**: a type is `atomType` (§12.34), so no declaration states `σ → τ` and
+    no expression acquires a receiver of one. The core stays single-argument, and multi-argument
+    function values are curried by nesting, matching the core's single-slot `Observer` and adding no
+    product type. Under-application is an arity error, not a silently produced function — uniform
+    access is unchanged.
 
     **Still open (a separate item):** partial application — supplying some of an operation's
     arguments and holding the rest (`(NatList append 3)`) — has no production
@@ -1581,9 +1581,8 @@ is a real finding for the spec:
     body(u)`), and contract firing order must be statable
     (`demands:` on an unused argument fires at the call site). Eager data / lazy codata is a
     field-and-generator strategy fixed by declaration kind; it is not a change to the application
-    rule. Spec impact: `surface-grammar.md` §3.2/§3.3/§3.6/§5.1/§5.3/§9/§10, `surface-syntax.md`
-    §2.1/§3.1/§4.1/§4.2/ §5.3, `elaboration.md` §2.3/§2.5/§7/§8, `design-decisions.md` §"Function
-    values".
+    rule. Spec impact: `src/surface/grammar.ts`, `surface-syntax.md` §2.1/§3.1/§4.1/§4.2/ §5.3,
+    `elaboration.md` §2.3/§2.5/§7/§8, `design-decisions.md` §"Function values".
 
 28. ~~**The conditional's branch arity — a fold takes one input, `ifTrue:ifFalse:` has two.**~~
     **Retired — the construct is gone, not repaired.** The finding asked how to fit two branches
@@ -1595,7 +1594,7 @@ is a real finding for the spec:
     totality — both branches evaluate before dispatch, so `take`'s untaken branch recurses at zero.
 
     The replacement is not a new rule but the existing asymmetry: **fold arms dispatch on a variant;
-    unfold arms decide on a seed** (`guard | payload`, `surface-grammar.md` §5.2). A decision over a
+    unfold arms decide on a seed** (`guard | payload`, `src/surface/grammar.ts`). A decision over a
     value with no discriminating variants is a decision on a seed and belongs in an unfold over a
     declared seed type — `take` is the worked case (`syntax-design.md` §"Behavior"). `Bool` remains
     a predicate carrier and appears in result position only.
@@ -1625,7 +1624,7 @@ is a real finding for the spec:
       Retracted. Application now states its rule directly: **a send to a receiver of function type
       applies it**, the third elimination form after `fold` and observation (`elaboration.md` §2.5).
     - **`typeParam:`** was a spec key with no meaning that the arm bindings do not already carry.
-      Removed from `surface-grammar.md` §3.7 and `surface-syntax.md` §3.4; the map examples now bind
+      Removed from `src/surface/grammar.ts` and `surface-syntax.md` §3.4; the map examples now bind
       their transform argument at the arm, exactly as `scaleEach` always did.
     - **`Object`** was written across `Stack`, `Stream`, `List`, `Search`, and `append` as an
       informal stand-in for "whatever the element is." It is not a declared type anywhere. It is the
@@ -1650,11 +1649,11 @@ is a real finding for the spec:
     rejection is what would have caught `Object` and `Number` at their first use instead of after a
     doc sweep ([#116](https://github.com/lapis-lang/lapis-lang/issues/116)).
 
-    Spec impact: `surface-grammar.md` §3.8 (the rule), §3.7 and §4.1 (the corresponding absence of
-    `typeParam:` and of a parameter list), `design-decisions.md` §"Core calculus" (which now states
-    the decision as permanent), `elaboration.md` §2.3/§2.5/§3.5/§4.2/§4.4, `surface-syntax.md`
-    §2.1/§3.1/§3.4, `syntax-design.md` §"Field Transformation"/§"Behavior"/§"Query", and
-    `users/rationale.md` §"Query".
+    Spec impact: `src/surface/grammar.ts` (the corresponding absence of `typeParam:` and of a
+    parameter list), `design-decisions.md` §"Core calculus" (which now states the decision as
+    permanent), `elaboration.md` §2.3/§2.5/§3.5/§4.2/§4.4, `surface-syntax.md` §2.1/§3.1/§3.4,
+    `syntax-design.md` §"Field Transformation"/§"Behavior"/§"Query", and `users/rationale.md`
+    §"Query".
 
 30. **A protocol member is a kind-marked signature with an optional default; the default binds
     `other`; `between:and:` is retired.** Three defects in one construct, none needing new
@@ -1674,7 +1673,7 @@ is a real finding for the spec:
     protocol cannot see its conformers' variants, so a default has no arm head and no bindings; it
     can only compose operations over `self`. The `in:` value lands in a fixed name, `other`, bound
     exactly when the member declares `in:` — the same machinery-supplied binding relationship a fold
-    arm has to its variant's fields (`surface-grammar.md` §3.7). Its kind-dependence is what makes
+    arm has to its variant's fields (`src/surface/grammar.ts`). Its kind-dependence is what makes
     defaults work at all: `equals` can be derived from `compare`, and that derivation is the reason
     a protocol carries bodies rather than only signatures. A default may carry contract clauses and
     they are enforced around it, so an installed default is not a weaker operation than a declared
@@ -1701,8 +1700,8 @@ is a real finding for the spec:
     desired surface form — were removed rather than given a production, since a conformance query is
     a user-defined operation if a program wants one.
 
-    Spec impact: `surface-grammar.md` §3.3, §3.7, §4.3, §8, §10; `elaboration.md` §2.5, §3.3, §3.7;
-    `surface-syntax.md` §2.3, §4.3; `syntax-design.md` §"Protocols" and its `instanceof:` lines.
+    Spec impact: `src/surface/grammar.ts`; `elaboration.md` §2.5, §3.3, §3.7; `surface-syntax.md`
+    §2.3, §4.3; `syntax-design.md` §"Protocols" and its `instanceof:` lines.
 
 31. **`Boolean` was written throughout the corpus but the type is `Bool` — the last undeclared-name
     leak of §12.18's class.** The registered type is `Bool` (`src/core/laws.ts` matches
@@ -1755,10 +1754,9 @@ is a real finding for the spec:
     `properties:` has no record-literal production, so both the term spelling this option depends on
     and the `#name` spelling in the second option are current parse failures. The choice below is a
     choice about what to _build_ ([#122](https://github.com/lapis-lang/lapis-lang/issues/122)), not
-    a comparison of working forms. Spec impact: `surface-grammar.md` §3.7's `properties` row,
-    `lc.md` §7.2's `identity:e` notation, `elaboration.md` §6.1, and `design-decisions.md`'s
-    `identity:Zero` example (which already spells a bare PascalCase name — the operation-reference
-    reading).
+    a comparison of working forms. Spec impact: `src/surface/grammar.ts`, `properties` row, `lc.md`
+    §7.2's `identity:e` notation, `elaboration.md` §6.1, and `design-decisions.md`'s `identity:Zero`
+    example (which already spells a bare PascalCase name — the operation-reference reading).
 
 33. **Operation aliasing (`.as('Identity')`) has no surface spelling.** The prototype aliases an
     operation with a second name — `add.as('combine')`, `Zero.as('Identity')` — and its std library
@@ -1786,8 +1784,8 @@ is a real finding for the spec:
     the operation _name_ (§"Laws are environments, not terms"), so an alias is either a second `Ω`
     entry sharing one definition and one law set, or a resolving reference that never enters `Ω` at
     all. The former keeps `Ω`'s declarations honest; the latter keeps `Ω` acyclic without a special
-    case. Spec impact: `surface-grammar.md` §5.1 (the clause), `Ω`'s declaration rules in `ops.ts`,
-    and `elaboration.md` §6.1's law attachment.
+    case. Spec impact: `src/surface/grammar.ts`, `Ω`'s declaration rules in `ops.ts`, and
+    `elaboration.md` §6.1's law attachment.
 
 34. **The surface has no function type — `typeExpr` is `atomType`, and a `->` production built a
     type nothing could inhabit.** §3.8 defined `typeExpr ::= typeExpr "->" typeExpr | atomType`, so
@@ -1814,8 +1812,8 @@ is a real finding for the spec:
     body bound to a field (§5.3), which is why it does not need one; a genuinely higher-order
     surface form would.
 
-    Spec impact: `surface-grammar.md` §3.2/§3.3/§3.6.1/§3.8/§4.1/§9, `surface-syntax.md` §3.1/§3.6,
-    `elaboration.md` §2.3/§2.5, `design-decisions.md` §"Function values", and this finding.
+    Spec impact: `src/surface/grammar.ts`, `surface-syntax.md` §3.1/§3.6, `elaboration.md`
+    §2.3/§2.5, `design-decisions.md` §"Function values", and this finding.
 
 35. **`properties:` cannot be written: every documented spelling fails to parse, and the one form
     that parses means nothing.** §3.7 assigns `properties` the value shape "`recordLiteral`-shaped",
@@ -1864,9 +1862,8 @@ is a real finding for the spec:
     missing productions, the law-set AST node, the vocabulary check, and the operator-resolution
     item, with this finding as its record.
 
-    Spec impact: `surface-grammar.md` §3.6/§3.7/§9, `elaboration.md` §6.1, `src/surface/resolve.ts`
-    (operator resolution), `src/surface/lexemes.ts` (the false comment), and §12.32's status-quo
-    claim.
+    Spec impact: `src/surface/grammar.ts`, `elaboration.md` §6.1, `src/surface/resolve.ts` (operator
+    resolution), `src/surface/lexemes.ts` (the false comment), and §12.32's status-quo claim.
 
 36. **Branching over the `Type` universe is opt-in, and the case protocol defaults.** `Type` carries
     a classification fold (`dispatch`) and a bottom-up transformation (`map`), both implemented per
@@ -1937,3 +1934,205 @@ is a real finding for the spec:
 
     Spec impact: `lc.md`'s type form (the protocol is implementation, not calculus), and this
     finding.
+
+37. **Constructor position is never resolved. RESOLVED (#84).** A construction could name a variant
+    no declaration declares, and a qualifier was never checked. Verified against `master` at
+    `141d8d9`; every arm body below was inside a `fold` over a declared type:
+
+    | Source (arm body)         | Resolution (before) | Elaboration (before)                   |
+    | ------------------------- | ------------------- | -------------------------------------- |
+    | `TotallyUnknown`          | `[]`                | `TotallyUnknown()` — a nullary of none |
+    | `(TotallyUnknown x: One)` | `[]`                | `TotallyUnknown(One())`                |
+    | `(Ghost One)`             | `[]`                | `One()` — the qualifier is dropped     |
+    | `(A Two)`                 | `[]`                | `Two()` — `A` declares no `Two`        |
+    | `(Same)`                  | `[]`                | `Same()`                               |
+    | `(P2 bogus: x y: y)`      | `[]`                | `P2(x, y)` — `bogus` is dropped        |
+
+    `resolve.ts` now walks expressions — fold arm bodies, contract-clause bodies, `map` transform
+    bodies, and every expression position a constructor can occupy — and reports
+    `unknown-constructor`, `ambiguous-constructor`, `bad-qualifier` and `selector-mismatch`.
+    `DeclarationTable.variants` keeps **every** declaring type, so an ambiguity can name each
+    candidate. The rule is stated in `surface-grammar.md` §2.8 and `surface-syntax.md` §4.1.
+
+38. **A construction's field names were never matched to its variant, so a reorder emitted the
+    arguments transposed. RESOLVED (#84).** The surface keys a construction by `key: value` pairs,
+    and elaboration used to drop the keys and emit positional arguments in **source** order. With
+    two same-typed fields that produced a well-typed transposition:
+
+    | Source         | Elaborated (before) | Now                             |
+    | -------------- | ------------------- | ------------------------------- |
+    | `P2 x: a y: b` | `P2(a, b)`          | `P2(a, b)` — the declared order |
+    | `P2 y: b x: a` | `P2(b, a)` — wrong  | `P2(a, b)` — the same value     |
+    | `P2 x: a`      | `P2(a)`             | **`selector-mismatch`**         |
+    | `P2 x: a x: b` | `P2(a, b)`          | **`selector-mismatch`**         |
+
+    The rule is **named arguments bind by name**: `P2 y: b x: a` is the same construction as
+    `P2 x: a y: b`, because each pair says which slot its value fills and a variant's field names
+    are unique within it. The bug was that elaboration emitted _source_ order instead of resolving
+    each name to its declared position — so the fix is to map names to positions, which is what the
+    JS prototype does too (its fields are a record, and property order is incidental). Only an
+    omitted, duplicated, or undeclared field is rejected.
+
+    **Why this entry changed.** An earlier reading treated the keyword sequence as a Smalltalk
+    selector, so a reorder became a different — undeclared — constructor. That borrows the
+    _operation_ rule for a constructor's field labels, where the names denote slots rather than
+    spell the constructor's name: an operation's selector is its name, a construction's is the
+    variant it is built with. The selector reading is recorded here so the mistake is not repeated.
+
+39. **`OpRef.qualifier` has no grammar path, and the elaboration arm that reads it emits text the
+    core rejects.** `Int double` parses as a _call_ whose receiver is a nullary `Int` variant
+    reference, not as a qualified operation reference — and emits `double(Int())`. The AST field is
+    live in `elaborate.ts` (`${qualifier} ${name}`), dead as a parse path. Worse, no core spelling
+    exists for the form: `Int double`, `Int.double`, `Int#double` and `#double` all fail to parse in
+    the core, so if the qualifier ever became producible it would emit unreadable text. **Owner:**
+    [#84](https://github.com/lapis-lang/lapis-lang/issues/84), work item 4 — which must first decide
+    the core's spelling, or defer the item until one exists.
+
+40. **A `map` declaration parses, is never validated, and is silently dropped.** `mapDecl` has a
+    production (`grammar.ts`'s `mapDeclProd`) and an AST node (`MapDecl`), and `DataBodyItem`
+    includes it. `resolve.ts`'s body-item switch has no `mapDecl` arm and `elaborate.ts` emits no
+    operation for one, so a `map` contributes nothing and reports nothing — not even for a transform
+    naming a nonexistent field. **Owner:**
+    [#124](https://github.com/lapis-lang/lapis-lang/issues/124).
+
+41. **The law vocabulary is a provisional subset of the prototype's.** `laws.ts`'s `LAW_KINDS` is
+    seven: `associative`, `commutative`, `identity`, `idempotent`, `involutory`, `absorbing`,
+    `distributive`. The prototype's `KNOWN_PROPERTIES` (`operations.mts`) is twenty, adding the
+    relation set (`reflexive`, `symmetric`, `antisymmetric`, `transitive`, `total`), the functor set
+    (`composition`), and `absorption`/`inverse`. `prelude.md` §5.2 defers `Ordered` precisely
+    because `total` has no spelling. Neither list is a subset of the other as written: the
+    prototype's plain names are bare strings while ours take typed arguments (`identity: e`).
+    **Owner:** [#122](https://github.com/lapis-lang/lapis-lang/issues/122).
+
+42. **Horner "single traversal" is asserted in three normative documents and implemented nowhere.**
+    `elaboration.md` §4.5 (and `semantics.md` §5.5's fusion bullet) state that a validated
+    `distributive:` pair is "sequenced as a single named operation". The prototype's README says the
+    opposite, in its own words: _"the current implementation does not perform single-traversal
+    algebra fusion — each fold completes its own full traversal over the structure … true
+    single-traversal fusion requires first-class inspectable handler expressions"_ (lapis-js#192).
+    What `distributive:` buys today is **pairing**: two folds under one name, past `merge`'s
+    at-most-one-fold rule. Both documents are now marked _intended, not achieved_. **Owner:**
+    [#128](https://github.com/lapis-lang/lapis-lang/issues/128).
+
+43. **`closure()`'s and `explore()`'s termination measures were unstated.** `closure` dedups by
+    endpoint pair, so its fixpoint is bounded by |domain| × |codomain| and cyclic input terminates
+    with no safety valve (X→Y→Z→X yields nine pairs). `explore` tables by _output value_ — objects
+    by identity (`WeakSet`), primitives by value (`Set`) — deliberately not by serializing an opaque
+    value. Both are now stated in `elaboration.md` §3.4/§3.5. Without them the two drivers were "run
+    until it stops", which is not a semantics. **Owner:**
+    [#127](https://github.com/lapis-lang/lapis-lang/issues/127).
+
+44. **Protocol `<:` admits one parent, so a multi-parent protocol has no spelling.** `protocolDecl`
+    takes a single parent, but `AbelianGroup` — a monoid that is also a group — is the standard
+    case, and the prototype allows it (`[extend]: [Group, CommutativeMonoid]`, with a diamond rule:
+    same kind, identical `in`/`out`, matching contract presence ⇒ merge silently and union the
+    properties; otherwise the child must re-declare). Data `<:` stays single-parent: a variant set
+    is a sum, and a sum of sums is not a sum without a tagging decision. **Owner:**
+    [#126](https://github.com/lapis-lang/lapis-lang/issues/126).
+
+45. **`merge`, `scan`, `satisfies:` and a data-body `unfold` have no production at all.** Not
+    "partial": `merge Total <#From, #sum>`, `scan`, `satisfies: Eq`, and `unfold u` inside a `data`
+    body each yield an empty forest. Worse, `merge`'s documented head cannot parse even in principle
+    — the production would be `mergeDecl ::= "merge" ident …`, and `ident` is camelCase-only, so
+    `merge Total` is unspellable while `merge total` is a different name. The case is load-bearing:
+    unfold-first ⇒ a PascalCase static constructor; map/fold-first ⇒ a camelCase instance member.
+    **Owner:** [#125](https://github.com/lapis-lang/lapis-lang/issues/125).
+
+46. **A fold's arm-key set is unvalidated in both implementations, in opposite directions.** Ours
+    rejects an unknown key at _check_ time (the exhaustiveness premise in `typing_grammar.ts`), so a
+    fold naming a variant that does not exist fails only when the definition is type-checked — after
+    elaboration has already reported success. The prototype accepts any key and looks it up by name
+    at _use_ time, silently ignoring a key that matches nothing (its `getCtorTransform` falls back
+    to `_`, then to a throwing stub). Static is right; the check belongs in the resolver, where the
+    declaration table can name the missing and the surplus variants. **Owner:**
+    [#84](https://github.com/lapis-lang/lapis-lang/issues/84), work item 5.
+
+47. **`elaborateProgram` has no error channel: it reports success for output that does not
+    type-check.** The signature is `elaborateProgram(program: SurfaceProgram): ElaborationResult` —
+    no verdict. A fold whose declared `in:` disagrees with the lambda it emits is emitted verbatim:
+    `fold pick <in: B, out: B>` over `data N` produces `\e:N. …` with signature `B → B`, and the
+    caller is told nothing. `OpRegistry.declare` _does_ check well-formedness via the injected
+    `OpWellFormedness`, but the pipeline never calls it — only tests do. This is the general hole
+    §12.46 is one symptom of. **Owner:**
+    [#133](https://github.com/lapis-lang/lapis-lang/issues/133).
+
+48. **A fold's `in:` value is bound by no rule, so its signature and its definition disagree.** The
+    emitter produces exactly one lambda (`\e:T.`) whatever `in:` says, and puts any further name in
+    the handler's binding list; the core's handler loop walks `variant.fields`, so a surplus binding
+    binds _nothing_. The prototype binds a `Family` field to a **continuation** when the fold has an
+    `in:` and to the plain folded value otherwise (`Data.mts`); the core has only the second reading
+    (`eval_grammar.ts`'s variant arm, `lc.md` §3.1 `E-Fold`). Consequence:
+    `fold add <in: Self, out: Self>` declares arity 2 and emits arity 1. Correctness is provable in
+    the core at σ = the carrier —
+    `\e:Nat. \other:Nat. fold [Nat] e { Zero() -> other, Succ(p) ->
+    Succ(p) }` returns
+    `Succ(Succ(Succ(Zero())))` for 2 + 1 — so the missing piece is the emitter, not the calculus.
+    **Owner:** [#130](https://github.com/lapis-lang/lapis-lang/issues/130).
+
+49. **Binary operators have no core counterpart, so every infix expression elaborates to text the
+    core rejects.** `elaboration.md` §2.4 requires `a + b` → `add(ℰ(a), ℰ(b))`; the emitter instead
+    writes the infix through (`(A1() + A1())`, `(A1() add A1())`), and the core's `atomProd` has no
+    infix production — `(a + b)` and `(a add b)` both fail to parse even with `add` declared in `Ω`,
+    while `add(A1(), A1())` type-checks. Every symbolic operator in the corpus — `prelude.md`'s
+    `1 + rest`, the quadratic example's `b * b` — is affected. **Owner:**
+    [#129](https://github.com/lapis-lang/lapis-lang/issues/129).
+
+50. **A fold that re-sends its own name cannot enter `Ω`, so no recursive operation is definable
+    from source.** `OpRegistry.declare`'s acyclicity check rejects self-reference (declaration-order
+    stratification), and a recursive fold's natural body names itself — `rest size` elaborates to
+    `size(rest)`, which is exactly the rejected shape. Verified: `fold size` over a `Stack` is
+    rejected with _"self-reference — an operation may only reference operations declared earlier in
+    Ω"_. The rule is sound for a _flat_ namespace and is the reason a recursive fold cannot be
+    installed; a per-declaring-type namespace (as the prototype's `adtTransformers` gives it) makes
+    the name resolvable without weakening the check. **Owner:**
+    [#131](https://github.com/lapis-lang/lapis-lang/issues/131).
+
+51. **Duplicate binding sites are accepted everywhere a name is introduced.** A variant may declare
+    a field twice (`P1 x: Any x: Any` — resolution reports nothing), an arm head may bind one name
+    twice (`S1 a a -> a` becomes the handler `S1(a a)`, whose body reads whichever binding the
+    environment kept last), and a `map` may name a transform twice. Only `duplicate-variant` and
+    `duplicate-declaration` exist as reasons. A shadowing form is a second binding site for one name
+    in one scope, which is the thing §12.6's "names are declared, never bound" exists to prevent.
+    **Owner:** [#136](https://github.com/lapis-lang/lapis-lang/issues/136).
+
+52. **A contract clause's body is parsed, never resolved, never elaborated.** `contractClauseProd`
+    builds a `ContractClause` with its `bindings` and its body `Expr`, and both passes stop there:
+    `resolve.ts` validates a fold's spec types and its arms but not its clauses, and `elaborate.ts`
+    emits no term for one. Verified: `demands: guard | Ghost` resolves `ok=true`, and the quadratic
+    example's `demands: self | self hasRealRoots` parses. The _bindable-name set_ and the head arity
+    are [#110](https://github.com/lapis-lang/lapis-lang/issues/110)'s; the body is unowned.
+    **Owner:** [#135](https://github.com/lapis-lang/lapis-lang/issues/135).
+
+53. **The comment scanner allocates a parser per character, so a long comment exhausts the stack.**
+    `layout.ts`'s `commentBody(depth)` builds `content.bind((c) => commentBody(depth).map(…))` for
+    _each_ character and re-attempts the whole suffix at every `or` branch. Cost grows with comment
+    length before nesting is involved, and each nesting level multiplies it. Measured: a flat
+    400-character comment parses in ~40 ms, 800 throws `RangeError`; `/**/**/**/**/**/` (20
+    characters, depth 5) takes ~3 s. `examples/quadratic.lapis`'s 1060-character header comment is
+    past the threshold, so the flagship example cannot be parsed at all. Nesting is the _specified_
+    behaviour and should stay; counting delimiters with a single scan gives it without the
+    recursion. **Owner:** [#134](https://github.com/lapis-lang/lapis-lang/issues/134) (pre-existing
+    at `141d8d9`).
+
+54. **Prefix position belongs to constructors, so there is no prefix operation form — but three
+    documents teach one.** `- expr` (`negate`) and `not expr` are documented as prefix operation
+    applications in `prelude.md` §3.1/§3.3, `elaboration.md` §2.5 and `surface-syntax.md` §1.5, and
+    `examples/quadratic.lapis` used `- b` twice. None is a production: `- 3`, `negate 3`, `not A1`
+    each yield an empty forest. The suffix forms are the language's — `3 negate` parses to
+    `negate(3)`, `A1 not` to `not(A1())` — and `-3` is a literal because the `Int` pattern `-[0-9]+`
+    matches at token start. The rule is already stated in `surface-syntax.md` §2.1 ("symbolic
+    characters in prefix position are pattern-matched constructors … in infix position are symbolic
+    operations"); it just had no third case, so the unary-operation form was invented to fill the
+    hole. Corrected in-branch to the suffix send. **Owner:** recorded here; the corpus sweep is
+    tracked in [#103](https://github.com/lapis-lang/lapis-lang/issues/103).
+
+55. **An empty forest means both "no parse" and "rejected", so a production cannot tell the author
+    which.** `parseProgram` returns `undefined` for a syntax error _and_ for a premise rejection —
+    both are `empty()` — and `parseToTree` returns `forest.size === 0` for both. The consequence is
+    a reviewer's problem rather than a user's: a claim that a form "is not a production" is
+    indistinguishable from a claim that it "is a production with an unsatisfiable premise", so
+    findings 54 and 45 above can only be stated as "yields an empty forest", not as "has no
+    production". It also costs diagnostics: a user who writes `negate 3` gets nothing at all, where
+    "prefix operations are written postfix" would be the useful answer. Worth a rejection channel
+    (`#99`'s, or the parser's) before more forms are added. **Owner:**
+    [#99](https://github.com/lapis-lang/lapis-lang/issues/99).
