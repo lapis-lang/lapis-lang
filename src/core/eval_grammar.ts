@@ -92,6 +92,31 @@ class PlaceholderValue extends Value {
 const PLACEHOLDER: Value = new PlaceholderValue()
 
 /**
+ * The **capture phase** — parsing a body only to learn its SPAN, to be replayed
+ * later via `_forward`.
+ *
+ * A span capture necessarily runs the body's semantic actions, because the span
+ * is an action's second argument; there is no action-free parse to use instead.
+ * So an application (E-App, E-Op) is made inert during a capture — it would
+ * otherwise be *performed* here and again on replay, and a self-reference would
+ * recurse through the capture instead of descending on a value.
+ *
+ * The phase rides on the environment (`ValueEnv.capturing`) rather than a field
+ * on the grammar: a parser is a description built before it runs, so a flag set
+ * while the description is assembled is already cleared by the time the actions
+ * fire. The environment is the one value the engine threads into every
+ * production's `ctx`.
+ */
+function capturingEnv(env: unknown): ValueEnv {
+    const base = env instanceof ValueEnv ? env : new ValueEnv()
+    return base.asCapture()
+}
+
+/** Whether `env` is a capture-phase environment. */
+function isCapturing(env: unknown): boolean {
+    return env instanceof ValueEnv && env.capturing
+}
+/**
  * Error sentinel returned when evaluation fails (unknown variant, unbound
  * variable, type mismatch, etc.). This is a proper Value subclass so it can
  * be distinguished from real values via `instanceof EvalErrorValue`.
@@ -279,7 +304,7 @@ export class LCEval extends AbstractLC<EvalShape> {
             assert(typeof param === "string", "lambda param must be a string")
             assert(ty !== undefined, "lambda type must be defined")
             const placeholderCtx = this.extendCtx(ctx, param, ty)
-            return this.exprProd(placeholderCtx)
+            return this.exprProd(capturingEnv(placeholderCtx))
                 .map((_body, span) =>
                     new SpanClosure(
                         param,
@@ -288,7 +313,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                             start: span.start + this._inputOffset,
                             end: span.end + this._inputOffset,
                         },
-                        ctx as ValueEnv,
+                        (ctx as ValueEnv).asAmbient(),
                         this._input,
                     )
                 )
@@ -315,6 +340,13 @@ export class LCEval extends AbstractLC<EvalShape> {
                         .bind(({ fnVal, argVal }) => {
                             if (!(fnVal instanceof SpanClosure)) {
                                 return empty<Value>()
+                            }
+                            // Capture phase: the enclosing body is parsed
+                            // only for its span, so an application must not
+                            // run here — it fires when that body is replayed
+                            // via `_forward` under the real environment.
+                            if (isCapturing(ctx)) {
+                                return epsilon<Value>(PLACEHOLDER)
                             }
                             const bodyEnv = fnVal.env.extend(fnVal.param, argVal)
                             const savedInput = this._input
@@ -418,7 +450,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                                 dataType,
                                                 scrutinee,
                                                 handlers,
-                                                ctx as ValueEnv,
+                                                (ctx as ValueEnv).asAmbient(),
                                             )
                                         )
                                 )
@@ -476,7 +508,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                         extendedCtx = this.extendCtx(extendedCtx, bindingList[i]!, field.type)
                     }
                 }
-                return this.exprProd(extendedCtx)
+                return this.exprProd(capturingEnv(extendedCtx))
                     .map((_body, span) => ({
                         kind: "variant" as const,
                         variantName: vName,
@@ -510,7 +542,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                 ) {
                     return empty<SpanHandler>()
                 }
-                return this.exprProd(ctx)
+                return this.exprProd(capturingEnv(ctx))
                     .map((_body, span) => ({
                         kind: "pattern" as const,
                         patternSource: resolved.source,
@@ -732,7 +764,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                                 codataType,
                                                 seed,
                                                 generators,
-                                                ctx as ValueEnv,
+                                                (ctx as ValueEnv).asAmbient(),
                                                 this._input,
                                             )
                                         )
@@ -772,7 +804,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                 return empty<SpanGenerator>()
             }
             const extendedCtx = this.extendCtx(ctx, "self", Any)
-            return this.exprProd(extendedCtx)
+            return this.exprProd(capturingEnv(extendedCtx))
                 .map((_body, span) => ({
                     observerName: obsName,
                     bodySpan: {
@@ -827,7 +859,7 @@ export class LCEval extends AbstractLC<EvalShape> {
                                                 codataType,
                                                 scrutinee,
                                                 handler,
-                                                ctx as ValueEnv,
+                                                (ctx as ValueEnv).asAmbient(),
                                             )
                                         )
                                 )
@@ -1000,7 +1032,12 @@ export class LCEval extends AbstractLC<EvalShape> {
             return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
                 .bind((args) =>
                     seq(this.ws, char(")"))
-                        .map(() => this.evalOp(opSig, args))
+                        .map(() =>
+                            // Capture phase: inside a body parsed only for its
+                            // span, an application must not run — it fires
+                            // when the body is replayed via `_forward`.
+                            isCapturing(ctx) ? PLACEHOLDER : this.evalOp(opSig, args)
+                        )
                 )
         })
     }

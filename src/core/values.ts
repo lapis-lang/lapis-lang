@@ -354,14 +354,39 @@ export class TokenVal extends Value {
 // ── Value environment ─────────────────────────────────────────────────────────
 
 /**
+ * Capture-phase counterparts of ambient environments, keyed by identity.
+ *
+ * A capture is a parser ARGUMENT, and the engine memoizes a production per
+ * `(instance, rule, arguments)` — an argument's identity is what makes two
+ * visits the same visit. Deriving a fresh environment per capture would hand
+ * every visit a new argument and defeat the memo, so a body would be re-parsed
+ * unmemoized on each visit: a whole extra sweep of the parse space.
+ */
+const CAPTURE_OF = new WeakMap<ValueEnv, ValueEnv>()
+
+/**
  * The value environment `ρ` — maps names to values.
  * Used during evaluation (the inherited attribute for the evaluator).
  */
 export class ValueEnv {
     private readonly bindings: Map<string, Value>
 
-    constructor(entries?: Map<string, Value>) {
+    /**
+     * Whether this environment belongs to a body being parsed only to learn its
+     * SPAN (the evaluator's capture phase).
+     *
+     * A parser is a description built before it runs, and a capture parses a
+     * body before replaying it, so a phase cannot be a field on the grammar: it
+     * would be cleared before the actions fire. The environment is the one
+     * value the engine threads into every production's `ctx`, so the phase
+     * rides here instead. `extend` inherits it — a binder inside a captured
+     * body is still inside that body — and lookup ignores it.
+     */
+    readonly capturing: boolean
+
+    constructor(entries?: Map<string, Value>, capturing: boolean = false) {
         this.bindings = entries ?? new Map()
+        this.capturing = capturing
     }
 
     lookup(name: string): Value | undefined {
@@ -371,7 +396,30 @@ export class ValueEnv {
     extend(name: string, value: Value): ValueEnv {
         const next = new Map(this.bindings)
         next.set(name, value)
-        return new ValueEnv(next)
+        return new ValueEnv(next, this.capturing)
+    }
+
+    /** This environment, marked as a capture-phase environment. */
+    asCapture(): ValueEnv {
+        if (this.capturing) return this
+        const cached = CAPTURE_OF.get(this)
+        if (cached) return cached
+        const capture = new ValueEnv(this.bindings, true)
+        CAPTURE_OF.set(this, capture)
+        return capture
+    }
+
+    /**
+     * This environment as an AMBIENT one — the form a closure or handler
+     * records for its later replay.
+     *
+     * A body is replayed outside the capture that parsed it, so the
+     * environment it carries must not still be marked: a replay under a
+     * capture-phase environment would treat every application as inert and
+     * produce no value.
+     */
+    asAmbient(): ValueEnv {
+        return this.capturing ? new ValueEnv(this.bindings, false) : this
     }
 
     /** Create a ValueEnv from a raw Map. */
