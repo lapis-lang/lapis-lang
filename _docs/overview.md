@@ -437,7 +437,7 @@ fold depth <out: Int>
     Node left right -> 1 + (left max right)
 
 fold balanced <aux: #depth, out: Bool>
-    Leaf -> true
+    Leaf -> True
     Node left right -> (left and right) and (1 = (abs (depth left - depth right)))
 ```
 
@@ -942,11 +942,11 @@ data Stack
         Push _ rest -> 1 + rest
 
     fold peek
-        Empty -> nil
+        Empty -> Empty
         Push value -> value
 
     fold pop <para>
-        Empty -> nil
+        Empty -> Empty
         Push value rest -> value , old rest
 
     unfold FromArray <in: List>
@@ -961,12 +961,11 @@ two other common shapes (previous results, auxiliary results) as keywords, not l
 
 ---
 
-## 9. The Language in 19 Keywords
+## 9. The Language in 20 Keywords
 
 | Keyword     | Purpose                                             |
 | ----------- | --------------------------------------------------- |
 | `data`      | Declare a type by how its values are built          |
-| `<:`        | Declare a type as an extension of another (§2.4)    |
 | `behavior`  | Declare a type by how its values are observed       |
 | `protocol`  | Declare operations a type must provide              |
 | `relation`  | Declare linked data with two endpoints              |
@@ -976,16 +975,19 @@ two other common shapes (previous results, auxiliary results) as keywords, not l
 | `unfold`    | Generate values from a seed                         |
 | `map`       | Transform fields, structure preserved               |
 | `merge`     | Fuse generate + consume into one pass               |
+| `scan`      | Every partial result of a fold                      |
 | `satisfies` | Assert a type meets a protocol                      |
-| `not`       | Negation on `Bool` (prefix)                         |
+| `not`       | Negation on `Bool` (suffix send)                    |
 | `self`      | The current instance (always in scope)              |
+| `in`        | A fold's `in:` value (always in scope in an arm)    |
 | `Family`    | "The rest of this data" — recursion in data         |
 | `Self`      | "The rest of this behavior" — recursion in behavior |
 | `old`       | The original sub-value, before folding              |
 | `prev`      | The previous fold's result                          |
 | `aux`       | An auxiliary fold's result                          |
 
-Plus `nil`, `true`, `false`. That is the entire reserved-word list.
+There is no special-value spelling: `true`/`false` are `Bool`'s `True`/`False` variants, and a null
+value would be a declared variant like `Nil`. That is the entire reserved-word list.
 
 There is no binding former — no `let`, no `in`, no definition keyword. `let x:σ = t in u` exists in
 the core calculus as a term, but it is not surface syntax; the surface introduces names only by
@@ -1057,44 +1059,46 @@ says **what the finding was**, **where its record now lives**, and **what is lef
 
 **Owned — the issue is the record.** Verify against the code before acting on the one-line summary.
 
-| #      | Finding                                                                                               | Owner                                                                                                                                                                    |
-| ------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| §12.18 | `Number` used throughout but declared nowhere; every site is `Int` or `Float`                         | [#119](https://github.com/lapis-lang/lapis-lang/issues/119) open                                                                                                         |
-| §12.21 | Comments and result annotations: the trailing position is a fragment convention, not a source pairing | [#83](https://github.com/lapis-lang/lapis-lang/issues/83) closed                                                                                                         |
-| §12.27 | Function values: no block literal, no apply production; partial application underived                 | [#109](https://github.com/lapis-lang/lapis-lang/issues/109), [#110](https://github.com/lapis-lang/lapis-lang/issues/110) open                                            |
-| §12.29 | No type variables and no type parameters, permanently — and an unknown name mints a `TypeVar`         | [#116](https://github.com/lapis-lang/lapis-lang/issues/116) open                                                                                                         |
-| §12.31 | `Boolean` written throughout; the declared type is `Bool`                                             | [#116](https://github.com/lapis-lang/lapis-lang/issues/116) open                                                                                                         |
-| §12.32 | `identity:` wants a value but `#name` is a reference                                                  | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
-| §12.35 | `properties:` cannot be written: no record-literal production, no law-set node                        | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
-| §12.39 | `OpRef.qualifier` has no grammar path and no core spelling                                            | [#84](https://github.com/lapis-lang/lapis-lang/issues/84) closed — item deferred                                                                                         |
-| §12.40 | A `map` declaration parses, is never validated, is silently dropped                                   | [#124](https://github.com/lapis-lang/lapis-lang/issues/124) open                                                                                                         |
-| §12.41 | The law vocabulary is a provisional subset of the prototype's                                         | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
-| §12.42 | Horner "single traversal" asserted in three documents, implemented nowhere                            | [#128](https://github.com/lapis-lang/lapis-lang/issues/128) open                                                                                                         |
-| §12.43 | `closure()`'s and `explore()`'s termination measures unstated                                         | [#127](https://github.com/lapis-lang/lapis-lang/issues/127) open                                                                                                         |
-| §12.44 | Protocol `<:` admits one parent, so a multi-parent protocol has no spelling                           | [#126](https://github.com/lapis-lang/lapis-lang/issues/126) open                                                                                                         |
-| §12.45 | `merge`, `scan`, `satisfies:` and a data-body `unfold` have no production                             | [#125](https://github.com/lapis-lang/lapis-lang/issues/125) open                                                                                                         |
-| §12.46 | A fold's arm-key set is unvalidated in both implementations                                           | [#84](https://github.com/lapis-lang/lapis-lang/issues/84) closed                                                                                                         |
-| §12.47 | `elaborateProgram` had no error channel                                                               | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
-| §12.48 | A fold's `in:` value was bound by no rule                                                             | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed                                                                                                       |
-| §12.49 | Binary operators have no core counterpart                                                             | [#129](https://github.com/lapis-lang/lapis-lang/issues/129) open                                                                                                         |
-| §12.50 | A fold re-sending its own name cannot enter `Ω`; keying is open, so two types cannot share one        | [#131](https://github.com/lapis-lang/lapis-lang/issues/131) closed; keying is [#152](https://github.com/lapis-lang/lapis-lang/issues/152) open                           |
-| §12.51 | Duplicate binding sites accepted everywhere a name is introduced                                      | [#136](https://github.com/lapis-lang/lapis-lang/issues/136) open                                                                                                         |
-| §12.52 | A contract clause's body is parsed, never resolved, never elaborated                                  | [#135](https://github.com/lapis-lang/lapis-lang/issues/135) open                                                                                                         |
-| §12.53 | The comment scanner allocates a parser per character                                                  | [#134](https://github.com/lapis-lang/lapis-lang/issues/134) open                                                                                                         |
-| §12.54 | No prefix operation form — the suffix send is the language's                                          | [#103](https://github.com/lapis-lang/lapis-lang/issues/103) open                                                                                                         |
-| §12.55 | An empty forest means both "no parse" and "rejected"                                                  | [#99](https://github.com/lapis-lang/lapis-lang/issues/99) open                                                                                                           |
-| §12.56 | A spec record accepts a repeated key and keeps the first                                              | [#138](https://github.com/lapis-lang/lapis-lang/issues/138) open — the check landed with [#130](https://github.com/lapis-lang/lapis-lang/issues/130); docs residual only |
-| §12.57 | `opWellFormedness` never compared a parameter's type                                                  | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
-| §12.58 | A fold's `in:` never reached its own definition                                                       | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
-| §12.59 | `prelude.md` §3.2 contradicted its own declaration and the resolver                                   | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed                                                                                                       |
-| §12.60 | An arm head's binding count and names were unvalidated against the variant                            | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed; names still open in [#143](https://github.com/lapis-lang/lapis-lang/issues/143)                      |
-| §12.61 | A fold whose result type differs from its carrier typed as `Any`                                      | [#140](https://github.com/lapis-lang/lapis-lang/issues/140) closed                                                                                                       |
-| §12.62 | An arm binding can shadow the fold's `in:` parameter                                                  | [#141](https://github.com/lapis-lang/lapis-lang/issues/141) closed                                                                                                       |
-| §12.63 | The surface could name a binder `in`; the core cannot spell it                                        | [#141](https://github.com/lapis-lang/lapis-lang/issues/141) closed                                                                                                       |
-| §12.65 | Every literal is emitted verbatim; the core has no production for any                                 | [#145](https://github.com/lapis-lang/lapis-lang/issues/145) open                                                                                                         |
-| §12.66 | Four documents still teach the retired `in:`-as-arm-binding spelling                                  | [#146](https://github.com/lapis-lang/lapis-lang/issues/146) open                                                                                                         |
-| §12.67 | A recursive operation does not terminate at evaluation, even on a base-case input                     | [#148](https://github.com/lapis-lang/lapis-lang/issues/148) closed                                                                                                       |
-| §12.68 | A fold's capture scan bound a recursive field to the carrier, so a non-carrier result could not type  | [#150](https://github.com/lapis-lang/lapis-lang/issues/150) closed                                                                                                       |
+| #      | Finding                                                                                                                | Owner                                                                                                                                                                    |
+| ------ | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| §12.18 | `Number` used throughout but declared nowhere; every site is `Int` or `Float`                                          | [#119](https://github.com/lapis-lang/lapis-lang/issues/119) open                                                                                                         |
+| §12.21 | Comments and result annotations: the trailing position is a fragment convention, not a source pairing                  | [#83](https://github.com/lapis-lang/lapis-lang/issues/83) closed                                                                                                         |
+| §12.27 | Function values: no block literal, no apply production; partial application underived                                  | [#109](https://github.com/lapis-lang/lapis-lang/issues/109), [#110](https://github.com/lapis-lang/lapis-lang/issues/110) open                                            |
+| §12.29 | No type variables and no type parameters, permanently — and an unknown name mints a `TypeVar`                          | [#116](https://github.com/lapis-lang/lapis-lang/issues/116) open                                                                                                         |
+| §12.31 | `Boolean` written throughout; the declared type is `Bool`                                                              | [#116](https://github.com/lapis-lang/lapis-lang/issues/116) open                                                                                                         |
+| §12.32 | `identity:` wants a value but `#name` is a reference                                                                   | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
+| §12.35 | `properties:` cannot be written: no record-literal production, no law-set node                                         | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
+| §12.39 | `OpRef.qualifier` has no grammar path and no core spelling                                                             | [#84](https://github.com/lapis-lang/lapis-lang/issues/84) closed — item deferred                                                                                         |
+| §12.40 | A `map` declaration parses, is never validated, is silently dropped                                                    | [#124](https://github.com/lapis-lang/lapis-lang/issues/124) open                                                                                                         |
+| §12.41 | The law vocabulary is a provisional subset of the prototype's                                                          | [#122](https://github.com/lapis-lang/lapis-lang/issues/122) open                                                                                                         |
+| §12.42 | Horner "single traversal" asserted in three documents, implemented nowhere                                             | [#128](https://github.com/lapis-lang/lapis-lang/issues/128) open                                                                                                         |
+| §12.43 | `closure()`'s and `explore()`'s termination measures unstated                                                          | [#127](https://github.com/lapis-lang/lapis-lang/issues/127) open                                                                                                         |
+| §12.44 | Protocol `<:` admits one parent, so a multi-parent protocol has no spelling                                            | [#126](https://github.com/lapis-lang/lapis-lang/issues/126) open                                                                                                         |
+| §12.45 | `merge`, `scan`, `satisfies:` and a data-body `unfold` have no production                                              | [#125](https://github.com/lapis-lang/lapis-lang/issues/125) open                                                                                                         |
+| §12.46 | A fold's arm-key set is unvalidated in both implementations                                                            | [#84](https://github.com/lapis-lang/lapis-lang/issues/84) closed                                                                                                         |
+| §12.47 | `elaborateProgram` had no error channel                                                                                | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
+| §12.48 | A fold's `in:` value was bound by no rule                                                                              | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed                                                                                                       |
+| §12.49 | Binary operators have no core counterpart                                                                              | [#129](https://github.com/lapis-lang/lapis-lang/issues/129) open                                                                                                         |
+| §12.50 | A fold re-sending its own name cannot enter `Ω`; keying is open, so two types cannot share one                         | [#131](https://github.com/lapis-lang/lapis-lang/issues/131) closed; keying is [#152](https://github.com/lapis-lang/lapis-lang/issues/152) open                           |
+| §12.51 | Duplicate binding sites accepted everywhere a name is introduced                                                       | [#136](https://github.com/lapis-lang/lapis-lang/issues/136) open                                                                                                         |
+| §12.52 | A contract clause's body is parsed, never resolved, never elaborated                                                   | [#135](https://github.com/lapis-lang/lapis-lang/issues/135) open                                                                                                         |
+| §12.53 | The comment scanner allocates a parser per character                                                                   | [#134](https://github.com/lapis-lang/lapis-lang/issues/134) open                                                                                                         |
+| §12.54 | No prefix operation form — the suffix send is the language's                                                           | [#103](https://github.com/lapis-lang/lapis-lang/issues/103) open                                                                                                         |
+| §12.55 | An empty forest means both "no parse" and "rejected"                                                                   | [#99](https://github.com/lapis-lang/lapis-lang/issues/99) open                                                                                                           |
+| §12.56 | A spec record accepts a repeated key and keeps the first                                                               | [#138](https://github.com/lapis-lang/lapis-lang/issues/138) open — the check landed with [#130](https://github.com/lapis-lang/lapis-lang/issues/130); docs residual only |
+| §12.57 | `opWellFormedness` never compared a parameter's type                                                                   | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
+| §12.58 | A fold's `in:` never reached its own definition                                                                        | [#133](https://github.com/lapis-lang/lapis-lang/issues/133) closed                                                                                                       |
+| §12.59 | `prelude.md` §3.2 contradicted its own declaration and the resolver                                                    | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed                                                                                                       |
+| §12.60 | An arm head's binding count and names were unvalidated against the variant                                             | [#130](https://github.com/lapis-lang/lapis-lang/issues/130) closed; names still open in [#143](https://github.com/lapis-lang/lapis-lang/issues/143)                      |
+| §12.61 | A fold whose result type differs from its carrier typed as `Any`                                                       | [#140](https://github.com/lapis-lang/lapis-lang/issues/140) closed                                                                                                       |
+| §12.62 | An arm binding can shadow the fold's `in:` parameter                                                                   | [#141](https://github.com/lapis-lang/lapis-lang/issues/141) closed                                                                                                       |
+| §12.63 | The surface could name a binder `in`; the core cannot spell it                                                         | [#141](https://github.com/lapis-lang/lapis-lang/issues/141) closed                                                                                                       |
+| §12.65 | Every literal is emitted verbatim; the core has no production for any                                                  | [#145](https://github.com/lapis-lang/lapis-lang/issues/145) open                                                                                                         |
+| §12.66 | Four documents still teach the retired `in:`-as-arm-binding spelling                                                   | [#146](https://github.com/lapis-lang/lapis-lang/issues/146) open                                                                                                         |
+| §12.67 | A recursive operation does not terminate at evaluation, even on a base-case input                                      | [#148](https://github.com/lapis-lang/lapis-lang/issues/148) closed                                                                                                       |
+| §12.68 | A fold's capture scan bound a recursive field to the carrier, so a non-carrier result could not type                   | [#150](https://github.com/lapis-lang/lapis-lang/issues/150) closed                                                                                                       |
+| §12.69 | `nil`/`true`/`false` were reserved value spellings with no declaration and no denotation                               | [#145](https://github.com/lapis-lang/lapis-lang/issues/145) closed by decision — a value spelling is a declared constructor                                              |
+| §12.70 | An operation reference is never resolved, so an undeclared operation name is reported as a whole-definition type error | [#154](https://github.com/lapis-lang/lapis-lang/issues/154) open                                                                                                         |
 
 **Decided, instructive, no issue — the class they illustrate is the record.** These closed by a
 decision, so there is nothing left to do; they stay because each is the clearest instance of a class
@@ -1116,6 +1120,7 @@ in §12.1, and the review skill cites them by number.
 | §12.37 | Constructor position is resolved: `unknown-`/`ambiguous-`/`bad-qualifier`/`selector-mismatch` | `surface-grammar.md` §2.8                                               |
 | §12.38 | A construction's keyword sequence **is** its selector; a reorder is an undeclared constructor | `surface-grammar.md` §2.8, §4.1                                         |
 | §12.64 | `aux` reads its operand as syntax, so a colliding binding is unreachable through it           | `surface-grammar.md` §4.1; the operand form is #107's                   |
+| §12.71 | There is no list or array literal: a container value is a declared constructor                | `surface-syntax.md` §3; `elaboration.md` §2.6; `prelude.md` §2.6        |
 
 **Open, unowned — the spec must pin these, and nothing tracks them yet.** Each is a form this
 document teaches that no document decides. The owner is the relevant spec section, so the gap is

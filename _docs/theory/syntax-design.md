@@ -49,12 +49,12 @@ data Color
         Blue -> "#0000FF"
 
     fold isWarm <out: Bool>
-        Red -> true
-        Green -> false
-        Blue -> false
+        Red -> True
+        Green -> False
+        Blue -> False
 
 Color Red toHex                       /* "#FF0000" */
-Color Red isWarm                      /* true */
+Color Red isWarm                      /* True */
 ```
 
 Each case arm uses `->` to separate the pattern from the body. Single-expression bodies appear on
@@ -106,19 +106,19 @@ data Stack
         Push _ rest -> 1 + rest
 
     fold peek
-        Empty -> nil
+        Empty -> Empty
         Push value -> value
 
     fold toArray <out: List>
-        Empty -> {}
+        Empty -> Nil
         Push value rest -> {value} , rest
 
     fold contains <in: Any, out: Bool>
-        Empty in -> false
+        Empty in -> False
         Push value rest in -> value = in | (rest contains: in)
 
     unfold FromArray <in: List>
-        Empty arr -> arr isEmpty | {}
+        Empty arr -> arr isEmpty | Nil
         Push arr -> arr notEmpty | value: arr first rest: arr tail
 
 Stack Push value: 3 rest: (Stack Push value: 2 rest: Stack Empty)
@@ -138,7 +138,7 @@ data Stack
     Empty  Push value: Any rest: Family
 
     fold pop <para>
-        Empty -> nil
+        Empty -> Empty
         Push value rest -> value , old rest
 
 /* value    — the fold result for the "value" field (raw Any) */
@@ -196,9 +196,9 @@ data ExtendedColor <: Color
         Purple -> "#800080"
 
     fold isWarm
-        Yellow -> true
-        Orange -> true
-        Purple -> false
+        Yellow -> True
+        Orange -> True
+        Purple -> False
 
 ExtendedColor Yellow toHex            /* "#FFFF00" */
 Color Red toHex                       /* "#FF0000" — inherited */
@@ -374,7 +374,7 @@ data Nat
 
     satisfies: Monoid
     unfold Identity
-        Zero -> true
+        Zero -> True
     fold combine <in: Self, out: Self>
         Zero -> in
         Succ pred -> Succ pred: pred

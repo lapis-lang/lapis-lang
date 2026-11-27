@@ -298,6 +298,14 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 - Base types (`ι` in the calculus: `Int`, `String`, `Bool`, ...) are **eliminated**. All types are
   `μ` (data) or `ν` (codata).
 - `Bool` = `data Bool (True | False)` — named constructors, zero fields.
+- **A value spelling is a declared constructor's name.** There is no special-value category: no
+  `nil`, no reserved `true`/`false`. A literal is whatever text a declared pattern matched, and
+  every other value is written as the constructor that builds it (`True`, `False`, a declared
+  `Nil`). The consequence is that an undeclared name denotes nothing rather than being a value the
+  language supplies — the same rule that stops an unknown type name from minting a `TypeVar`
+  (`overview.md` §12.29, §12.69). A null value specifically has no denotation to give: the calculus
+  has no such term (`lc.md` has no `nil`), and `Nothing` is the uninhabited bottom type, so a
+  spelling for it could only ever mean "nothing at all".
 - `Int`, `String`, `Complex`, `Rational`, etc. = `data` types with **pattern-matched constructors**
   (a compact specification of an infinite constructor set). `Int`'s one pattern is `-?[0-9]+`,
   covering both signs.
@@ -337,6 +345,12 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 - **Lexer priority**: patterns > operators > identifiers. Within each phase, longest match wins;
   ties broken by declaration order. Named constructors take precedence over patterns when both could
   match (more specific).
+- **No collection literal.** A container value is a declared constructor, never a bracketed or
+  braced spelling: `List`'s empty value is `Nil` and a non-empty one is `Cons …` / the `,` operator.
+  There is no `{}` or `{a, b, c}` production, so no array literal, no list literal, and no array
+  type to go with one (`prelude.md` §2.6 retires `Array`). The `,` operator is the only
+  multi-element spelling, and it is a fold on `List` rather than sugar over one (`overview.md`
+  §12.71).
 
 ## Comments and result annotations
 

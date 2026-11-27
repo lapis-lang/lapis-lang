@@ -117,7 +117,9 @@ the core calculus.
 ### 2.1 Literals and References
 
 Base types are eliminated (see [`design-decisions.md`](../design-decisions.md) §"No base types").
-Literals are pattern-matched or named constructors of `data` types.
+Every literal is the text a declared pattern matched, so every literal is a constructor of a
+pattern-carrier `data` type. There is no second category: no `nil`, no reserved `true`/`false`
+(`surface-grammar.md` §2.4, `surface-syntax.md` §1.6).
 
 | Surface                             | Core                                 | Notes                                                                                                                                                                                            |
 | ----------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -125,9 +127,8 @@ Literals are pattern-matched or named constructors of `data` types.
 | `42`                                | `match("42") : Int`                  | Pattern-matched constructor of `Int = μ α. -?[0-9]+`                                                                                                                                             |
 | `-3`                                | `match("-3") : Int`                  | Pattern-matched constructor of `Int = μ α. (-[0-9]+ \| [0-9]+)`                                                                                                                                  |
 | `"hello"`                           | `match("hello") : String`            | Pattern-matched constructor of `String = μ α. "<Char>*"` (type reference)                                                                                                                        |
-| `nil`                               | `nil`                                | A built-in value of type `Any` (or `Nothing` in a strict reading)                                                                                                                                |
-| `true`                              | `True`                               | Named variant construction of `Bool = μ α. (True \| False)`                                                                                                                                      |
-| `false`                             | `False`                              | Named variant construction of `Bool`                                                                                                                                                             |
+| `True`                              | `True()`                             | Named variant construction of `Bool = μ α. (True \| False)`; spelled as the variant itself                                                                                                       |
+| `False`                             | `False()`                            | Named variant construction of `Bool`                                                                                                                                                             |
 | `self`                              | `self`                               | The current instance variable (in scope in fold/unfold handlers)                                                                                                                                 |
 | `Family`                            | `α` (the μ-bound type variable)      | Resolved to the recursive self-reference                                                                                                                                                         |
 | `Self`                              | `α` (the ν-bound type variable)      | Resolved to the corecursive self-reference                                                                                                                                                       |
@@ -259,21 +260,22 @@ two sends. The core's application is single-argument (a curried `FunType` chain)
 multi-argument function value is curried by nesting — the same shape `Observer`'s single type slot
 supports.
 
-### 2.6 Arrays and Records
+### 2.6 Records
 
-**Not implemented.** Neither array nor record literals have a surface production, so every row below
-is the _intended_ translation, not one the compiler performs.
+**Not implemented.** A record literal has no surface production, so the row below is the _intended_
+translation, not one the compiler performs.
 
-| Surface            | Core                                      | Notes                                     |
-| ------------------ | ----------------------------------------- | ----------------------------------------- |
-| `{}`               | `Nil` (empty array)                       | Or a built-in empty-array value           |
-| `{a, b, c}`        | `Cons(ℰ(a), Cons(ℰ(b), Cons(ℰ(c), Nil)))` | List literal = nested cons                |
-| `(k1: v1, k2: v2)` | `{k1 = ℰ(v1), k2 = ℰ(v2)}`                | Record = product type (built-in or sugar) |
+| Surface            | Core                       | Notes                                     |
+| ------------------ | -------------------------- | ----------------------------------------- |
+| `(k1: v1, k2: v2)` | `{k1 = ℰ(v1), k2 = ℰ(v2)}` | Record = product type (built-in or sugar) |
 
-Arrays would elaborate to a built-in `List` type (a μ-type with `Nil` and `Cons` variants) and
-records to built-in product types. Both would also need a core counterpart, which the calculus does
-not have — see §9's record question. `properties:`'s value shape is the case that will force a
-decision first (`overview.md` §12.35, [#122](https://github.com/lapis-lang/lapis-lang/issues/122)).
+A record would elaborate to a built-in product type and would also need a core counterpart, which
+the calculus does not have — see §9's record question. `properties:`'s value shape is the case that
+will force a decision first (`overview.md` §12.35,
+[#122](https://github.com/lapis-lang/lapis-lang/issues/122)).
+
+There is no array or list literal: a container value is built with a declared constructor, so
+`List`'s empty value is `Nil` and a non-empty one is `Cons` (§2.7).
 
 ### 2.7 Variant Construction
 
@@ -359,7 +361,7 @@ no seed, so its arms carry no bindings and the guard alone decides which arm pro
 
 ```lapis
 unfold Identity
-    Zero -> true
+    Zero -> True
 ```
 
 Elaborates to an unfold whose generator takes no argument — `Identity = unfold_T { Zero → true }` —
@@ -619,7 +621,7 @@ A paramorphism gives the handler both the folded result _and_ the raw sub-node (
 
 ```lapis
 fold pop <para>
-    Empty -> nil
+    Empty -> Empty
     Push value rest -> value , old rest
 ```
 
@@ -627,7 +629,7 @@ fold pop <para>
 
 ```
 pop = fold_Stack e {
-    Empty() → (nil, Empty),
+    Empty() → (Empty, Empty),
     Push(value, rest) → (value , rest_raw, rest_raw)
 }
 ```
@@ -1146,7 +1148,6 @@ data IntList <: List
 | Binary operators     | Message sends → folds on the operand type                         | §2.4    |
 | `double` (op ref)    | The operation's definition term (a `FunType`)                     | §2.3    |
 | `f value: x`         | `f x` — apply the function-typed receiver                         | §2.5    |
-| `{a, b, c}`          | Nested cons on built-in List                                      | §2.6    |
 
 ## 9. Open Questions
 
@@ -1200,14 +1201,14 @@ eliminator for `Bool`. `Bool = μ α. (True | False)` is an ordinary data type, 
 
 ```lapis
 fold isWarm <out: Bool>
-    Red -> true
-    Green -> false
-    Blue -> false
+    Red -> True
+    Green -> False
+    Blue -> False
 ```
 
 Branching is **structural dispatch**, in exactly two forms:
 
-- **Fold arms** dispatch on a variant. The arm keying _is_ the decision — `Red -> true` needs no
+- **Fold arms** dispatch on a variant. The arm keying _is_ the decision — `Red -> True` needs no
   guard, because `Red` is the condition.
 - **Unfold arms** decide on a seed: `guard | payload`, first match wins (`src/surface/grammar.ts`,
   `unfoldArm`).

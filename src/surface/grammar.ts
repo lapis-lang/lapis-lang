@@ -145,7 +145,6 @@ import {
     keyword,
     pascalIdent,
     patternLiteral,
-    specialValue,
     stringLiteral,
     SURFACE_KEYWORDS,
     symbolicOp,
@@ -752,8 +751,8 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
     }
 
     /**
-     * A unary message stops before a `key:` pair: `nil rest: Empty` is a keyword
-     * call whose receiver is `nil`, not a send of `Empty` to `rest:`. Without the
+     * A unary message stops before a `key:` pair: `x rest: Empty` is a keyword
+     * call whose receiver is `x`, not a send of `Empty` to `rest:`. Without the
      * guard both readings parse and mean different things.
      */
     private unaryMessages(): Parser<string[]> {
@@ -766,8 +765,8 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
 
     /**
      * Ordered by specificity. A parenthesized expression re-opens the message
-     * chain; `nil`/`true`/`false` are excluded from `ident` or every such literal
-     * would have two parses.
+     * chain; a PascalCase name is a constructor position, so it is tried before
+     * `ident` (which admits lowercase names only).
      */
     @rule
     protected primaryProd(): Parser<S["primary"]> {
@@ -776,7 +775,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
             this.constructionOrVariantRef(),
             this.referenceProd(),
             this.literalProd(),
-            ident.bind((name) => isSpecialValue(name) ? empty<Primary>() : epsilon(opRef(name))),
+            ident.map((name) => opRef(name)),
         )
     }
 
@@ -890,7 +889,6 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
         return or(
             stringLiteral.map((text) => ({ kind: "lit", text }) as Primary),
             charLiteral.map((text) => ({ kind: "lit", text }) as Primary),
-            specialValue.map((text) => ({ kind: "lit", text }) as Primary),
             // A pattern literal is tried last: it is a permissive numeric form
             // and must not shadow a symbolic operator.
             seq(patternLiteral, seq(hws1, ident).many()).bind(([text, trailing]) =>
@@ -915,11 +913,6 @@ function atom(name: string): AtomType {
 /** An operation reference — a `camelCase` name in `primary` position (§3.6.1). */
 function opRef(name: string): Primary {
     return { kind: "opRef", name }
-}
-
-/** §2.5's special values: they are values, not operation references. */
-function isSpecialValue(name: string): boolean {
-    return name === "nil" || name === "true" || name === "false"
 }
 
 /** Whether an expression is a variant construction (§3.4). */

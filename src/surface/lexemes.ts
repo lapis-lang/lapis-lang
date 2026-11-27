@@ -111,19 +111,6 @@ export const symbolicOp: Parser<string> = charsWhere(isSymbolicOpChar, "<symboli
     .bind((op) => op === "" ? empty<string>() : epsilon(op))
 
 /**
- * `true` / `false` / `nil` (§2.5's special values).
- *
- * These are **not** keywords — they are ordinary values. `true` and `false` are
- * `Bool`'s variants and `nil` is the null reference, so they are parsed as
- * literals rather than references.
- */
-export const specialValue: Parser<string> = or(
-    literal("true"),
-    literal("false"),
-    literal("nil"),
-)
-
-/**
  * A quoted string literal — `'"' ( char | escape )* '"'` (`surface-grammar.md` §2.4).
  *
  * The delimiter escapes are pinned; the fuller escape vocabulary is open (§9.1).

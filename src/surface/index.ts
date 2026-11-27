@@ -71,7 +71,6 @@ export {
     keyword,
     pascalIdent,
     patternLiteral,
-    specialValue,
     stringLiteral,
     SURFACE_KEYWORDS,
     symbolicOp,
