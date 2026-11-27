@@ -347,7 +347,7 @@ receives the value under the name `in`, which the body reads directly:
 ```lapis
 fold add <in: Self, out: Self>
     Zero -> in
-    Succ pred -> Succ pred: (pred add: in)
+    Succ pred -> Succ pred: pred
 ```
 
 `in` appears in no arm head, exactly as `self` does not: both are names the machinery supplies and

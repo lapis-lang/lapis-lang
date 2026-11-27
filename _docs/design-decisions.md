@@ -39,6 +39,19 @@ Pinned in `_docs/theory/language-design.md`, `_docs/theory/lc.md`, and `_docs/th
   idempotent, etc.). `properties` is the price paid for subtyping-over-generics.
 - No general fixpoint. Recursion only via fold (terminating, data finite) and unfold (productive,
   guarded). Sized-types story specialized to bialgebraic setting.
+- **Data folds are bottom-up; codata unfolds are top-down.** A variant arm runs _after_ its
+  recursive children have been folded, so a `Family` binding holds the **already-computed result**
+  of the subterm, never the subterm itself — `Succ pred: Family` is bound to a value of the fold's
+  result type σ (`lc.md` §5.2, `tᵢ : Fᵢ(σ)[α := σ] → σ`). `unfold` is the dual: a generator runs at
+  the observation that demands it, so a recursive observer position is the seed's own type. The
+  consequence that matters for source shape is that **recursion needs no self-reference**: the
+  fold's induction _is_ the recursion, so `add` on `Nat` is `Succ pred -> Succ pred: pred` and a
+  `size` on `List` is `Cons head rest -> Succ pred: rest`. The prototype's std reads the same way
+  (`List.length` is `Cons({ tail }) { return 1 + tail; }`), and it is what makes `Ω`'s acyclicity
+  rule (`lc.md` §2.5) sound rather than restrictive: a fold body never names its own operation.
+  Reading one orientation into the other is the defect this records — a top-down reading of data
+  makes recursive fields subterms (so `Succ(pred)` would rebuild a list), and a bottom-up reading of
+  codata makes a generator's `self` an already-observed value rather than the seed.
 - **A fold's result type is declared or inferred; it is never defaulted to `Any`.** `T-Fold`'s `σ`
   is the fixpoint `⨆ᵢ type of tᵢ` seeded at `⊥` (`lc.md` §5.2) — the join's identity, so the arms'
   common type is the result. The limit is the **join**, so arms with no common supertype below `Any`

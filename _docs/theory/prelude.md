@@ -212,7 +212,7 @@ data Nat
 
     fold add <in: Self, out: Self>
         Zero -> in
-        Succ pred -> Succ pred: (pred add: in)
+        Succ pred -> Succ pred: pred
 ```
 
 This is `users/rationale.md` §4's worked example, and it is the shape the law suite already
@@ -232,22 +232,24 @@ exercises. Five things about the spelling are load-bearing:
   type. The definition is `λe:Nat. λ<core-name>:Nat. fold_Nat e {…}` — a lambda enclosing every arm,
   never a handler binding.
 - **A recursive field binds the fold's result, not a continuation.** `Succ`'s `pred` field holds the
-  already-folded `pred`, so `add`'s recursion is `pred add: in` — the operation applied again to the
-  folded field as receiver, with the second operand as the keyword argument.
-- **The recursive call is not a continuation application.** `eval_grammar.ts`'s variant arm binds a
-  `Family` field to `fold [T] vⱼ {…}` (`lc.md` §3.1, `E-Fold`), which is a value of the fold's
-  result type. There is no partially applied continuation to apply, and no `value:` form in the data
-  path.
+  already-folded `pred`, so `add`'s recursion is `Succ pred: pred` — the arm rebuilds `Succ` around
+  a field that is already a number. Data folds are bottom-up (`lc.md` §5.2): the arm runs _after_
+  its children, so nothing is re-folded and the operation never names itself.
+- **The recursive field is the whole recursion.** A variant arm binds a `Family` field to
+  `fold [T] vⱼ {…}` (`lc.md` §5.2, `E-Fold`), a value of the fold's result type. The prototype's std
+  agrees: `List.length` is `Cons({ tail }) { return 1 + tail; }`, and `List.combine` is
+  `Cons({ head, tail }, other) { return Cons({ head, tail: tail(other) }); }` — `tail` is the folded
+  result, so for a `family`-valued fold it is a value to apply, not a computation to redo. There is
+  no partially applied continuation, and no `value:` form in the data path.
 - **A construction's fields are its selector.** `Succ` declares one field, `pred`, so `Succ pred:`
   is the only spelling of a `Succ` construction; `Succ value: …` is a different, undeclared
   constructor.
 
-> **Not yet runnable.** `pred add: in` — an operation applied to a _non-construction_ receiver with
-> a keyword part — elaborates to `add(pred, in)`, which is the form the core reads. But an `add`
-> whose body re-sends `add` is self-referential, and `OpRegistry.declare` rejects that (`lc.md`
-> §2.5, acyclicity). The surface spelling above is right; the pipeline cannot install it yet. See
-> `overview.md` §12.48 and §12.50. A binder named `in` also has no core spelling
-> (`LC_RESERVED_WORDS`), so the emitter must rename it — §12.63.
+> **Runnable.** `Succ pred: pred` needs no self-reference, so `Ω`'s acyclicity rule (`lc.md` §2.5)
+> does not apply: the recursion is the fold's induction. `size <out: Nat>` over `List` reaches the
+> same conclusion (`Cons head rest -> Succ pred: rest`), but is blocked for an unrelated reason —
+> the type checker's capture parse binds a recursive field at the carrier. A binder named `in` has
+> no core spelling (`LC_RESERVED_WORDS`), so the emitter renames it (§12.63).
 
 ### 3.3 `Bool` — connectives
 

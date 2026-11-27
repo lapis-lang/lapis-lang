@@ -377,7 +377,7 @@ data Nat
         Zero -> true
     fold combine <in: Self, out: Self>
         Zero -> in
-        Succ pred -> Succ pred: (pred combine: in)
+        Succ pred -> Succ pred: pred
 ```
 
 Two things are load-bearing here.
