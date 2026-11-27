@@ -14,7 +14,7 @@ import {
     OpRegistry,
     OpSig,
 } from "../src/index.ts"
-import { FunType, Nothing, TypeEnv } from "../src/core/types.ts"
+import { Any, FunType, Nothing, TypeEnv } from "../src/core/types.ts"
 import { type Value, ValueEnv, VariantVal } from "../src/core/values.ts"
 import { createOpFixtures, createTestFixtures } from "./fixtures.ts"
 
@@ -437,6 +437,79 @@ Deno.test("E-Op: escaping closure — op returning a function, applied later", (
     const [val] = result
     assert(val instanceof VariantVal)
     assertEquals(val.variantName, "Succ")
+})
+
+// ── opWellFormedness: the signature/definition agreement (lc.md §2.4) ────────
+//
+// `declare` is the only producer of a `CheckedOpSig`, and T-Op trusts its
+// `resultType` while E-Op executes the raw `definition`. So every way a
+// definition can disagree with its declared signature must be rejected here —
+// otherwise an operation type-checks as one thing and evaluates as another.
+
+Deno.test("well-formedness: a mismatched PARAMETER type is rejected", () => {
+    // The declared parameter is checked against the definition's, not merely
+    // counted. Without this, `N → Any` accepts a definition of `Bool → Bool`
+    // and T-Op's premise `Γ ⊢ t : N` never reaches the lambda that is actually
+    // executed.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () =>
+            ops.declare(
+                new OpSig("wrongParam", [bool], bool, "\\x:Nat. Zero()"),
+                tc.opWellFormedness,
+            ),
+        OpDeclarationError,
+        "parameter type",
+    )
+})
+
+Deno.test("well-formedness: an extra lambda is an arity error, even at result Any", () => {
+    // A FunType is `<: Any` by S-Top, so an over-applied definition would pass
+    // a result check against `Any`. The residue after peeling is what catches
+    // it.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () =>
+            ops.declare(
+                new OpSig("tooManyLambdas", [nat], Any, "\\x:Nat. \\y:Nat. x"),
+                tc.opWellFormedness,
+            ),
+        OpDeclarationError,
+        "more arguments than the declared arity",
+    )
+})
+
+Deno.test("well-formedness: a function-typed RESULT is an operation, not arity overflow", () => {
+    // The counterpart to the test above: `mkAdder` genuinely returns a function,
+    // so the extra lambda is its shape. Rejecting it would make the operation
+    // unspellable — and it is the escaping-closure test's fixture.
+    const { ops, tc } = checkedOps()
+    const sealed = ops.declare(
+        new OpSig("mkAdder", [nat], new FunType(nat, nat), "\\x:Nat. \\y:Nat. Zero()"),
+        tc.opWellFormedness,
+    )
+    assertEquals(sealed.name, "mkAdder")
+})
+
+Deno.test("well-formedness: a function-typed result must EQUAL the declared one", () => {
+    // Equal, not merely a subtype: the result is what T-Op reports, so a
+    // narrower function type would let callers apply arguments the definition
+    // never accepts.
+    const { ops, tc } = checkedOps()
+    assertThrows(
+        () =>
+            ops.declare(
+                new OpSig(
+                    "narrowResult",
+                    [nat],
+                    new FunType(bool, nat),
+                    "\\x:Nat. \\y:Nat. Zero()",
+                ),
+                tc.opWellFormedness,
+            ),
+        OpDeclarationError,
+        "function type",
+    )
 })
 
 Deno.test("E-OpArg: arguments evaluate leftmost (strictness)", () => {

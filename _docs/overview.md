@@ -2054,7 +2054,11 @@ is a real finding for the spec:
     caller is told nothing. `OpRegistry.declare` _does_ check well-formedness via the injected
     `OpWellFormedness`, but the pipeline never calls it — only tests do. This is the general hole
     §12.46 is one symptom of. **Owner:**
-    [#133](https://github.com/lapis-lang/lapis-lang/issues/133).
+    [#133](https://github.com/lapis-lang/lapis-lang/issues/133). **Closed by fix:** elaboration now
+    returns `ok`, `errors` (a reason per failing operation), and an `opRegistry` holding only the
+    operations that passed; each is declared through the core's own `opWellFormedness`, so the
+    verdict and `Ω`'s entry are one judgement. Two holes in that check had to be closed first — see
+    §12.57.
 
 48. **A fold's `in:` value is bound by no rule, so its signature and its definition disagree.** The
     emitter produces exactly one lambda (`\e:T.`) whatever `in:` says, and puts any further name in
@@ -2136,3 +2140,49 @@ is a real finding for the spec:
     "prefix operations are written postfix" would be the useful answer. Worth a rejection channel
     (`#99`'s, or the parser's) before more forms are added. **Owner:**
     [#99](https://github.com/lapis-lang/lapis-lang/issues/99).
+
+56. **A spec record accepts a repeated key and silently keeps the first.** `specRecord` is a keyword
+    _list_: the grammar repeats `specEntry` with `(... "," ...).many()`, and neither pass checks
+    multiplicity. `resolve.ts`'s `validateSpec` validates each entry's type and nothing more;
+    `elaborate.ts`'s `specType` is `entries.find(...)`, so every occurrence after the first is
+    discarded with no diagnostic. Verified: `<in: Self, in: Self>` resolves `ok` and elaborates to a
+    **one**-parameter operation; `<out: Self, out: Any>` keeps `Self`; `<out: Any, in: Self>` is
+    accepted with no ordering rule. This matters because the corpus's own `add` needs two operands —
+    `prelude.md` §3.2 says the second "as the keyword argument" — so the spelling a reader reaches
+    for parses and is dropped, and the result looks well-typed. A spec key is a selector, not a
+    binding, which is why this is not [#136](https://github.com/lapis-lang/lapis-lang/issues/136)'s
+    duplicate-binding rule; the `in:` multiplicity decision belongs with
+    [#130](https://github.com/lapis-lang/lapis-lang/issues/130)'s arm-head rule. **Owner:**
+    [#138](https://github.com/lapis-lang/lapis-lang/issues/138).
+
+57. **`opWellFormedness` checked arity and result type but never a parameter's type.** The check
+    peeled one `FunType` per declared parameter with `for (const _ of op.paramTypes)` — the declared
+    type was discarded — so only the _count_ and the _result_ were compared. Verified against the
+    pre-fix check: `{paramTypes: [N], resultType: Any}` accepted the definition
+    `\e:Holder. fold [Holder] e { H() -> H() }` (type `Holder → Holder`), and the same signature
+    accepted `\e:N. \x:N. x` (arity 2). The second has the same root: an extra lambda leaves a
+    `FunType` residue, and `FunType <: Any` by `S-Top`, so the result comparison cannot see it. Both
+    are Preservation violations through `Ω` — T-Op reports `resultType` while E-Op executes the raw
+    definition — and both would have survived the new elaboration verdict, so closing §12.47
+    required fixing them first. The parameter is now compared by **mutual** subtyping (a parameter
+    _is_ the declared type, not merely compatible with it), and a function-typed residue is accepted
+    only when the declared result is that same function type (`mkAdder : <1> → Nat → Nat` is a real
+    operation, not an over-application). **Owner:** closed by fix in
+    [#133](https://github.com/lapis-lang/lapis-lang/issues/133); that a function-typed _result_ is
+    legal is stated in `lc.md` §2.4.
+
+58. **A fold's `in:` never reached its own definition.** `elaborate.ts` computed `inType` and used
+    it only as the declared `paramTypes` entry; the emitted lambda was hard-coded
+    `\e:${decl.name}.`. So a fold can declare a parameter type that its definition does not take —
+    `fold pick <in: B, out: Any>` over `data Holder` emits a `Holder → Holder` term while announcing
+    `B → Any` — and nothing noticed, because §12.57's parameter hole meant the check never compared
+    the two. The emitted text type-checks on its own, so no later stage catches it. With §12.57
+    fixed the disagreement is `not-well-formed` at elaboration, with the fold named. **Owner:**
+    closed by fix in [#133](https://github.com/lapis-lang/lapis-lang/issues/133).
+
+    This is a _defect_, not a ruling on what `in:` means. `in: Type` names the fold's value argument
+    and an arm binds it as a trailing binding (`syntax-design.md`'s syntax summary,
+    `surface-grammar.md` §4.1), so `fold add <in: Self, out: Self>` declaring a second operand is
+    intended. Making the emitter honour it — one lambda per declared parameter, and the tail bound
+    in the arm — is §12.48, still open. Until then a fold declaring more than its carrier as its
+    parameter is reported rather than silently mis-typed.

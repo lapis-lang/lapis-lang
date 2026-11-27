@@ -19,10 +19,11 @@ import {
     Field,
     Nothing,
     NothingType,
-    Type,
     type TypeSlot,
     Variant,
 } from "../core/types.ts"
+
+import { LCTypeCheck, OpDeclarationError, OpRegistry, OpSig, type Type } from "../core/index.ts"
 
 import { TypeRegistry } from "../core/grammar.ts"
 
@@ -52,6 +53,27 @@ export interface ElaboratedOperation {
     readonly source: FoldDecl
 }
 
+/**
+ * Why one declaration failed to elaborate.
+ *
+ * The *reasons* are the stable part; the message text is provisional, the same
+ * convention `ResolutionError` follows — the vocabulary is pinned by the
+ * diagnostics work, not by this pass.
+ */
+export interface ElaborationError {
+    /**
+     * The emitted definition does not type as the declared signature —
+     * `paramTypes → resultType` (`lc.md` §2.4). Every way the two can disagree
+     * is this one reason, because they are one condition: the signature comes
+     * from the spec (`in:` value, `out:` result) and the definition from the
+     * arms, and `Ω` requires them to agree component-wise.
+     */
+    readonly reason: "not-well-formed"
+    /** The operation whose elaboration failed. */
+    readonly operation: string
+    readonly message: string
+}
+
 /** The outcome of elaborating a program. */
 export interface ElaborationResult {
     /** The declared types, in source order. */
@@ -60,6 +82,19 @@ export interface ElaborationResult {
     readonly operations: readonly ElaboratedOperation[]
     /** A registry populated with `types` — ready for `LCTypeCheck`/`LCEval`. */
     readonly registry: TypeRegistry
+    /**
+     * `Ω`, populated with the operations that passed — in declaration order.
+     *
+     * A failed operation is absent rather than fatal: the failure is
+     * per-operation, so the rest of the program stays usable, mirroring
+     * `ResolutionResult`'s `ok` + `errors` shape. `errors` says which ones and
+     * why.
+     */
+    readonly opRegistry: OpRegistry
+    /** The per-declaration failures, in source order. */
+    readonly errors: readonly ElaborationError[]
+    /** Whether every declaration elaborated to a well-formed operation. */
+    readonly ok: boolean
 }
 
 /**
@@ -71,6 +106,13 @@ export interface ElaborationResult {
  * is the same knot the `DataTypeBuilder` API exposes for hand-built fixtures, and
  * it is what makes a program's declarations order-independent, matching the
  * resolver's whole-program view.
+ *
+ * Elaboration **has a verdict**: each emitted operation is checked against its
+ * declared signature before it is installed in `Ω`, and a declaration that does
+ * not hold up is reported in `errors` instead of being emitted as text the core
+ * would reject downstream. The check is the core's own
+ * (`LCTypeCheck.opWellFormedness`), not a second implementation of it — the
+ * point is that `Ω`'s entry and the pipeline's verdict are the same judgement.
  */
 export function elaborateProgram(program: SurfaceProgram): ElaborationResult {
     const dataDecls = program.declarations.filter((d): d is DataDecl => d.kind === "data")
@@ -90,8 +132,78 @@ export function elaborateProgram(program: SurfaceProgram): ElaborationResult {
     const registry = new TypeRegistry()
     for (const type of types) registry.register(type)
 
-    const operations = dataDecls.flatMap((decl) => elaborateFolds(decl, types))
-    return { types, operations, registry }
+    const opRegistry = new OpRegistry()
+    const operations: ElaboratedOperation[] = []
+    const errors: ElaborationError[] = []
+
+    // Operations are declared in source order, so `Ω`'s stratification order is
+    // the program's. A fold whose definition references an earlier fold checks
+    // against it; a self-reference or forward reference is still rejected by
+    // `declare`'s acyclicity check, and surfaces here as `not-well-formed`.
+    for (const decl of dataDecls) {
+        for (const operation of elaborateFolds(decl, types)) {
+            const verdict = installOperation(operation, registry, opRegistry)
+            if (verdict === undefined) {
+                operations.push(operation)
+            } else {
+                errors.push({
+                    reason: "not-well-formed",
+                    operation: operation.name,
+                    message: verdict,
+                })
+            }
+        }
+    }
+
+    return {
+        types,
+        operations,
+        registry,
+        opRegistry,
+        errors,
+        ok: errors.length === 0,
+    }
+}
+
+/**
+ * Check one operation against its declared signature and install it in `Ω`.
+ *
+ * Returns `undefined` on success, or the reason it failed. Installation happens
+ * here rather than in a later pass so that every `operations` entry is
+ * simultaneously an `Ω` entry — the invariant the result type promises.
+ *
+ * `declare` also enforces acyclicity (a definition may only reference earlier
+ * operations) and name shape. Both are reported as failures of this operation
+ * rather than thrown: `Ω` is a stratified environment, so an operation whose
+ * definition names itself (every recursive fold) or a later operation cannot be
+ * installed. That is a declaration the environment refuses, not a crash.
+ */
+function installOperation(
+    operation: ElaboratedOperation,
+    registry: TypeRegistry,
+    opRegistry: OpRegistry,
+): string | undefined {
+    const sig = new OpSig(
+        operation.name,
+        [...operation.paramTypes],
+        operation.resultType,
+        operation.definition,
+    )
+    // The checker is built per call so it sees the `Ω` accumulated so far —
+    // a definition may reference an earlier operation, and `Ω` is the context
+    // that check needs.
+    const checker = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
+    try {
+        opRegistry.declare(sig, checker.opWellFormedness)
+        return undefined
+    } catch (error) {
+        // `OpDeclarationError` separates the operation name from the failed
+        // check's reason; the name is already the error's `operation` field, so
+        // the message carries only the reason — otherwise every diagnostic reads
+        // "operation "x": …" after the caller has already been told which one.
+        if (error instanceof OpDeclarationError) return error.reason
+        return error instanceof Error ? error.message : String(error)
+    }
 }
 
 // ── Declarations ─────────────────────────────────────────────────────────────
@@ -176,7 +288,13 @@ function handleFor<T>(name: string, handles: ReadonlyMap<string, T>): T {
 
 // ── Folds ────────────────────────────────────────────────────────────────────
 
-/** Every `fold` in a declaration, elaborated to an operation definition. */
+/**
+ * Every `fold` in a declaration, elaborated to an operation definition.
+ *
+ * Each fold is elaborated and then handed to the install step, which decides
+ * whether it holds up. Whether the definition agrees with the signature is the
+ * install step's question, so nothing is filtered here.
+ */
 function elaborateFolds(
     decl: DataDecl,
     types: readonly DataType[],
@@ -184,10 +302,9 @@ function elaborateFolds(
     const self = types.find((t) => t.name === decl.name)
     if (self === undefined) return []
     const published = publishedHandles(types)
-    return decl.items.flatMap((item) => {
-        if (item.kind !== "foldDecl") return []
-        return [elaborateFold(item, decl, self, published)]
-    })
+    return decl.items.flatMap((item) =>
+        item.kind === "foldDecl" ? [elaborateFold(item, decl, self, published)] : []
+    )
 }
 
 /**

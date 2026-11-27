@@ -38,6 +38,22 @@ If  Γ ⊢_surface s : σ   then   ℰ(Γ) ⊢_core ℰ(s) : σ
 This is the **type-preservation theorem** for elaboration. It ensures that the type checker only
 needs to handle the core calculus, not the full surface language.
 
+**The pipeline enforces it, it does not defer it.** Elaboration has a verdict: `elaborateProgram`
+returns `ok`, a per-operation `errors` list, and an `opRegistry` holding only the operations that
+hold up. Each emitted operation is checked against its declared signature by the core's own
+`opWellFormedness` — the same check `OpRegistry.declare` runs — so the verdict and the `Ω` entry are
+one judgement rather than two that could drift. A declaration that fails is absent from `Ω` and
+named in `errors`; the rest of the program stays usable.
+
+The single failure reason is `not-well-formed`: the emitted definition does not type as
+`paramTypes → resultType` (`lc.md` §2.4). One reason covers every way the two can disagree, because
+they are one condition — the signature comes from the spec (`in:` value, `out:` result), the
+definition from the arms, and `Ω` requires agreement component-wise. It also covers what the core's
+declaration checks reject beyond typing: a recursive body, whose self-reference `Ω`'s acyclicity
+rule forbids. Reporting recursion as an elaboration failure is honest — the operation genuinely
+cannot be installed — but it is not the language's final answer for recursion, which is a separate
+decision.
+
 ### 1.3 Elaboration is Semantics-Preserving
 
 **Goal:** The meaning of the surface program equals the meaning of the elaborated core program:
@@ -230,6 +246,16 @@ A surface `data` declaration elaborates to:
 4. **Map declarations**: see §4.4.
 5. **Merge declarations**: see §4.5.
 6. **Satisfies clause**: see §3.5.
+
+**A fold's `in:` is a parameter, not its carrier.** The emitted definition is always
+`λe:<declaring type>. fold_T e {…}` because the arms destructure the declaring type's variants, so
+the fold's parameter is fixed by where it is declared. An `in:` that names some other type declares
+a signature whose parameter disagrees with the definition, which is `not-well-formed` at elaboration
+rather than a type error inside generated text.
+
+What an `in:` _is_ — the fold's value argument, and, beyond the variant's fields, what an arm's
+trailing binding names — is `surface-syntax.md` §1 and `surface-grammar.md` §4.1's question, not
+this one.
 
 **Example:**
 

@@ -1303,19 +1303,54 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
     readonly opWellFormedness: OpWellFormedness = {
         checkDefinition: (op: OpSig): string | undefined => {
             // The definition must be a curried function over the declared
-            // parameters, returning the declared result type: peel one
-            // FunType layer per parameter, then check the body against
+            // parameters, returning the declared result type. Peel one FunType
+            // layer per parameter and compare each layer's domain against the
+            // declared parameter type, then check the residue against
             // resultType (up to subsumption — T-Sub at the result).
             const defType = this.typeCheckSource(op.definition)
             if (defType === undefined) {
                 return `definition does not type-check: "${op.definition}"`
             }
             let def = defType
-            for (const _ of op.paramTypes) {
+            for (const declared of op.paramTypes) {
                 if (!(def instanceof FunType)) {
                     return "definition is not a function of the declared arity"
                 }
+                // A parameter is *equal* to its declaration, not merely
+                // compatible with it. One-way contravariance would admit
+                // `Any -> τ` against a declared `N -> τ` and one-way
+                // covariance `Nothing -> τ`; either leaves the signature and
+                // the definition describing different operations, which is
+                // the divergence Ω exists to prevent. Mutual subtyping is the
+                // equality the lattice can express.
+                if (!isSubtype(declared, def.param) || !isSubtype(def.param, declared)) {
+                    return `parameter type ${def.param} does not match the declared ${declared}`
+                }
                 def = def.result
+            }
+            // More lambdas than declared parameters leave a function-typed
+            // residue. Checked before the result comparison because that
+            // comparison cannot see it: a FunType is <: Any by S-Top, so an
+            // over-applied definition would pass a `resultType` of `Any`
+            // unnoticed.
+            //
+            // A function-typed residue is legitimate only when the declared
+            // result type *is* that function type — `mkAdder <1>` returning
+            // `Nat → Nat` is a real operation, not an over-application. The
+            // two are distinguished by the declared result: if it is a
+            // FunType, the extra lambdas are its shape and the residue must
+            // equal it (`typeEquals`, so no subsumption slips through);
+            // otherwise an extra lambda is an arity error.
+            if (def instanceof FunType) {
+                if (op.resultType instanceof FunType) {
+                    if (!typeEquals(def, op.resultType)) {
+                        return `definition returns the function type ${def}, ` +
+                            `which is not the declared ${op.resultType}`
+                    }
+                    return undefined
+                }
+                return `definition takes more arguments than the declared arity ` +
+                    `(${op.paramTypes.length})`
             }
             if (!isSubtype(def, op.resultType)) {
                 return `definition returns ${def}, which is not <: ${op.resultType}`
