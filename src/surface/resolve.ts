@@ -62,6 +62,7 @@ export interface ResolutionError {
         | "bad-qualifier"
         | "selector-mismatch"
         | "arity-mismatch"
+        | "field-name-mismatch"
         | "duplicate-spec-key"
         | "wildcard-arm"
     readonly message: string
@@ -404,12 +405,24 @@ function validateArm(
 }
 
 /**
- * An arm head binds exactly the variant's fields.
+ * An arm head binds exactly the variant's fields, by the fields' own names.
  *
  * The count is exact, not a minimum. Too few leaves a field unnamed; too many
  * names a slot the emitted handler does not have, which the emitter would
  * silently drop — the failure mode that made a two-parameter fold elaborate to
  * a one-parameter definition.
+ *
+ * The names are exact too, and positionally so. The emitted handler is
+ * positional — `fold [M] e { M(b a) -> … }` binds `b` to the variant's first
+ * field — so a head that spells the fields in another order, or renames them,
+ * does not fail: it reads a different field and computes a different value. A
+ * construction's selector is compared as a *set* because there `x: … y: …`
+ * names each slot, but an arm head is a positional pattern with no `field:`
+ * tokens, so only the declared name at that position denotes the field.
+ *
+ * `_` is exempt from the name comparison at any position. Whether that is a
+ * discard or an ordinary identifier is undecided (`overview.md` §12.77): the
+ * exemption only says the checker does not report it for being a field name.
  */
 function validateArmBindings(
     fold: FoldDecl,
@@ -419,15 +432,36 @@ function validateArmBindings(
 ): void {
     const bound = arm.head.bindings.length
     const fields = variant.fields.length
-    if (bound === fields) return
+    if (bound !== fields) {
+        errors.push({
+            reason: "arity-mismatch",
+            message: bound < fields
+                ? `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
+                    `${fields} field(s) — every field must be named`
+                : `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
+                    `${fields} field(s) and \`fold ${fold.name}\` binds no extra argument — ` +
+                    `the \`in:\` value is read from the body as \`in\``,
+        })
+        return
+    }
+
+    const mismatched = variant.fields
+        .map((field, i) => ({
+            position: i + 1,
+            declared: field.name,
+            written: arm.head.bindings[i]!,
+        }))
+        .filter(({ declared, written }) => written !== "_" && written !== declared)
+    if (mismatched.length === 0) return
+
+    const problems = mismatched.map(({ position, declared, written }) =>
+        `position ${position} is \`${written}\`, but the field there is \`${declared}\``
+    )
     errors.push({
-        reason: "arity-mismatch",
-        message: bound < fields
-            ? `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
-                `${fields} field(s) — every field must be named`
-            : `the arm for "${variant.name}" binds ${bound} name(s), but the variant has ` +
-                `${fields} field(s) and \`fold ${fold.name}\` binds no extra argument — ` +
-                `the \`in:\` value is read from the body as \`in\``,
+        reason: "field-name-mismatch",
+        message: `the arm for "${variant.name}" binds ${problems.join("; ")} — an arm head ` +
+            `is a pattern over the declaration, so each binding is its field's own name ` +
+            `(\`_\` is exempt)`,
     })
 }
 

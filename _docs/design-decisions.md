@@ -562,12 +562,14 @@ of "is this well formed" is the defect, not the fix.
   resolver enforces the count exactly.
 - **A fold arm's head is a pattern, so it spells the fields' names.** Each binding for a variant's
   field must be that field's declared name; `M a b -> …` is the only spelling for `M`'s two fields,
-  and `M x y -> …` is an error rather than a rename. This is the construction rule read the other
-  way: a construction's keyword sequence equals the declared fields, so a fold arm's binding
-  sequence does too. `_` discards a field without naming it. The reason is uniform — a case arm _is_
-  a pattern-matching form, and a pattern that renames its subjects is not a destructuring of the
-  declared variant but a fresh set of bindings that happens to have the right arity. An **unfold**
-  arm is exempt: it binds the seed, which no variant declares, so its name is the author's choice.
+  and `M x y -> …` is an error rather than a rename. The check is **positional**: the emitted
+  handler is positional, so a head that reorders the names would read another field's value — a case
+  arm _is_ a pattern-matching form, and a pattern that renames its subjects is not a destructuring
+  of the declared variant but a fresh set of bindings that happens to have the right arity. A
+  construction's selector is the opposite case: it names each slot (`x: … y: …`), so it is compared
+  as a set and a reorder denotes the same value (`surface-grammar.md` §2.8). `_` discards a field at
+  any position without naming it. An **unfold** arm is exempt: it binds the seed, which no variant
+  declares, so its name is the author's choice.
 - **The one non-field binding is `in`.** A fold's extra argument has no declaration to agree with,
   so the language fixes its name: `in`, matching the spec record's key and the name a protocol
   default body uses — the same word in all three positions. The emitter must translate it when

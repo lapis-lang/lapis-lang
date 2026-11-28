@@ -119,7 +119,7 @@ const STACK_TOP = `data Stack
     Push value: Any rest: Family
     fold top <out: Stack>
         Empty -> Empty
-        Push x rest -> rest
+        Push value rest -> rest
 `
 
 Deno.test("elaborate: a fold becomes an operation with the spec's types", () => {
@@ -138,7 +138,7 @@ Deno.test("elaborate: the fold's definition is core concrete syntax", () => {
     // commas; a zero-field variant is a nullary construction.
     assertEquals(
         operations[0]?.definition,
-        "\\e:Stack. fold [Stack] e { Empty() -> Empty(), Push(x rest) -> rest }",
+        "\\e:Stack. fold [Stack] e { Empty() -> Empty(), Push(value rest) -> rest }",
     )
 })
 
@@ -308,17 +308,17 @@ Deno.test("elaborate: the fold evaluates through the core", () => {
     assertEquals((value as { variantName?: string }).variantName, "Empty")
 })
 
-Deno.test("elaborate: a fold's arm bindings are positional in field order", () => {
-    // `Fill x y` binds `x` to field `a` and `y` to field `b`, so returning `x`
-    // must yield `a`'s value. The fixture distinguishes the fields: `Empty` and
-    // `Push(…)` are different variants, so a swapped binding shows up as the
+Deno.test("elaborate: a fold's arm bindings follow the declaration's field order", () => {
+    // `Fill a b` binds the position, so returning `a` must yield the first
+    // field's value. The fixture distinguishes the fields: `Empty` and
+    // `Push(…)` are different variants, so a transposed head shows up as the
     // other value rather than as the same one.
     const { operations, registry } = pipeline(`data Box
     Empty
     Fill a: Any b: Any
     fold first <out: Any>
         Empty -> Empty
-        Fill x y -> x
+        Fill a b -> a
 `)
     const def = operations[0]?.definition ?? ""
     const value = evalOf(`(${def}) Fill(Empty(), Push(Empty(), Empty()))`, registry)[0]
@@ -326,6 +326,44 @@ Deno.test("elaborate: a fold's arm bindings are positional in field order", () =
     // non-empty would pass on a failed evaluation.
     assert(value !== undefined)
     assertEquals((value as { variantName?: string }).variantName, "Empty")
+})
+
+Deno.test("elaborate: an arm reads the field its binding names", () => {
+    // The end-to-end property behind the name rule. Both fields hold a `Nat` of
+    // a different magnitude, so reading the wrong slot changes the *value* and
+    // a transposition cannot hide behind two equal fields. The emitted handler
+    // keeps the surface names, so a reader of the core text sees the same
+    // binding the author wrote.
+    const source = (selected: string) =>
+        `data Nat
+    Zero
+    Succ pred: Family
+
+data M
+    X a: Nat b: Nat
+    fold pick <out: Nat>
+        X a b -> ${selected}
+`
+    const magnitude = (value: unknown): number => {
+        if (!(value instanceof VariantVal)) throw new Error("not a variant")
+        return value.variantName === "Zero" ? 0 : 1 + magnitude([...value.fields.values()][0])
+    }
+    const pick = (selected: string, term: string) => {
+        const { operations, registry, opRegistry } = pipeline(source(selected))
+        assertEquals(operations[0]?.definition, `\\e:M. fold [M] e { X(a b) -> ${selected} }`)
+        const forest = [
+            ...new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(term, new ValueEnv()),
+        ]
+        // A second derivation of the same term would still yield a value, so the
+        // forest's size is what proves the parse was unambiguous.
+        assertEquals(forest.length, 1)
+        return magnitude(forest[0])
+    }
+
+    // `X(Zero(), Succ(Zero()))` is `a = 0`, `b = 1`.
+    assertEquals(pick("a", "#pick(X(Zero(), Succ(Zero())))"), 0)
+    assertEquals(pick("b", "#pick(X(Zero(), Succ(Zero())))"), 1)
 })
 
 Deno.test("elaborate: `Self` means the declaring type, not the μ-bound", () => {
@@ -643,6 +681,91 @@ Deno.test("resolve: an arm binding fewer names than the variant has fields is re
     )
 })
 
+Deno.test("resolve: an arm head that renames its fields is reported", () => {
+    // The head is a pattern over the declaration, so a binding is that field's
+    // own name. A rename binds a name the variant does not declare, and the
+    // emitted handler — which is positional — would read a different field.
+    assertEquals(
+        reasonsOf(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        X x y -> x
+`),
+        ["field-name-mismatch"],
+    )
+})
+
+Deno.test("resolve: an arm head that transposes its fields is reported", () => {
+    // The count matches, so only a positional name check catches this. The
+    // emitted handler keeps the written names and binds them positionally, so
+    // the body would read field `b` while naming field `a`.
+    assertEquals(
+        reasonsOf(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        X b a -> a
+`),
+        ["field-name-mismatch"],
+    )
+})
+
+Deno.test("resolve: an arm head naming one field twice is reported", () => {
+    // Right count, wrong binding: field `b` is never named, so the emitted
+    // handler rebinds `a` over it.
+    assertEquals(
+        reasonsOf(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        X a a -> a
+`),
+        ["field-name-mismatch"],
+    )
+})
+
+Deno.test("resolve: an arm head binding the fields' names is accepted", () => {
+    assertEquals(
+        reasonsOf(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        X a b -> a
+`),
+        [],
+    )
+})
+
+Deno.test("resolve: `_` discards a field at any position", () => {
+    // `_` is the only binding that is not a name: it discards the field instead
+    // of binding it, so it is legal wherever a field's name is.
+    for (const head of ["X a _ -> a", "X _ b -> b", "X _ _ -> a"]) {
+        assertEquals(
+            reasonsOf(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        ${head}
+`),
+            [],
+            head,
+        )
+    }
+})
+
+Deno.test("resolve: a field-name mismatch names the position, field, and binding", () => {
+    // The message has to say which slot is wrong, or an author with a
+    // multi-field variant cannot find the transposition.
+    const [error] = resolveProgram(
+        new SurfaceParse().parseProgram(`data A
+    X a: Any b: Any
+    fold f <out: Any>
+        X b a -> a
+`)!,
+    ).errors
+    assert(error !== undefined)
+    assertEquals(error.reason, "field-name-mismatch")
+    assert(error.message.includes("position 1"), error.message)
+    assert(error.message.includes("`b`"), error.message)
+    assert(error.message.includes("`a`"), error.message)
+})
+
 Deno.test("resolve: a wildcard arm is reported until comb inheritance lands", () => {
     assertEquals(
         reasonsOf(`data A
@@ -759,11 +882,11 @@ data B
 data P
     P2 x: A y: B
     fold f <out: Any>
-        P2 a b -> (P2 y: B1 x: A1)
+        P2 x y -> (P2 y: B1 x: A1)
 `)
     assertEquals(
         operations[0]?.definition,
-        "\\e:P. fold [P] e { P2(a b) -> (P2(A1(), B1())) }",
+        "\\e:P. fold [P] e { P2(x y) -> (P2(A1(), B1())) }",
     )
 })
 
