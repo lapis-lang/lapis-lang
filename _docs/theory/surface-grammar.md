@@ -82,14 +82,29 @@ operator characters, recognized by longest match among _declared_ operators.
 
 ```
 symbolicOp ::= ( "+" | "-" | "*" | "/" | "<" | ">" | "=" | "!" | "?" | "&" | "|" | "," | "." )+
+operationName ::= ident | symbolicOp
 ```
 
-Grouping characters are permitted inside a symbolic name (`<+>`, `<>`). A symbolic name is never a
-pattern: the two live in different lexical contexts (expression level vs. pattern level).
+The set is **closed and pinned**: those thirteen characters are the non-delimiter punctuation. Each
+excluded class is excluded for a reason, not by oversight:
 
-> **Open (spec §2.1).** The exact operator-character set is not pinned. The set above is the
-> candidate; the _rule_ — contiguous non-whitespace, longest match among declared operators — is
-> pinned.
+- **Parentheses, square brackets, braces** are core syntax — `( expr )` grouping, `t[τ]` type
+  application, fold/cofold handler braces. A name containing one would collide with the syntax
+  around it, and maximal munch would swallow the delimiter: with `(` in the set, `(+)` lexes as a
+  single name.
+- **`#`** marks a core operation application (`lc.md` §2.2), so it can never begin a surface name.
+- **Whitespace** delimits names, which is what lets a symbolic name sit beside a spec record —
+  `fold <+> <out: Self>` is unambiguous because the space separates the name from `<`.
+- **Angle brackets are inside the set.** `<` and `>` are not delimiters in the core, so `<+>` and
+  `<>` are legal operation names.
+
+A symbolic name is never a pattern: the two live in different lexical contexts (expression level vs.
+pattern level), and no pattern's symbolic prefix is drawn from this alphabet.
+
+The name is declared by `foldDecl` (`fold <name> …`), so a symbolic operation needs no alias —
+`fold
++` declares the operation named `+`. In core text that name is written `#+(a, b)` (`lc.md`
+§2.2).
 
 ### 2.4 Literals
 

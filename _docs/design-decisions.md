@@ -479,15 +479,20 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
   "expecting an operator" (infix — try operators > identifiers for named sends). Whitespace is
   consumed between tokens in both modes.
 - **Operation name rules**: symbolic (`+`, `<=`, `<+>`, `<>`, `==`) or named (`add`, `lessThan`). No
-  spaces — an operation name is a contiguous sequence of non-whitespace characters. Can include
-  grouping characters (`<`, `>`, `(`, `)`, `[`, `]`, `{`, `}`) as part of the name. Recognized in
+  spaces — an operation name is a contiguous sequence of non-whitespace characters. Recognized in
   infix position only. Longest match among declared operators. **Can never be patterns** — they're
-  in a different lexical context (expression level, not pattern level). Character set for symbolic
-  operators: any non-whitespace, non-alphanumeric character; multi-character operators are sequences
-  of these.
+  in a different lexical context (expression level, not pattern level). **The character set is
+  closed**: `+ - * / < > = ! ? & | , .` (`surface-grammar.md` §2.3). It excludes every core
+  delimiter — parentheses, brackets, braces, `:`, `\`, whitespace — because a name that could
+  contain a delimiter would collide with the syntax around it, and maximal munch would then swallow
+  the delimiters (`(+)` would lex as one name). Angle brackets are inside the set, so `<+>` is a
+  legal name; round, square and curly brackets are not.
 - **Naming convention**: PascalCase prefix = named constructor. Symbolic prefix (no whitespace) =
   pattern-matched constructor. camelCase infix = named operation. Symbolic infix = symbolic
   operation.
+- **A symbolic name IS the operation's name — it is not an alias.** Aliasing (one operation, several
+  names) has no surface spelling yet (`overview.md` §12.33), so a prelude row pairing `+` with `add`
+  describes two _distinct_ names, not one operation with two spellings.
 - **Uniform binary precedence** (Smalltalk model): ALL binary messages have the same precedence.
   Evaluated strictly left-to-right. `1 + 2 * 3` parses as `(1 + 2) * 3 = 9`. Explicit parentheses
   required for mathematical grouping: `1 + (2 * 3) = 7`. NO configurable or hierarchical operator
@@ -495,6 +500,40 @@ Verse has no algebraic-law story; the exploitation tier is unoccupied there too.
 - **Escaping in patterns**: special characters (`+ * ? [ ] \`) are escaped with `\` when meant
   literally. E.g., `[0-9]+\+[0-9]+j` for complex numbers — the `\+` is a literal `+` inside the
   token, while the unescaped `+` after `[0-9]` is the quantifier.
+
+## Operation applications in core text carry the `#` sigil
+
+- **Every** operation application in core concrete syntax is `#name(args)` — `#add(a, b)`,
+  `#+(a, b)`, `#<+>(a, b)`. One rule, no conditionals: a symbolic name is not a special case.
+- **Why a spelling of its own at all.** An operation's name is whatever the surface declared, and
+  `lc.md` §2.2 says the named form _is_ "the symbolic identity of a fold". A symbolic name has no
+  spelling in a grammar whose name lexeme is identifiers, and `add(a, b)` is ambiguous with variable
+  application until the registry says otherwise. The sigil settles both at the lexeme.
+- **Why `#` and not a bracket form.** The spelling must be one the _surface cannot produce_, so no
+  user declaration can capture core-owned vocabulary. No surface operator character set contains
+  `#`, so `#+`/`#add` are outside the surface's name grammar. Bracketed forms fail this test: `(+)`
+  becomes spellable the moment `(` and `)` join the operator set, and each candidate bracket (`(`
+  `)` `[` `]` `{` `}`) is core syntax, so admitting one overlaps the operator alphabet with the
+  delimiter alphabet. This is the same reasoning that spells the core-owned raw-text type `@Token`
+  (`lc.md` §2.1), which names `#name` as the precedent.
+- **Why uniform rather than "sigil only for symbolic names".** A conditional sigil needs an
+  `isSymbolic` test at every text boundary — render, parse, the declaration gate, the dependency
+  scan, and the law machinery's obligation interpolation — and each test is a place the two sides
+  can disagree. Uniform also buys a parse that does not consult `Ω` to identify the form.
+- **The surface's `#` already means this.** The surface uses `#` for a spec record's `aux #name`
+  entry and for a law argument's keyword-part reference (`identity: #add`). Both denote an
+  operation, so they are the _same_ form as an application rather than a third kind of thing. The
+  reference-vs-value distinction is `overview.md` §12.6; what this decision fixes is the _spelling_
+  of an application, which the surface had none of before.
+- **The registry gate stays a prefix, and it is not what identifies the form.** The sigil identifies
+  the form syntactically; the gate still runs before the argument list is parsed, because parsing
+  arguments the registry will reject is work the backtracking engine repeats at every enclosing
+  alternative — a combinatorial blowup on exactly the nested terms law screening generates
+  (`#op(#op(a))`).
+- **Round-tripping.** `renderOperationName` and `parseOperationName` (`src/core/ops.ts`) are total
+  and mutually inverse, so core text carries no side table, no counter, and no compilation-order
+  dependence. A numeric tag would have needed all three, and would make two compilation units mint
+  colliding names.
 
 ## Elaboration has a verdict
 

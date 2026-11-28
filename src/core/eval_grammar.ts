@@ -1018,28 +1018,16 @@ export class LCEval extends AbstractLC<EvalShape> {
      * is never inlined into the parse input, keeping operation identity
      * recognizable to law-aware passes.
      */
-    // op(t₁, ..., tₙ)  — E-Op (definition application via _forward)
+    // #op(t₁, ..., tₙ)  — E-Op (definition application via _forward)
     @rule({ rule: "E-Op", production: "opProd" })
     protected override opProd(ctx: unknown): Parser<Value> {
-        return seq(
-            this.opIdent,
-            char("("),
-            this.ws,
-        ).bind(([opName]) => {
-            const opSig = this.opRegistry.lookup(opName)
-            if (!opSig) {
-                return empty<Value>()
-            }
-            return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
-                .bind((args) =>
-                    seq(this.ws, char(")"))
-                        .map(() =>
-                            // Capture phase: inside a body parsed only for its
-                            // span, an application must not run — it fires
-                            // when the body is replayed via `_forward`.
-                            isCapturing(ctx) ? PLACEHOLDER : this.evalOp(opSig, args)
-                        )
-                )
+        return this.opCall(ctx).bind(([opSig, args]) => {
+            // Capture phase: inside a body parsed only for its span, an
+            // application must not run — it fires when the body is replayed
+            // via `_forward`.
+            return epsilon(
+                isCapturing(ctx) ? PLACEHOLDER : this.evalOp(opSig, args),
+            )
         })
     }
 

@@ -1478,23 +1478,11 @@ export class LCTypeCheck extends AbstractLC<TypeCheckShape> {
      * enforced here because `@requires` is declarative metadata, not a
      * runtime check.
      */
-    // op(t₁, ..., tₙ)  — T-Op via bind (type-checks signature premises)
+    // #op(t₁, ..., tₙ)  — T-Op via bind (type-checks signature premises)
     @rule
     protected override opProd(ctx: unknown): Parser<Type> {
-        return seq(
-            this.opIdent,
-            char("("),
-            this.ws,
-        ).bind(([opName]) => {
-            const opSig = this.opRegistry.lookup(opName)
-            if (!opSig) {
-                return empty<Type>()
-            }
-            return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
-                .bind((args) =>
-                    seq(this.ws, char(")"))
-                        .map(() => this.checkOpPremises(opSig, args))
-                )
+        return this.opCall(ctx).bind(([opSig, args]) => {
+            return epsilon(this.checkOpPremises(opSig, args))
                 .bind((result) => result === undefined ? empty<Type>() : epsilon<Type>(result))
         })
     }

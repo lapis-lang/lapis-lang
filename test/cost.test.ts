@@ -276,7 +276,7 @@ Deno.test("certified: addZero — the fold-composition shape stays polynomial", 
             "addZero",
             [nat, nat],
             nat,
-            "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Succ(add(p, b)) }",
+            "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Succ(#add(p, b)) }",
         ),
         tc.opWellFormedness,
     )
@@ -355,7 +355,7 @@ Deno.test("certified: map → fold certifies with no flag (affine constructors)"
     // A consuming fold over incList's result: the scrutinee edge's producer
     // (the op) has a closed size — the edge certifies.
     const sumReport = analyzeTerm(
-        "fold [List] incList(l) { Nil() -> Zero(), Cons(h t) -> Succ(h) }",
+        "fold [List] #incList(l) { Nil() -> Zero(), Cons(h t) -> Succ(h) }",
         registry,
         omega,
         new Map([["l", list]]),
@@ -695,7 +695,7 @@ Deno.test("CostPass: the tree entry composes the memoized op summary", () => {
         tc.opWellFormedness,
     )
 
-    const source = "double(Succ(Zero()))"
+    const source = "#double(Succ(Zero()))"
     const tree = tc.parseToTree(source).trees[0]
     assert(tree !== undefined)
     const pass = new CostPass(registry, omega)
@@ -744,7 +744,7 @@ Deno.test("CostPass: the memo does not leak across reports (per-report walk stat
     )
     const pass = new CostPass(registry, omega)
 
-    const first = pass.evaluateReport(tc.parseToTree("double(Succ(Zero()))").trees[0]!)
+    const first = pass.evaluateReport(tc.parseToTree("#double(Succ(Zero()))").trees[0]!)
     assert(first !== undefined)
     // The eager argument composes with the instantiated callee summary:
     // the arg's construction (2 nodes) + the fold's instantiated cost
@@ -779,7 +779,7 @@ Deno.test("CostPass: a divergent Ω surfaces the tree's unknown-op names as resi
         ),
         tc.opWellFormedness,
     )
-    const tree = tc.parseToTree("double(Succ(Zero()))").trees[0]!
+    const tree = tc.parseToTree("#double(Succ(Zero()))").trees[0]!
     const divergentPass = new CostPass(registry, new OpRegistry())
     const report = divergentPass.evaluateReport(tree)
     assert(report !== undefined)
@@ -873,7 +873,7 @@ Deno.test("regression: multiplicative feedback does NOT close to a linear bound"
             "pow2",
             [nat, nat],
             nat,
-            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Succ(Zero()), Succ(p) -> mul(y, p) }",
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Succ(Zero()), Succ(p) -> #mul(y, p) }",
         ),
         tc.opWellFormedness,
     )
@@ -901,7 +901,7 @@ Deno.test("regression: additive growth with a symbolic factor still closes", () 
             "grow",
             [nat, nat],
             nat,
-            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> y, Succ(p) -> Succ(mul(y, y)) }",
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> y, Succ(p) -> Succ(#mul(y, y)) }",
         ),
         tc.opWellFormedness,
     )
@@ -917,7 +917,7 @@ Deno.test("regression: a sum-scrutinee's FULL size drives the recurrence", () =>
     // `variables()[0]` pick dropped |n|, understating the result as 1 + |m|.
     const fixtures = createOpFixtures()
     const report = analyzeTerm(
-        "fold [Nat] add(m, n) { Zero() -> Zero(), Succ(p) -> Succ(p) }",
+        "fold [Nat] #add(m, n) { Zero() -> Zero(), Succ(p) -> Succ(p) }",
         fixtures.registry,
         fixtures.opRegistry,
         new Map([["m", fixtures.nat], ["n", fixtures.nat]]),

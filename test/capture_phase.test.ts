@@ -128,35 +128,35 @@ Deno.test("capture: a recursive operation terminates on its base case", () => {
     // before any value had descended.
     const { evaluator: ev } = harness(
         "down",
-        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> down(pred) }",
+        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> #down(pred) }",
     )
-    assertEquals(evaluate(ev, "down(Zero())"), "Zero()")
+    assertEquals(evaluate(ev, "#down(Zero())"), "Zero()")
 })
 
 Deno.test("capture: a recursive operation descends and returns", () => {
     const { evaluator: ev } = harness(
         "down",
-        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> down(pred) }",
+        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> #down(pred) }",
     )
     // Three successors still bottom out at `Zero()`, so the descent is real
     // rather than a single step that happens to be correct.
-    assertEquals(evaluate(ev, "down(Succ(Succ(Succ(Zero()))))"), "Zero()")
+    assertEquals(evaluate(ev, "#down(Succ(Succ(Succ(Zero()))))"), "Zero()")
 })
 
 Deno.test("capture: an unreachable arm's operation is never applied", () => {
     // The two bodies differ only in an operation call inside the `Succ` arm.
-    // `main(Zero())` never selects that arm, so the two must cost the same.
+    // `#main(Zero())` never selects that arm, so the two must cost the same.
     const quiet = harness(
         "main",
         "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> Zero() }",
     )
     const calling = harness(
         "main",
-        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> id(pred) }",
+        "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> #id(pred) }",
     )
     assertEquals(
-        applications(calling.evaluator, "main(Zero())"),
-        applications(quiet.evaluator, "main(Zero())"),
+        applications(calling.evaluator, "#main(Zero())"),
+        applications(quiet.evaluator, "#main(Zero())"),
         "an unselected fold arm must not apply an operation",
     )
 })
@@ -171,11 +171,11 @@ Deno.test("capture: the selected arm's operation IS applied", () => {
     )
     const calling = harness(
         "main",
-        "\\e:Nat. fold [Nat] e { Zero() -> id(Zero()), Succ(pred) -> Zero() }",
+        "\\e:Nat. fold [Nat] e { Zero() -> #id(Zero()), Succ(pred) -> Zero() }",
     )
     assert(
-        applications(calling.evaluator, "main(Zero())") >
-            applications(quiet.evaluator, "main(Zero())"),
+        applications(calling.evaluator, "#main(Zero())") >
+            applications(quiet.evaluator, "#main(Zero())"),
         "a selected fold arm must apply its operation",
     )
 })
@@ -189,7 +189,7 @@ Deno.test("capture: a fold arm body referencing a field computes", () => {
         "peel",
         "\\e:Nat. fold [Nat] e { Zero() -> Zero(), Succ(pred) -> pred }",
     )
-    assertEquals(evaluate(ev, "peel(Succ(Zero()))"), "Zero()")
+    assertEquals(evaluate(ev, "#peel(Succ(Zero()))"), "Zero()")
 })
 
 Deno.test("capture: a lambda body computes when applied", () => {
@@ -197,5 +197,5 @@ Deno.test("capture: a lambda body computes when applied", () => {
         "apply",
         "\\x:Nat. x",
     )
-    assertEquals(evaluate(ev, "apply(Zero())"), "Zero()")
+    assertEquals(evaluate(ev, "#apply(Zero())"), "Zero()")
 })

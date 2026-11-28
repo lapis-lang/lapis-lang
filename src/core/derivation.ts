@@ -990,7 +990,7 @@ function unfoldOne(fold: Extract<Term, { k: "fold" }>, registry: TypeRegistry): 
  * The E-Op computation rule at the symbolic level: apply a definition to
  * constructor-pattern operands.
  *
- * `op(v₁, …, vₙ)` with every `vᵢ` a constructor-pattern term (a closed
+ * `#op(v₁, …, vₙ)` with every `vᵢ` a constructor-pattern term (a closed
  * constructor spine, possibly over the case's field variables — a case
  * pattern is the symbolic counterpart of the VALUE the evaluator would
  * have) unfolds to the definition's body with the parameters substituted —
@@ -1449,7 +1449,7 @@ function matchPattern(
  * constructor/op structure). As a subterm rewrite PATTERN such a side
  * matches every subterm — using it as `from` rewrites any subterm into the
  * side's other direction (e.g. `add(a, Zero) ≡ a` used backwards turns an
- * arbitrary subterm into `add(subterm, Zero)`), growing the obligation
+ * arbitrary subterm into `#add(subterm, Zero)`), growing the obligation
  * instead of reducing it. Whole-side matching is unaffected (there `from`
  * must equal a whole obligation side exactly — no wildcard). The axiom
  * move therefore orients subterm rewrites only from a STRUCTURAL side to a

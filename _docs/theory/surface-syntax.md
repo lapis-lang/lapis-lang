@@ -294,9 +294,16 @@ another. See [`design-decisions.md`](../design-decisions.md) §"Symbolic operati
 **Symbolic operation names:** Binary operators are fold names. They can be symbolic (`+`, `*`, `<`,
 `<=`, `<+>`, `<>`) or named (`add`, `mul`, `lessThan`). Symbolic operators are recognized by longest
 match among declared operators. Multi-character operators (`<=`, `==`, `<>`, `<+>`) are supported.
-Operation names are contiguous non-whitespace sequences; they can include grouping characters (`<`,
-`>`, `(`, `)`, `[`, `]`, `{`, `}`). They can never be patterns — they're in a different lexical
-context (expression level, not pattern level).
+Operation names are contiguous non-whitespace sequences of the operator characters
+`+ - * / < > = ! ? & | , .` — the set is closed and pinned in
+[`surface-grammar.md`](./surface-grammar.md) §2.3. They can never be patterns — they're in a
+different lexical context (expression level, not pattern level).
+
+**Grouping characters are not operator characters.** Parentheses, square brackets and braces are
+core syntax (`( expr )` grouping, `t[τ]` type application, fold/cofold handler braces), so a name
+containing one would collide with the syntax around it and maximal munch would swallow the
+delimiters — `(+)` would lex as a single name. Angle brackets are inside the operator set (`<+>` is
+a legal name); the rest are outside it.
 
 **Position discriminates data from operations:** Symbolic characters in prefix position (start of
 token) are pattern-matched constructors (data introduction). Symbolic characters in infix position

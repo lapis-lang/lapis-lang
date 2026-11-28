@@ -1,6 +1,6 @@
 /**
  * Operation symbols tests — verify the Ω environment (OpRegistry), the
- * `op(t₁, ..., tₙ)` term form (opProd), T-Op (typing), and E-Op (evaluation).
+ * `#op(t₁, ..., tₙ)` term form (opProd), T-Op (typing), and E-Op (evaluation).
  *
  * See _docs/theory/lc.md §2.2 (op form), §2.4 (Ω), §2.5 (well-formedness), §3 (E-Op/E-OpArg), §5
  * (T-Op).
@@ -84,20 +84,20 @@ Deno.test("Ω: declare accepts an acyclic chain (mul references earlier add)", (
 
 Deno.test("Ω: declare rejects self-reference", () => {
     const ops = new OpRegistry()
-    const bad = new OpSig("loop", [nat, nat], nat, "loop(a, b)")
+    const bad = new OpSig("loop", [nat, nat], nat, "#loop(a, b)")
     assertThrows(() => ops.declare(bad, permissive), OpDeclarationError)
 })
 
 Deno.test("Ω: declare rejects forward reference", () => {
     const ops = new OpRegistry()
-    const bad = new OpSig("early", [nat, nat], nat, "late(a, b)")
+    const bad = new OpSig("early", [nat, nat], nat, "#late(a, b)")
     assertThrows(() => ops.declare(bad, permissive), OpDeclarationError)
 })
 
 Deno.test("Ω: declare rejects the cyclic A↔B pair", () => {
     const ops = new OpRegistry()
-    const a = new OpSig("opA", [nat, nat], nat, "opB(x, y)")
-    const b = new OpSig("opB", [nat, nat], nat, "opA(x, y)")
+    const a = new OpSig("opA", [nat, nat], nat, "#opB(x, y)")
+    const b = new OpSig("opB", [nat, nat], nat, "#opA(x, y)")
     assertThrows(() => ops.declare(a, permissive), OpDeclarationError)
     assertThrows(() => ops.declare(b, permissive), OpDeclarationError)
 })
@@ -105,13 +105,12 @@ Deno.test("Ω: declare rejects the cyclic A↔B pair", () => {
 // ── Acyclicity scan: lexical scope and exclusions ─────────────────────────────
 //
 // The dependency check is a lexical scan, not a token-level one (declare runs
-// before parsing infrastructure exists). These tests pin its exactness claim:
-// what it must match, what it must ignore, and that a missed exclusion fails
-// loudly (rejected declaration), never silently.
+// before parsing infrastructure exists). These tests pin its contract: the
+// sigil makes it exact, so nothing needs excluding and nothing may be missed.
 
 Deno.test("Ω: the scan's exclusions — built-in call forms are not op references", () => {
     // `match("p")` is a language-level call form (lc.md §2.2, T-Pattern), not
-    // an operation. A definition using it must declare cleanly.
+    // an operation, so a definition using it declares cleanly.
     const ops = new OpRegistry()
     ops.declare(
         new OpSig("usesMatch", [nat], nat, 'match("[0-9]+")'),
@@ -120,20 +119,17 @@ Deno.test("Ω: the scan's exclusions — built-in call forms are not op referenc
     assertEquals(ops.lookup("usesMatch") !== undefined, true)
 })
 
-Deno.test("Ω: the scan's lexical boundaries — what is not an op application", () => {
+Deno.test("Ω: the scan's boundaries — what is not an op application", () => {
     const ops = new OpRegistry()
-    // These definition shapes contain no genuine op references; each must
-    // declare cleanly (a phantom match would reject the declaration).
+    // These definition shapes contain no op references; each must declare
+    // cleanly (a phantom match would reject the declaration).
 
-    // Variable application is whitespace-delimited — `f (x)` is not `f(x)`:
-    // the whitespace breaks the ident-then-tight-paren shape.
+    // Variable application is whitespace-delimited — `f (x)` is not `f(x)`.
     ops.declare(
         new OpSig("wsApp", [nat], nat, "\\x:Nat. \\f:Nat -> Nat. f (x)"),
         permissive,
     )
-    // Variant construction is PascalCase — Zero() is not an op call, and the
-    // lookbehind prevents the mid-identifier phantom (`ero(`) that a naive
-    // lowercase-tail match would produce.
+    // Variant construction is PascalCase and carries no sigil.
     ops.declare(new OpSig("variantUse", [nat], nat, "Zero()"), permissive)
     // A bare variable mention (no paren) is not an application: `myOp` alone
     // does not report a dependency on an op of that name.
@@ -144,18 +140,38 @@ Deno.test("Ω: the scan's lexical boundaries — what is not an op application",
     assertEquals(ops.all().length, 3, "all three must declare cleanly")
 })
 
-Deno.test("Ω: the scan still catches genuine op references inside definitions", () => {
-    // The exclusions must not over-suppress: a real op application in a
-    // definition still requires the referenced op to be declared earlier.
+Deno.test("Ω: the scan ignores quoted pattern text", () => {
+    // A quoted pattern is not source code. A pattern whose TEXT looks like an
+    // operation reference (`#foo(`) must not report a dependency, so the scan
+    // strips quoted spans before matching.
+    const ops = new OpRegistry()
+    ops.declare(new OpSig("quoted", [nat], nat, 'match("#foo(bar)")'), permissive)
+    assertEquals(ops.lookup("quoted") !== undefined, true)
+})
+
+Deno.test("Ω: the scan catches a symbolic op reference", () => {
+    // Symbolic names are sigilled like any other, so a reference is visible to
+    // the dependency check (`#+(a, b)`, not `+(a, b)`).
     const ops = new OpRegistry()
     assertThrows(
-        () => ops.declare(new OpSig("refsUnknown", [nat], nat, "unknownOp(x)"), permissive),
+        () => ops.declare(new OpSig("usesPlus", [nat, nat], nat, "#+(a, b)"), permissive),
+        OpDeclarationError,
+        "not declared earlier",
+    )
+})
+
+Deno.test("Ω: the scan still catches genuine op references inside definitions", () => {
+    // The sigil must not over-suppress: a real op application in a definition
+    // still requires the referenced op to be declared earlier.
+    const ops = new OpRegistry()
+    assertThrows(
+        () => ops.declare(new OpSig("refsUnknown", [nat], nat, "#unknownOp(x)"), permissive),
         OpDeclarationError,
         "not declared earlier",
     )
     // And once declared, the reference is accepted (acyclic chain).
     ops.declare(new OpSig("known", [nat], nat, "\\x:Nat. x"), permissive)
-    ops.declare(new OpSig("refsKnown", [nat], nat, "known(x)"), permissive)
+    ops.declare(new OpSig("refsKnown", [nat], nat, "#known(x)"), permissive)
     assertEquals(ops.lookup("refsKnown") !== undefined, true)
 })
 
@@ -194,7 +210,7 @@ Deno.test("Ω: declare rejects an operation named with a built-in call form", ()
 Deno.test("Ω: an operation may be named with a reserved word", () => {
     // The op form's tight paren is positionally disjoint from every keyword
     // position (all whitespace-delimited), so keyword-named operations are
-    // declaraable and appliable — `fold(a, b)` is an op application.
+    // declaraable and appliable — `#fold(a, b)` is an op application.
     const ops = new OpRegistry()
     ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), permissive)
     assertEquals(ops.lookup("fold") !== undefined, true)
@@ -264,19 +280,19 @@ Deno.test("Ω: declare accepts a definition that is well-formed", () => {
 
 Deno.test("Ω: well-formedness checks against the earlier-declared operations", () => {
     // A definition referencing an earlier op type-checks with it in Ω:
-    // double(x) = add(x, x) requires `add`'s signature for T-Op inside the
+    // #double(x) = #add(x, x) requires `add`'s signature for T-Op inside the
     // definition. Declare in dependency order — the check sees it.
     const { ops, tc } = checkedOps()
     ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
     const sealed = ops.declare(
-        new OpSig("double", [nat], nat, "\\x:Nat. add(x, x)"),
+        new OpSig("double", [nat], nat, "\\x:Nat. #add(x, x)"),
         tc.opWellFormedness,
     )
     assertEquals(sealed.checked, true)
 })
 
 Deno.test("namespaces: a keyword-named op is positionally disjoint from the keyword forms", () => {
-    // `fold(a, b)` — tight paren — is the op application (the registry
+    // `#fold(a, b)` — tight paren — is the op application (the registry
     // gate resolves the reading; the keyword form needs `fold [T]`).
     const ops = new OpRegistry()
     ops.declare(new OpSig("fold", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), permissive)
@@ -285,7 +301,7 @@ Deno.test("namespaces: a keyword-named op is positionally disjoint from the keyw
     const typed = new LCTypeCheck()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("fold(Zero(), Zero())", new TypeEnv())
+        .parseWith("#fold(Zero(), Zero())", new TypeEnv())
     assert(typed.size === 1, "the tight-paren op form must type-check")
     assertEquals([...typed][0], nat)
 
@@ -293,7 +309,7 @@ Deno.test("namespaces: a keyword-named op is positionally disjoint from the keyw
     const evald = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("fold(Zero(), Zero())", new ValueEnv())
+        .parseWith("#fold(Zero(), Zero())", new ValueEnv())
     assert(evald.size === 1, "the op form must evaluate")
     const [val] = evald
     assert(val instanceof VariantVal)
@@ -314,21 +330,21 @@ Deno.test("namespaces: a keyword-named op is positionally disjoint from the keyw
 // ── T-Op: typing ──────────────────────────────────────────────────────────────
 
 Deno.test("T-Op: add(Zero(), Zero()) has type Nat", () => {
-    const result = typeForestOf("add(Zero(), Zero())")
+    const result = typeForestOf("#add(Zero(), Zero())")
     assert(result.size === 1, "should have exactly one parse")
     const [type] = result
     assertEquals(type, nat)
 })
 
 Deno.test("T-Op: add(Succ(Zero()), Zero()) has type Nat", () => {
-    const result = typeForestOf("add(Succ(Zero()), Zero())")
+    const result = typeForestOf("#add(Succ(Zero()), Zero())")
     assert(result.size === 1, "should have exactly one parse")
     const [type] = result
     assertEquals(type, nat)
 })
 
 Deno.test("T-Op: arity mismatch is rejected (add takes 2 args)", () => {
-    const result = typeForestOf("add(Zero())")
+    const result = typeForestOf("#add(Zero())")
     assertEquals(result.size, 0, "a 1-arg application of a 2-arg op must be rejected")
 })
 
@@ -339,7 +355,7 @@ Deno.test("T-Op: argument type mismatch is rejected", () => {
     const result = new LCTypeCheck()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("add(Zero(), True())", new TypeEnv())
+        .parseWith("#add(Zero(), True())", new TypeEnv())
     assertEquals(result.size, 0, "a Bool argument to add must be rejected")
 })
 
@@ -353,18 +369,18 @@ Deno.test("T-Op: unknown operation does not parse as an op application", () => {
 Deno.test("T-Op: subsumption — a Nat argument satisfies a Nat parameter", () => {
     // The premise is arg <: σᵢ (checked field-wise, like T-App's domain).
     // A Nat argument to add : Nat → Nat → Nat is accepted via S-Refl.
-    const result = typeForestOf("add(x, Zero())", new TypeEnv().extend("x", nat))
+    const result = typeForestOf("#add(x, Zero())", new TypeEnv().extend("x", nat))
     assert(result.size === 1, "a Nat argument must be accepted")
 })
 
 Deno.test("T-Op: Nothing argument propagates to the application type", () => {
     // An eagerly-evaluated arg of type Nothing makes the application
     // uninhabited (principle of explosion) — in either argument position.
-    const first = typeForestOf("add(x, Zero())", new TypeEnv().extend("x", Nothing))
+    const first = typeForestOf("#add(x, Zero())", new TypeEnv().extend("x", Nothing))
     assert(first.size === 1, "should have exactly one parse")
     assertEquals([...first][0], Nothing, "Nothing in the first arg propagates")
 
-    const second = typeForestOf("add(Zero(), x)", new TypeEnv().extend("x", Nothing))
+    const second = typeForestOf("#add(Zero(), x)", new TypeEnv().extend("x", Nothing))
     assert(second.size === 1, "should have exactly one parse")
     assertEquals([...second][0], Nothing, "Nothing in the second arg propagates")
 })
@@ -374,14 +390,14 @@ Deno.test("T-Op: a Nothing arg does not mask an arg type error", () => {
     // premise fails and the application is ill-typed (rejected), not Nothing:
     // a genuine type error must never be masked by Nothing propagation.
     const gamma = new TypeEnv().extend("x", Nothing).extend("b", bool)
-    const result = typeForestOf("add(x, b)", gamma)
+    const result = typeForestOf("#add(x, b)", gamma)
     assertEquals(result.size, 0, "the type error must win over Nothing propagation")
 })
 
 // ── E-Op: evaluation ──────────────────────────────────────────────────────────
 
 Deno.test("E-Op: add(Zero(), Zero()) evaluates to Zero", () => {
-    const result = evalForestOf("add(Zero(), Zero())")
+    const result = evalForestOf("#add(Zero(), Zero())")
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -390,7 +406,7 @@ Deno.test("E-Op: add(Zero(), Zero()) evaluates to Zero", () => {
 
 Deno.test("E-Op: add computes as if let-bound (2 + 1 = 3)", () => {
     // two = Succ(Succ(Zero())); one = Succ(Zero()); add(two, one) = 3 succs
-    const result = evalForestOf("add(Succ(Succ(Zero())), Succ(Zero()))")
+    const result = evalForestOf("#add(Succ(Succ(Zero())), Succ(Zero()))")
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -399,7 +415,7 @@ Deno.test("E-Op: add computes as if let-bound (2 + 1 = 3)", () => {
 
 Deno.test("E-Op: mul references add by name (acyclic chain computes)", () => {
     // mul(2, 2) = 4
-    const result = evalForestOf("mul(Succ(Succ(Zero())), Succ(Succ(Zero())))")
+    const result = evalForestOf("#mul(Succ(Succ(Zero())), Succ(Succ(Zero())))")
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -409,7 +425,7 @@ Deno.test("E-Op: mul references add by name (acyclic chain computes)", () => {
 Deno.test("E-Op: nested op application — add inside add's argument", () => {
     // add(add(1, 1), 1) = 3
     const result = evalForestOf(
-        "add(add(Succ(Zero()), Succ(Zero())), Succ(Zero()))",
+        "#add(#add(Succ(Zero()), Succ(Zero())), Succ(Zero()))",
     )
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
@@ -424,16 +440,16 @@ Deno.test("E-Op: escaping closure — op returning a function, applied later", (
     const { ops, tc } = checkedOps()
     ops.declare(new OpSig("add", [nat, nat], nat, "\\x:Nat. \\y:Nat. x"), tc.opWellFormedness)
     ops.declare(
-        new OpSig("mkAdder", [nat], new FunType(nat, nat), "\\x:Nat. \\y:Nat. add(x, y)"),
+        new OpSig("mkAdder", [nat], new FunType(nat, nat), "\\x:Nat. \\y:Nat. #add(x, y)"),
         tc.opWellFormedness,
     )
 
-    // Application requires whitespace in LC (`f x`, never `f(x)`): the
+    // Application requires whitespace in LC (`f x`, never `#f(x)`): the
     // closure escapes the op and is applied later, in the main input.
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("mkAdder(Succ(Zero())) (Succ(Zero()))", new ValueEnv())
+        .parseWith("#mkAdder(Succ(Zero())) (Succ(Zero()))", new ValueEnv())
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -516,7 +532,7 @@ Deno.test("well-formedness: a function-typed result must EQUAL the declared one"
 Deno.test("E-OpArg: arguments evaluate leftmost (strictness)", () => {
     // Both arguments are op applications themselves — evaluation must reduce
     // them to values before the definition applies (E-OpArg, structural).
-    const result = evalForestOf("add(add(Zero(), Zero()), add(Zero(), Zero()))")
+    const result = evalForestOf("#add(#add(Zero(), Zero()), #add(Zero(), Zero()))")
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -546,7 +562,7 @@ Deno.test("E-Op: an op returning an unfold stays observable after the window", (
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("(mkStream(Zero())).head", new ValueEnv())
+        .parseWith("(#mkStream(Zero())).head", new ValueEnv())
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -563,7 +579,7 @@ Deno.test("E-Op: a codata argument stays observable inside the definition window
         .setRegistry(registry)
         .setOpRegistry(ops)
         .parseWith(
-            "headOf((unfold [NatStream] Succ(Zero()) { head -> Succ(Zero()), tail -> self }))",
+            "#headOf((unfold [NatStream] Succ(Zero()) { head -> Succ(Zero()), tail -> self }))",
             new ValueEnv(),
         )
     assert(result.size === 1, "should have exactly one result")
@@ -590,7 +606,7 @@ Deno.test("E-Op: codata crosses two definition windows (chained ops)", () => {
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("headOf(mkStream(Zero()))", new ValueEnv())
+        .parseWith("#headOf(#mkStream(Zero()))", new ValueEnv())
     assert(result.size === 1, "should have exactly one result")
     const [val] = result
     assert(val instanceof VariantVal)
@@ -619,7 +635,7 @@ Deno.test("identity-survival: opProd nodes are retained in the derivation tree",
     // parseToTree retains @rule productions; opProd is one, so the tree
     // contains a labeled opProd node covering the application's span.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
-    const { forest, trees } = tc.parseToTree("add(Zero(), Zero())")
+    const { forest, trees } = tc.parseToTree("#add(Zero(), Zero())")
     assert(forest.size === 1)
     assert(trees.length === 1)
 
@@ -631,7 +647,7 @@ Deno.test("identity-survival: opProd nodes are retained in the derivation tree",
     }
     walk(trees[0]!.root)
     assertEquals(opNodes.length >= 1, true, "opProd node must be retained")
-    assertEquals(opNodes.some((n) => n.span.start === 0 && n.span.end === 19), true)
+    assertEquals(opNodes.some((n) => n.span.start === 0 && n.span.end === 20), true)
 })
 
 Deno.test("identity-survival: two applications of the same op are recognizable", () => {
@@ -642,7 +658,7 @@ Deno.test("identity-survival: two applications of the same op are recognizable",
     // left-recursion resolution duplicates ancestor labels in the tree, so
     // node counts are not a stable identity signal.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
-    const src = "add(add(Zero(), Zero()), add(Zero(), Zero()))"
+    const src = "#add(#add(Zero(), Zero()), #add(Zero(), Zero()))"
     const { trees } = tc.parseToTree(src)
     assert(trees.length === 1)
 
@@ -656,9 +672,9 @@ Deno.test("identity-survival: two applications of the same op are recognizable",
         for (const child of node.children) walk(child)
     }
     walk(trees[0]!.root)
-    assertEquals(spans.includes("0,45"), true, "outer op application retained")
-    assertEquals(spans.includes("4,23"), true, "first inner op application retained")
-    assertEquals(spans.includes("25,44"), true, "second inner op application retained")
+    assertEquals(spans.includes("0,48"), true, "outer op application retained")
+    assertEquals(spans.includes("5,25"), true, "first inner op application retained")
+    assertEquals(spans.includes("27,47"), true, "second inner op application retained")
 })
 
 // ── Namespace disambiguation ──────────────────────────────────────────────────
@@ -674,10 +690,10 @@ Deno.test("namespaces: a let-bound add is still applicable with whitespace", () 
 })
 
 Deno.test("namespaces: op application is not variable application", () => {
-    // add(Zero(), Zero()) with the tight paren is the op form — the let-bound
+    // #add(Zero(), Zero()) with the tight paren is the op form — the let-bound
     // shadow does not capture it.
     const result = typeForestOf(
-        "let add:Any = \\x:Nat. x in add(Zero(), Zero())",
+        "let add:Any = \\x:Nat. x in #add(Zero(), Zero())",
     )
     assert(result.size === 1, "the op form must type-check regardless of shadowing")
     const [type] = result
@@ -711,7 +727,7 @@ Deno.test("E-Op: arity mismatch against the signature is a diagnosable error", (
     const result = new LCEval()
         .setRegistry(registry)
         .setOpRegistry(ops)
-        .parseWith("add2(Zero())", new ValueEnv())
+        .parseWith("#add2(Zero())", new ValueEnv())
     assert(result.size === 1, "exactly one error value")
     const [val] = result
     assert(val instanceof EvalErrorValue)
@@ -724,7 +740,7 @@ Deno.test("E-Op: arity mismatch against the signature is a diagnosable error", (
 Deno.test("E-Op: a well-formed definition still evaluates deterministically", () => {
     // The guards must not reject legitimate op application: the standard
     // fixture op evaluates to exactly one value.
-    const result = evalForestOf("add(Succ(Zero()), Succ(Zero()))")
+    const result = evalForestOf("#add(Succ(Zero()), Succ(Zero()))")
     assert(result.size === 1, "deterministic single result")
     const [val] = result
     assert(val instanceof VariantVal)

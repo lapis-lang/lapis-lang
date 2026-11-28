@@ -444,7 +444,7 @@ function declareProj2(): { ops: OpRegistry; ev: LCEval } {
 
 Deno.test("screen: identity requires BOTH directions — proj2's right identity fails", () => {
     const { ops, ev } = declareProj2()
-    // proj2(Zero(), a) = a holds for e = Zero(), but proj2(a, Zero()) = Zero()
+    // #proj2(Zero(), a) = a holds for e = Zero(), but #proj2(a, Zero()) = Zero()
     // fails for a = Succ(p) — the RIGHT axiom is falsified.
     assertThrows(
         () =>
@@ -459,7 +459,7 @@ Deno.test("screen: identity requires BOTH directions — proj2's right identity 
 })
 
 Deno.test("screen: commutative falsified — the Cartesian sweep reaches a ≠ b", () => {
-    // proj2(x, y) = y is NOT commutative: proj2(a, b) = b but proj2(b, a) = a.
+    // #proj2(x, y) = y is NOT commutative: #proj2(a, b) = b but #proj2(b, a) = a.
     // The assignment sweep enumerates independent samples per variable (a and
     // b draw separately), so the falsifying pair a ≠ b is reachable — a cyclic
     // assignment would degenerate to the vacuous op(a, a) ≡ op(a, a) and pass.
@@ -477,8 +477,8 @@ Deno.test("screen: commutative falsified — the Cartesian sweep reaches a ≠ b
 })
 
 Deno.test("screen: absorbing requires BOTH directions — proj1 annihilates from the right only", () => {
-    // proj1(x, y) = fold over y returning x: proj1(z, a) = z (left absorbing
-    // HOLDS) but proj1(a, z) = a (right absorbing FAILS for a ≠ z). Screening
+    // #proj1(x, y) = fold over y returning x: #proj1(z, a) = z (left absorbing
+    // HOLDS) but #proj1(a, z) = a (right absorbing FAILS for a ≠ z). Screening
     // only the left axiom would pass this declaration.
     const tc = new LCTypeCheck().setRegistry(registry).setOpRegistry(opRegistry)
     const ops = new OpRegistry()
@@ -560,7 +560,7 @@ Deno.test("screen: an instance that evaluates to error sentinels is skipped, not
 })
 
 Deno.test("E: schema typing — a heterogeneous carrier is rejected (idempotent on trunc)", () => {
-    // trunc : (Nat, Bool) → Nat. The idempotent axiom is trunc(a, a) — the
+    // trunc : (Nat, Bool) → Nat. The idempotent axiom is #trunc(a, a) — the
     // schema sweeps ONE sample space through both operand slots, so a
     // heterogeneous carrier makes it ill-typed by construction (a Nat sample
     // in the Bool slot evaluates to a sentinel). Validation rejects it before
@@ -695,7 +695,7 @@ Deno.test("exploit: identity-elimination rewrites add(Zero(), t) to t without th
 
     // The rewrite is an equivalence with direct evaluation — the thesis
     // experiment: the declaration bought an optimization.
-    const direct = evalOf("add(Zero(), Succ(Succ(Succ(Zero()))))", new ValueEnv())[0]
+    const direct = evalOf("#add(Zero(), Succ(Succ(Succ(Zero()))))", new ValueEnv())[0]
     assert((direct as VariantVal).equals(t))
 })
 
@@ -744,10 +744,10 @@ Deno.test("Value.equals: nesting is compared", () => {
 
 Deno.test("screen inputs: op applications evaluate under bound sample envs", () => {
     // The screen's strategy: bind schema variables to samples and evaluate
-    // instance terms. `add(a, Succ(Zero()))` with `a` bound to `Succ(Zero())`
+    // instance terms. `#add(a, Succ(Zero()))` with `a` bound to `Succ(Zero())`
     // must evaluate to depth 2.
     const a = natOf(1)
-    const result = evalGrammar.parseWith("add(a, Succ(Zero()))", new ValueEnv().extend("a", a))
+    const result = evalGrammar.parseWith("#add(a, Succ(Zero()))", new ValueEnv().extend("a", a))
     assertEquals(result.size, 1)
     const [value] = result
     assert(value instanceof VariantVal)
@@ -833,7 +833,7 @@ function identityFoldHolds(src: string): boolean {
  * minimal counterexample.
  */
 function idempotentMulHolds(src: string): boolean {
-    return mustEval(`mul(${src}, ${src})`).equals(mustEval(src))
+    return mustEval(`#mul(${src}, ${src})`).equals(mustEval(src))
 }
 
 Deno.test("forAll: identity-fold law holds over 200 generated Nat values", () => {

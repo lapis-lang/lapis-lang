@@ -87,7 +87,16 @@ export {
 export { isSubtype, join, meet, typeEquals } from "./subtyping.ts"
 
 // Operation symbols (lc.md §2.2 (op form), §2.4 (Ω), §2.5 (well-formedness, acyclicity))
-export { OpDeclarationError, OpRegistry, OpSig, scanOpReferences } from "./ops.ts"
+export {
+    isOperationName,
+    OP_NAME_SIGIL,
+    OpDeclarationError,
+    OpRegistry,
+    OpSig,
+    parseOperationName,
+    renderOperationName,
+    scanOpReferences,
+} from "./ops.ts"
 export type { CheckedOpSig } from "./ops.ts"
 
 // Law derivation (type-algebra.md §6 — the derivable regime: the BMF

@@ -67,16 +67,28 @@ t, u ::= x                              variable
        | Λα <: σ. t                     type abstraction
        | t [τ]                          type application
        | let x:σ = t in u               let-binding
-       | op(t₁, ..., tₙ)                named operation application
+       | #op(t₁, ..., tₙ)               named operation application
 ```
 
-`op(t₁, ..., tₙ)` is the application of a _named operation_ — the symbolic identity of a fold
-declared in the surface language. It elaborates from surface operator use (`a + b` → `add(a, b)`)
-and is _definitional_ sugar: `Ω` maps each operation name to its defining LC term, so
-`op(t₁, ..., tₙ)` computes by applying the definition. The form exists so that operation identity
-survives `let`-inlining and substitution: an optimizer can recognize two occurrences as the same
-algebraic operation, which anonymous folds cannot express. Laws are attached to the operation _name_
-in `E`, never to the term.
+`#op(t₁, ..., tₙ)` is the application of a _named operation_ — the symbolic identity of a fold
+declared in the surface language. It is _definitional_ sugar: `Ω` maps each operation name to its
+defining LC term, so `#op(t₁, ..., tₙ)` computes by applying the definition. The form exists so that
+operation identity survives `let`-inlining and substitution: an optimizer can recognize two
+occurrences as the same algebraic operation, which anonymous folds cannot express. Laws are attached
+to the operation _name_ in `E`, never to the term.
+
+**The sigil (`#`) is part of the form, and it is uniform.** Every operation application carries it,
+whether the name is alphanumeric (`#add(a, b)`) or symbolic (`#+(a, b)`, `#<+>(a, b)`). The reason
+is the one `@Token` gives for its own sigil (§2.1): an operation's name is whatever the surface
+declared, and a symbolic name has no spelling in a lexeme that admits only identifiers. A bracket
+form could not serve — every candidate bracket is core syntax, so it would overlap the operator
+alphabet with the delimiter alphabet. Uniformity is what lets the spelling be a total, invertible
+function of the name, so core text round-trips with no side table. A name may be symbolic, so `<+>`
+is one operation name, not three operator characters.
+
+**Surface operators are operation applications.** `a + b` elaborates to `#+(ℰ(a), ℰ(b))`, and the
+postfix send `b negate` to `#negate(ℰ(b))` (§2.4 of `elaboration.md`). The core has no infix level;
+the operator's symbol is applied like any other operation name.
 
 **Operation names and the keywords.** The op form is positionally disjoint from every keyword form:
 the paren is tight (`fold(a, b)` — no whitespace), while every keyword position is

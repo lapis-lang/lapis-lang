@@ -1045,7 +1045,7 @@ Deno.test("elaborate: a non-carrier size computes by structural recursion", () =
         return value === undefined ? undefined : magnitude(value)
     }
 
-    assertEquals(size("size(Nil())"), 0)
-    assertEquals(size("size(Cons(Zero(), Nil()))"), 1)
-    assertEquals(size("size(Cons(Zero(), Cons(Zero(), Nil())))"), 2)
+    assertEquals(size("#size(Nil())"), 0)
+    assertEquals(size("#size(Cons(Zero(), Nil()))"), 1)
+    assertEquals(size("#size(Cons(Zero(), Cons(Zero(), Nil())))"), 2)
 })

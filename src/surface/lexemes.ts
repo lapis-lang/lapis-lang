@@ -7,6 +7,7 @@
  */
 
 import { char, empty, epsilon, literal, or, type Parser, pred } from "@lapis-lang/lang-forma"
+import { isSymbolicOpChar as coreIsSymbolicOpChar } from "../core/ops.ts"
 
 /**
  * The keywords of §2.5.
@@ -46,8 +47,17 @@ export const isLowerStart = (c: string): boolean => /[a-z_]/.test(c)
 /** `alphaUpper ::= "A" … "Z"` (§2.1). */
 export const isUpperStart = (c: string): boolean => /[A-Z]/.test(c)
 
-/** The characters a symbolic operation name may be built from (§2.3). */
-export const isSymbolicOpChar = (c: string): boolean => "+-*/<>=!?&|,.".includes(c)
+/**
+ * The characters a symbolic operation name may be built from
+ * (`surface-grammar.md` §2.3).
+ *
+ * Delegates to the core's definition rather than restating it: the surface
+ * operator lexeme and the core operation-name lexeme index the same language,
+ * and two copies of an alphabet drift. The set is the non-delimiter
+ * punctuation, which is what keeps the operator alphabet disjoint from the
+ * core's syntax alphabet.
+ */
+export const isSymbolicOpChar = coreIsSymbolicOpChar
 
 /**
  * Follow an identifier-continuation character, greedily, into a string.
@@ -98,8 +108,8 @@ export const pascalIdent: Parser<string> = pred(isUpperStart, "<pascal-start>")
     )
 
 /**
- * A symbolic operation name (§2.3): a contiguous run of operator characters,
- * recognised by longest match among *declared* operators.
+ * A symbolic operation name (`surface-grammar.md` §2.3): a contiguous run of
+ * operator characters, recognised by longest match among *declared* operators.
  *
  * The longest-match refinement needs the declaration table and so belongs to
  * name resolution; this production accepts any run. Resolution does **not** yet

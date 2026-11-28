@@ -2314,7 +2314,10 @@ export class CostPass extends SemanticPass<CostPassShape> {
      * op, the summary comes from Ω once).
      */
     protected opProd(node: DerivationNode, _children: readonly DeferredSummary[]): DeferredSummary {
-        const nameNode = directChildren(node, "ident")[0]
+        // The lexeme is `opIdent`'s (the operation-name production), not
+        // `ident`'s: an operation name may be symbolic, and `ident` only ever
+        // admits camelCase.
+        const nameNode = directChildren(node, "opIdent")[0]
         if (nameNode === undefined) {
             // The wrapper form (the checker's appProd recomposition): a
             // single exprProd child flows through — the arg-bearing opProd

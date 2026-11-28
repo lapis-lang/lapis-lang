@@ -219,7 +219,7 @@ export function createOpFixtures(): OpTestFixtures {
             // mul = fold over x: Zero → Zero; Succ(p) → add(y, p).
             // p IS mul(pred(x), y); the handler references the earlier-declared
             // add by name — an acyclic chain (declaration-order stratification).
-            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Zero(), Succ(p) -> add(y, p) }",
+            "\\x:Nat. \\y:Nat. fold [Nat] x { Zero() -> Zero(), Succ(p) -> #add(y, p) }",
         ),
         tc.opWellFormedness,
     )
@@ -234,7 +234,7 @@ export function createOpFixtures(): OpTestFixtures {
  * values: `Zero()` | `Succ(nat)`.
  *
  * The law harness needs samples it can embed into law instances
- * (`mul(${src}, ${src})`) and evaluate through `LCEval` — so the semantic
+ * (`#mul(${src}, ${src})`) and evaluate through `LCEval` — so the semantic
  * action emits the concrete syntax itself. The `@rule` decoration on
  * `natProd` is load-bearing: it routes the production through lang-forma's
  * recursion-depth machinery, without which the generator's `Succ` branch
