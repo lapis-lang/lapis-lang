@@ -960,10 +960,11 @@ data Holder
 })
 
 Deno.test("elaborate: an operation the core cannot install is `not-well-formed`", () => {
-    // A recursive fold's body names itself, which `Ω`'s acyclicity rule rejects
-    // — an operation may only reference operations declared before it. The
-    // failure surfaces against the operation rather than being emitted as text
-    // that no consumer could install.
+    // A **self-call** names an operation from inside its own body, which `Ω`'s
+    // acyclicity rule rejects — an operation may only reference operations
+    // declared before it. The failure surfaces against the operation rather
+    // than being emitted as text that no consumer could install. Structural
+    // recursion is a different shape: it never names itself, so it installs.
     const result = elaborateVerdictOf(`data Stack
     Empty
     Cons value: Any rest: Family
@@ -971,7 +972,6 @@ Deno.test("elaborate: an operation the core cannot install is `not-well-formed`"
         Empty -> Empty
         Cons v r -> (r size)
 `)
-    assertEquals(result.ok, false)
     assertEquals(result.errors.map((e) => e.reason), ["not-well-formed"])
     assertEquals(result.errors[0]?.operation, "size")
 })
@@ -1048,4 +1048,122 @@ Deno.test("elaborate: a non-carrier size computes by structural recursion", () =
     assertEquals(size("#size(Nil())"), 0)
     assertEquals(size("#size(Cons(Zero(), Nil()))"), 1)
     assertEquals(size("#size(Cons(Zero(), Cons(Zero(), Nil())))"), 2)
+})
+
+// ── Operation application ───────────────────────────────────────────────────
+//
+// A unary send is the surface's application form (`surface-syntax.md` §2.3):
+// `recv name` eliminates its receiver and applies the operation to it, so a
+// send inside a body is how one declared operation is used from another. The
+// emitted text is the core's sigilled application, `#name(arg)`.
+
+const APPLY = `data Nat
+    Zero
+    Succ pred: Family
+
+data List
+    Nil
+    Cons head: Nat rest: Family
+
+    fold size <out: Nat>
+        Nil -> Zero
+        Cons head rest -> Succ pred: rest
+
+data Box
+    B inner: List
+
+    fold sizeOf <out: Nat>
+        B inner -> inner size
+`
+
+Deno.test("elaborate: a unary send applies the named operation to its receiver", () => {
+    // `inner size` is an application, not a field read: `size` is a declared
+    // operation taking the receiver as its carrier argument. The sent name is
+    // rendered with the operation sigil, which is what makes it a core
+    // application rather than a bare identifier.
+    const { operations } = pipeline(APPLY)
+    const sizeOf = operations.find((op) => op.name === "sizeOf")
+    assertEquals(sizeOf?.definition, "\\e:Box. fold [Box] e { B(inner) -> #size(inner) }")
+})
+
+Deno.test("elaborate: an operation applied from a body types and computes", () => {
+    // The end-to-end property. Both operations install, and the outer one's
+    // result is the inner one's on the field — so the send reached the core as
+    // an application and ran.
+    const { operations, registry, opRegistry } = pipeline(APPLY)
+    assertEquals(operations.map((op) => op.name).sort(), ["size", "sizeOf"])
+
+    /** A `Nat` value read back as its unary magnitude. */
+    const magnitude = (value: unknown): number => {
+        if (!(value instanceof VariantVal)) throw new Error("not a variant")
+        return value.variantName === "Zero" ? 0 : 1 + magnitude([...value.fields.values()][0])
+    }
+    const sizeOf = (term: string) => {
+        const [value] = [
+            ...new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(term, new ValueEnv()),
+        ]
+        return value === undefined ? undefined : magnitude(value)
+    }
+
+    assertEquals(sizeOf("#sizeOf(B(Nil()))"), 0)
+    assertEquals(sizeOf("#sizeOf(B(Cons(Zero(), Nil())))"), 1)
+    assertEquals(sizeOf("#sizeOf(B(Cons(Zero(), Cons(Zero(), Nil()))))"), 2)
+})
+
+// ── Structural recursion ────────────────────────────────────────────────────
+//
+// A data fold is bottom-up (`lc.md` §5.2): a recursive `Family` field arrives at
+// its arm already folded to the fold's result, so an arm that rebuilds a
+// constructor around it recurses without naming the operation. That is the only
+// recursion spelling the surface has — a self-call is the one `Ω`'s acyclicity
+// rule rejects.
+
+const PRELUDE_ADD = `data Nat
+    Zero
+    Succ pred: Family
+
+    fold add <in: Self, out: Self>
+        Zero -> in
+        Succ pred -> Succ pred: pred
+`
+
+Deno.test("elaborate: structural recursion installs without a self-call", () => {
+    // `Succ pred: pred` rebuilds around the field, which holds the folded
+    // predecessor — a Nat, which is the fold's σ. Nothing in the arm names
+    // `add`, so the acyclicity rule has nothing to reject.
+    const result = pipeline(PRELUDE_ADD)
+    assertEquals(result.operations.map((op) => op.name), ["add"])
+    assertEquals(
+        result.operations[0]?.definition,
+        "\\e:Nat. \\in_:Nat. fold [Nat] e { Zero() -> in_, Succ(pred) -> Succ(pred) }",
+    )
+    assert(result.opRegistry.lookup("add") !== undefined)
+})
+
+Deno.test("elaborate: a structurally recursive operation computes its sum", () => {
+    // The semantic property, not just the emission: `add` is addition. A
+    // definition that dropped the recursive field would install and type and
+    // still be wrong, so the assertion is on the value.
+    const { operations, registry, opRegistry } = pipeline(PRELUDE_ADD)
+
+    /** A `Nat` value read back as its unary magnitude. */
+    const magnitude = (value: unknown): number => {
+        if (!(value instanceof VariantVal)) throw new Error("not a variant")
+        return value.variantName === "Zero" ? 0 : 1 + magnitude([...value.fields.values()][0])
+    }
+    const add = (left: number, right: number) => {
+        const numeral = (n: number): string => n === 0 ? "Zero()" : `Succ(${numeral(n - 1)})`
+        const [value] = [
+            ...new LCEval().setRegistry(registry).setOpRegistry(opRegistry)
+                .parseWith(`#add(${numeral(left)}, ${numeral(right)})`, new ValueEnv()),
+        ]
+        return value === undefined ? undefined : magnitude(value)
+    }
+
+    assertEquals(operations.length, 1)
+    assertEquals(add(0, 0), 0)
+    assertEquals(add(0, 1), 1)
+    assertEquals(add(1, 1), 2)
+    assertEquals(add(2, 3), 5)
 })
