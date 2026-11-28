@@ -1037,17 +1037,17 @@ the disagreement.**
 
 ### 12.1 The classes
 
-| Class                                  | The question                                                               | Recorded cases                                                             |
-| -------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| **Undeclared name taught by the docs** | Does every type name in the corpus resolve to a built-in or a declaration? | `Number` (§12.18), `Boolean` (§12.31), `Object` (§12.29)                   |
-| **Unspellable construct**              | Is every form the spec _teaches_ actually a production?                    | `Block<σ,τ>` (§12.27), `typeParam:` (§12.29), `data` declarations (§12.15) |
-| **Two spellings for one concept**      | Does one reference form have one spelling?                                 | `aux d` vs `aux #d` (§12.26)                                               |
-| **Same spelling, two meanings**        | Does one token resolve one way?                                            | `Family` open vs. closed recursion (§12.13)                                |
-| **Rule stated, never enforced**        | Is a decided rule enforced at its site, or only recorded in prose?         | `Family` reserved, unenforced (§12.16)                                     |
-| **Grammar vs. corpus drift**           | Do the productions match their own examples?                               | `protocolItem` had no signature form (#113)                                |
-| **Missing arm in a relation**          | Does every constructor of a judgment have a rule?                          | `isSubtype` had no `FamilyType` arm (§12.14)                               |
-| **Silent permissiveness**              | Does the checker accept what it should reject?                             | unknown type names minted a `TypeVar` (§12.29)                             |
-| **Stale evidence**                     | Does the issue's claimed failing case still fail?                          | `Cons(Nil())` became legal; #102's premise expired                         |
+| Class                                  | The question                                                               | Recorded cases                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| **Undeclared name taught by the docs** | Does every type name in the corpus resolve to a built-in or a declaration? | `Number` (§12.18), `Boolean` (§12.31), `Object` (§12.29)                     |
+| **Unspellable construct**              | Is every form the spec _teaches_ actually a production?                    | `Block<σ,τ>` (§12.27), `typeParam:` (§12.29), `behavior`/`protocol` (§12.15) |
+| **Two spellings for one concept**      | Does one reference form have one spelling?                                 | `aux d` vs `aux #d` (§12.26)                                                 |
+| **Same spelling, two meanings**        | Does one token resolve one way?                                            | `Family` open vs. closed recursion (§12.13)                                  |
+| **Rule stated, never enforced**        | Is a decided rule enforced at its site, or only recorded in prose?         | `Family` reserved, unenforced (§12.16)                                       |
+| **Grammar vs. corpus drift**           | Do the productions match their own examples?                               | `protocolItem` had no signature form (#113)                                  |
+| **Missing arm in a relation**          | Does every constructor of a judgment have a rule?                          | `isSubtype` had no `FamilyType` arm (§12.14)                                 |
+| **Silent permissiveness**              | Does the checker accept what it should reject?                             | unknown type names minted a `TypeVar` (§12.29)                               |
+| **Stale evidence**                     | Does the issue's claimed failing case still fail?                          | `Cons(Nil())` became legal; #102's premise expired                           |
 
 **The last row is the one that bites.** Verify the failing case before reporting it. An issue whose
 premise has silently expired is itself a finding — against the tracker, not the code.
@@ -1102,6 +1102,7 @@ says **what the finding was**, **where its record now lives**, and **what is lef
 | §12.72 | A `fold` could not be named with a symbol, so no operation could have a symbolic identity                              | [#129](https://github.com/lapis-lang/lapis-lang/issues/129) closed by the declaration form (`surface-grammar.md` §2.3)                                                   |
 | §12.73 | `surface-syntax.md` §2.1 claimed six grouping characters are operator characters; no production admitted any           | `surface-grammar.md` §2.3 — the set is pinned, with the delimiter argument                                                                                               |
 | §12.74 | The op-reference scanner was quote-blind, so a pattern's text reported a phantom dependency                            | `src/core/ops.ts` `scanOpReferences` — quoted spans are stripped before the sigil-anchored match                                                                         |
+| §12.76 | A field read (`somePoint x`) resolves clean and cannot elaborate: the selector is emitted as an operation reference    | [#157](https://github.com/lapis-lang/lapis-lang/issues/157) open                                                                                                         |
 | §12.75 | `not` is a surface keyword that `prelude.md` §3.3 declares as an operator, so it cannot be declared from source        | `surface-grammar.md` §2.5; the keyword list is §12.19's territory                                                                                                        |
 
 **Decided, instructive, no issue — the class they illustrate is the record.** These closed by a
@@ -1143,7 +1144,7 @@ visible where it matters even before an issue exists.
 | §12.10 | A fold arm over a pattern keys on the type name (one pattern) or the declared constructor name (several)                                                            | `surface-syntax.md` §1.3, §5.1                          |
 | §12.11 | A pattern's leftmost-matchable set must exclude `[A-Za-z]`                                                                                                          | `surface-syntax.md` §1.3; enforced in `pattern_lang.ts` |
 | §12.14 | A `Family`-typed field must relate to its carrier in `isSubtype`                                                                                                    | `lc.md` §4.2; `subtyping.ts` S-Data-Family arm          |
-| §12.15 | The six declaration forms are unimplemented in `src/`                                                                                                               | `surface-syntax.md` §4.1; `language-design.md` staging  |
+| §12.15 | Five of the six declaration forms are unimplemented in `src/` — `data` is not one of them                                                                           | `surface-syntax.md` §4.1; `language-design.md` staging  |
 | §12.17 | Variant-level subtyping is not a pinned form (and is unstatable without record types)                                                                               | `surface-syntax.md` §4.1                                |
 | §12.19 | The fold option family (`in:`, `old`, `prev`, `aux`, `scan`, wildcard arms, aliases) has no pinned spelling                                                         | `surface-syntax.md` §5.1, §5.2                          |
 | §12.20 | Lattice bounds, mutual recursion, multiple unfolds, parametric observers, `inverse:` maps, modules, variant invariants, naming — every new section is spec-unpinned | `surface-syntax.md` §1.3, §4.1, §5.1, §5.3, §6          |

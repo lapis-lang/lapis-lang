@@ -58,10 +58,11 @@ The single failure reason is `not-well-formed`: the emitted definition does not 
 `paramTypes → resultType` (`lc.md` §2.5, well-formedness). One reason covers every way the two can
 disagree, because they are one condition — the signature comes from the spec (`in:` value, `out:`
 result), the definition from the arms, and `Ω` requires agreement component-wise. It also covers
-what the core's declaration checks reject beyond typing: a recursive body, whose self-reference
-`Ω`'s acyclicity rule forbids. Reporting recursion as an elaboration failure is honest — the
-operation genuinely cannot be installed — but it is not the language's final answer for recursion,
-which is a separate decision.
+what the core's declaration checks reject beyond typing: a **self-referential** body, whose
+self-call `Ω`'s acyclicity rule forbids. That is narrower than recursion as a whole — a structural
+fold never names itself, so its recursion is the fold's induction and installs normally (`lc.md`
+§5.2); what cannot be installed is the non-structural spelling, and reporting it here is honest
+because it genuinely does not type as a terminating operation.
 
 ### 1.3 An operation's result type is declared, or inferred from its arms
 
