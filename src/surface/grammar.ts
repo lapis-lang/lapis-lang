@@ -374,9 +374,17 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
 
     /**
      * ```
-     * foldDecl ::= "fold" ident specRecord? ⏎ foldBody
+     * foldDecl ::= "fold" ␣ operationName specRecord? ⏎ foldBody
      * foldBody ::= ␣(8) foldItem+
+     * operationName ::= ident | symbolicOp
      * ```
+     *
+     * The name may be symbolic (`fold + <out: Self>`): `+` is the operation's
+     * own name, not an alias of a named twin (`surface-syntax.md` §2.1). The
+     * two alternatives are lexically disjoint — `ident` admits letters and `_`,
+     * `symbolicOp` admits only operator characters — so no ordering or
+     * lookahead is needed. The mandatory space after `fold` is what separates
+     * the name from the spec record's `<`.
      */
     @rule
     protected foldDeclProd(column: number): Parser<FoldDecl> {
@@ -384,7 +392,7 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
             spaces(column),
             keyword("fold"),
             hws1,
-            ident,
+            this.operationNameProd(),
             hws,
             this.specRecordProd().opt(),
             lineEnd,
@@ -400,6 +408,15 @@ export abstract class AbstractSurface<S extends SurfaceShape> extends Grammar<S>
                 foldItems.filter((i): i is CaseArm & { itemKind: "arm" } => i.itemKind === "arm"),
             )
         })
+    }
+
+    /**
+     * `operationName ::= ident | symbolicOp` (`surface-grammar.md` §2.3) — the
+     * declared name.
+     */
+    @rule
+    protected operationNameProd(): Parser<string> {
+        return or(ident, symbolicOp)
     }
 
     /** `foldItem ::= contractClause | caseArm` (§5.1). */

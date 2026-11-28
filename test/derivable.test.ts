@@ -90,8 +90,8 @@ function declareNatOp(
 /** The canonical `add`: fold over the first parameter, recursion passes `p` through. */
 const ADD_DEF = "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Succ(p) }"
 
-/** The fold-composition shape: recursion continues into `add(p, b)`. */
-const ADD_ZERO_DEF = "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Succ(add(p, b)) }"
+/** The fold-composition shape: recursion continues into `#add(p, b)`. */
+const ADD_ZERO_DEF = "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Succ(#add(p, b)) }"
 
 /** A constant-second handler: the IH misuse guard's target. */
 const CONST_B_DEF = "\\a:Nat. \\b:Nat. fold [Nat] a { Zero() -> b, Succ(p) -> Zero() }"
@@ -154,7 +154,7 @@ Deno.test("readDefShape: loud rejections name the construct", () => {
     assert(shapeError.message.includes("unfold"))
 
     // A fold whose scrutinee is a compound term — no induction axis.
-    const compoundDef = "\\a:Nat. \\b:Nat. fold [Nat] add(a, b) { Zero() -> Zero(), Succ(p) -> p }"
+    const compoundDef = "\\a:Nat. \\b:Nat. fold [Nat] #add(a, b) { Zero() -> Zero(), Succ(p) -> p }"
     assertThrows(
         () => readDefShapeRaw(h, compoundDef),
         DefinitionShapeError,
@@ -188,7 +188,7 @@ Deno.test("readDefShape: shape checks beyond well-formedness are loud", () => {
     // handler is already rejected earlier — Ω's T-Fold types it Any, so the
     // declaration itself fails; the fragment's own completeness check guards
     // the same invariant for the shape reader.)
-    const compoundDef = "\\a:Nat. \\b:Nat. fold [Nat] add(a, b) { Zero() -> Zero(), Succ(p) -> p }"
+    const compoundDef = "\\a:Nat. \\b:Nat. fold [Nat] #add(a, b) { Zero() -> Zero(), Succ(p) -> p }"
     const opRegistry = h.opRegistry
     opRegistry.declare(
         new OpSig(
@@ -406,7 +406,7 @@ Deno.test("deriveLaw: a non-constructor argument term shape-rejects", () => {
     declareNatOp(h, "add", ADD_DEF)
     const add = h.opRegistry.lookup("add")!
     const result = deriveLaw(
-        { kind: "identity", target: "add", argument: "add(a, b)" },
+        { kind: "identity", target: "add", argument: "#add(a, b)" },
         add,
         h.registry,
         h.opRegistry,

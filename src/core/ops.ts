@@ -115,58 +115,179 @@ const brandChecked = (op: OpSig): CheckedOpSig => Object.assign(op, { checked: t
  */
 const BUILTIN_CALL_FORMS: readonly string[] = ["match"]
 
+// ── Operation names in core text: the `#` sigil ──────────────────────────────
+
+/**
+ * The sigil that marks a core-text operation application: `#add(a, b)`.
+ *
+ * Every operation application in core concrete syntax carries it, whether the
+ * name is symbolic (`#+(a, b)`) or alphanumeric (`#add(a, b)`). One rule, so
+ * `renderOperationName`/`parseOperationName` are total and mutually inverse
+ * with no conditionals and no symbol table.
+ *
+ * **Why a sigil at all.** An operation's name is whatever the source declared
+ * — `+` is a name in its own right, not an alias of `add` (`lc.md` §2.2: the
+ * named form *is* "the symbolic identity of a fold"). Without a sigil, `+`
+ * has no spelling in core text whose grammar admits only
+ * identifiers, and `add(a, b)` is ambiguous with variable application until
+ * the registry says otherwise. The sigil resolves both at the lexeme.
+ *
+ * **Why `#` and not a bracket form.** The sigil must be *unspellable from the
+ * surface*: a name a user declaration can produce would let a program capture
+ * core-owned vocabulary. No surface operator-character set contains `#`
+ * (`surface-grammar.md` §2.3: contiguous runs of `+ - * / < > = ! ? & | , .`),
+ * so `#+` and `#add` are outside the surface's name grammar. A bracketed form
+ * like `(+)` is spellable the moment `(` and `)` join the operator set — and
+ * every candidate bracket (`(` `)` `[` `]` `{` `}`) is core syntax, so
+ * admitting it would overlap the operator alphabet with the delimiter
+ * alphabet. The same reasoning spells the core-owned raw-text type `@Token`
+ * (`lc.md` §2.1), which names `#name` as this sigil's precedent.
+ *
+ * **Why uniform.** The alternative — a sigil only on symbolic names — needs an
+ * `isSymbolic` test at every text boundary (render, parse, gate, scan, and the
+ * law machinery's interpolations), and each test is a place the two sides can
+ * disagree. Uniform also buys a parse that does not consult `Ω`: the sigil
+ * makes an operation application syntactically identifiable, whereas a bare
+ * `name(args)` is one only when the registry already holds the name.
+ *
+ * **The surface's own `#`.** The surface uses `#` in two places — a spec
+ * record's `aux #name` entry and a law argument's keyword-part reference
+ * (`identity: #add`). Both denote an operation, so under this rule they are
+ * the *same* form as an application rather than a third kind of thing
+ * (`overview.md` §12.23 records the reference-vs-value distinction).
+ */
+export const OP_NAME_SIGIL = "#"
+
+/**
+ * The core-text spelling of an operation name — `add` → `#add`.
+ *
+ * Total and injective: distinct names never share a spelling, which is what
+ * lets core text round-trip through a parser without a side table.
+ */
+export function renderOperationName(name: string): string {
+    return `${OP_NAME_SIGIL}${name}`
+}
+
+/**
+ * The operation name a core-text lexeme denotes — `#add` → `add`.
+ *
+ * Inverse of `renderOperationName`. Returns `undefined` for a lexeme without
+ * the sigil, which is how the parser distinguishes an operation application
+ * from variable application.
+ */
+export function parseOperationName(lexeme: string): string | undefined {
+    return lexeme.startsWith(OP_NAME_SIGIL) ? lexeme.slice(OP_NAME_SIGIL.length) : undefined
+}
+
+/**
+ * The characters a symbolic operation name may be built from
+ * (`surface-grammar.md` §2.3). *
+ * Two properties hold by choice, and both are load-bearing:
+ *
+ * - **Disjoint from the core's delimiters.** No character here is `(`, `)`,
+ *   `[`, `]`, `{`, `}`, `:`, `\`, or whitespace, so a symbolic name can be
+ *   written adjacent to the syntax that surrounds it. This is why the surface
+ *   spec's prose mention of "grouping characters" (`surface-syntax.md` §2.1)
+ *   is not implementable: admitting brackets would overlap the operator
+ *   alphabet with the delimiter alphabet, and a maximal-munch run would then
+ *   swallow the delimiters (`(+)` would lex as one name).
+ * - **Disjoint from the sigil.** `#` is absent, so an operation name can never
+ *   begin with the character that marks an application.
+ */
+export const SYMBOLIC_OP_CHARS: readonly string[] = [
+    "+",
+    "-",
+    "*",
+    "/",
+    "<",
+    ">",
+    "=",
+    "!",
+    "?",
+    "&",
+    "|",
+    ",",
+    ".",
+]
+
+/**
+ * Whether `c` may appear in a symbolic operation name.
+ *
+ * The one definition: the surface's operator lexeme and the core's
+ * operation-name lexeme both read it, so the two alphabets cannot drift.
+ */
+export function isSymbolicOpChar(c: string): boolean {
+    return SYMBOLIC_OP_CHARS.includes(c)
+}
+
+/**
+ * Whether `name` is a well-formed operation name.
+ *
+ * Two disjoint classes, both of which are *names the surface can declare*:
+ *
+ * - **camelCase** — an identifier: `add`, `_aux`, `fold` (keywords are
+ *   allowed; the op form's sigil and tight paren are positionally disjoint
+ *   from every keyword position).
+ * - **symbolic** — a contiguous run of `SYMBOLIC_OP_CHARS`: `+`, `<=`, `<+>`.
+ *
+ * Neither class admits a character that is core syntax (a bracket, a comma, a
+ * dot, a colon), which is what keeps the emitted text parseable. A PascalCase
+ * name is rejected because it would collide with the variant namespace.
+ */
+export function isOperationName(name: string): boolean {
+    if (name === "") return false
+    if (/^[a-z_][a-zA-Z0-9_]*$/.test(name)) return true
+    return [...name].every(isSymbolicOpChar)
+}
+
 /**
  * Scan concrete-syntax source for named operation applications — the shared
  * op-reference scanner.
  *
- * A camelCase identifier immediately followed by `(` is an op application
- * (`add(a, b)`); variable application requires whitespace (`f x`) and
- * variant construction is PascalCase (`Zero()`), so the pattern is
- * unambiguous in LC concrete syntax.
+ * An operation application is spelled with the sigil: `#add(a, b)`. The sigil
+ * makes the scan **exact**, not approximate:
  *
- * The lookbehind guards against mid-identifier matches: without it,
- * `Zero(` would match at the lowercase `e`, yielding the phantom
- * reference `ero(`. The identifier must start at a non-identifier
- * character boundary.
+ * - No other form in LC concrete syntax begins with `#`, so the pattern cannot
+ *   match a variant construction (`Zero()`), a variable, or the name in a
+ *   `@Token` type.
+ * - Nothing must be excluded. `match("p")` is a language call form, not an
+ *   operation, and it is not sigilled either — `BUILTIN_CALL_FORMS` therefore
+ *   needs no special case here.
+ * - Symbolic names need no separate treatment: `#+(a, b)` and `#add(a, b)`
+ *   differ only in the characters between the sigil and the paren.
  *
- * **Scope of the scan (exactness claim):** this is a lexical scan over
- * source text, not a token-level one — Ω's acyclicity check runs before
- * parsing infrastructure exists (`Ω` is populated before grammars are
- * constructed), so the check must be grammar-independent. It is exact for
- * the current LC concrete syntax, which has no string literals and no
- * comments; the language-level call forms (`BUILTIN_CALL_FORMS`, e.g.
- * `match("p")`) are excluded because they are language constructs, not
- * operations — sound because `declare` reserves those names from
- * operations (check 1b), so an occurrence of a reserved name in a
- * definition is always the language form, never an op application. A
- * future syntax revision adding string literals, comments, or other
- * call-shaped constructs must extend the exclusion list (or replace the
- * scan) — until then, every reported name is a genuine op reference.
+ * **Quoted pattern sources are removed before matching.** A pattern's text is
+ * not source code: `data Tag / pattern #\w+` declares text a token matches,
+ * and a source containing `#name(` would otherwise be reported as an operation
+ * reference. The scan strips double-quoted spans first, so its exactness does
+ * not depend on which characters a pattern happens to use.
+ *
+ * **Why a lexical scan at all.** Ω's acyclicity check runs before parsing
+ * infrastructure exists (`Ω` is populated before grammars are constructed), so
+ * the check must be grammar-independent. The sigil is what makes a lexical
+ * scan exact: the pattern is anchored by a character no other production uses.
  *
  * **Consumers:** `OpRegistry.declare`'s acyclicity check (the declaration-
  * order stratification). The derivation engine's axiom-base scan does NOT
  * use this function: it scans PARSED handler bodies at the term level
  * (`derivation.ts`'s `freeOps` — the ops an obligation's `op` applications
  * name), so the two scans operate at different levels (lexical source vs.
- * parsed terms). They agree in practice because the reader parses exactly
- * the concrete syntax this lexical scan approximates, but neither is the
- * other's implementation — this scanner is the acyclicity check's
- * grammar-independent source-level scan, needed because it runs before
- * parsing infrastructure exists.
+ * parsed terms). They agree because the reader parses exactly the concrete
+ * syntax this scan recognizes.
  *
- * **Over-approximation risk:** none today. If an exclusion is missed or a
- * new construct appears, the failure mode is a rejected declaration
- * (`OpDeclarationError` naming the phantom reference) — loud, not silent.
+ * **Over-approximation risk:** none. The sigil is unambiguous, and the
+ * character class is closed (no whitespace, no delimiters), so every match is
+ * a genuine application.
  */
 export function scanOpReferences(source: string): Set<string> {
     const referenced = new Set<string>()
-    // camelCase identifier immediately followed by "(", starting at a
-    // non-identifier boundary
-    const opCall = /(?<![a-zA-Z0-9_])[a-z_][a-zA-Z0-9_]*\(/g
-    for (const match of source.matchAll(opCall)) {
-        const name = match[0].slice(0, -1) // strip the trailing "("
-        if (BUILTIN_CALL_FORMS.includes(name)) continue
-        referenced.add(name)
+    // A pattern's quoted source is text, not code (see the docblock).
+    const unquoted = source.replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    // `#` then a maximal run of non-whitespace, non-delimiter characters, then `(`
+    const opCall = /#([^\s(),[\]{}:;.\\]+)\(/g
+    for (const match of unquoted.matchAll(opCall)) {
+        const name = match[1]
+        if (name !== undefined) referenced.add(name)
     }
     return referenced
 }
@@ -259,18 +380,16 @@ export class OpRegistry {
      *
      * Checks:
      *
-     * 1. **Name shape** — camelCase (lowercase-first), matching the `opIdent`
-     *    lexeme that `opProd` parses. A PascalCase name would collide with the
-     *    variant namespace and never parse as an op application. Reserved
-     *    words are allowed: the op form's tight paren is positionally
-     *    disjoint from every keyword position, so an operation named `fold`
-     *    is appliable (`fold(a, b)`).
+     * 1. **Name shape** — an operation name the surface can declare:
+     *    camelCase (matching the `opIdent` lexeme) or a symbolic run
+     *    (`surface-grammar.md` §2.3). A PascalCase name is rejected because it
+     *    would collide with the variant namespace and never parse as an op
+     *    application. Reserved words are allowed: the op form's sigil and tight
+     *    paren are positionally disjoint from every keyword position, so an
+     *    operation named `fold` is appliable (`#fold(a, b)`).
      * 1b. **Built-in call forms** — `match` (and any future call form) are
      *    reserved from operation names: an op so named would be
-     *    indistinguishable from the language form and, once installed, would
-     *    shadow it at the `opProd` gate. This reservation is also what makes
-     *    the acyclicity scan's exclusion of these names sound (see
-     *    `BUILTIN_CALL_FORMS`).
+     *    indistinguishable from the language form `match("p")`.
      * 2. **Duplicate** — redeclaring an operation name is rejected; the
      *    signature and definition would silently diverge.
      * 3. **Acyclicity** — the definition may only reference operations already
@@ -289,21 +408,21 @@ export class OpRegistry {
      * @throws OpDeclarationError on any failed check.
      */
     declare(op: OpSig, wellFormedness: OpWellFormedness): CheckedOpSig {
-        // 1. Name shape: must match the `opIdent` lexeme (camelCase).
-        if (!/^[a-z_][a-zA-Z0-9_]*$/.test(op.name)) {
+        // 1. Name shape: camelCase or symbolic — the two classes the surface
+        //    declares and the emitted core text parses.
+        if (!isOperationName(op.name)) {
             throw new OpDeclarationError(
                 op.name,
-                "operation names must be camelCase (lowercase-first) — the `opIdent` lexeme",
+                "not a valid operation name — expected camelCase or a symbolic run " +
+                    "(`surface-grammar.md` §2.3)",
             )
         }
 
         // 1b. Built-in call forms are reserved from operation names: an op
         //     named `match` would be indistinguishable from the language's
-        //     `match("p")` form, and once installed would shadow it at the
-        //     `opProd` gate for every subsequent parse. Reserving the name
-        //     is also what makes `referencedOps`'s scan exclusion sound: a
-        //     reserved name can never be an operation, so excluding it never
-        //     suppresses a genuine op reference (no acyclicity hole).
+        //     `match("p")` form. The sigil disjoints an application from that
+        //     form, but the bare name would still be ambiguous inside a spec
+        //     record or a law argument, where `#name` denotes the operation.
         if (BUILTIN_CALL_FORMS.includes(op.name)) {
             throw new OpDeclarationError(
                 op.name,

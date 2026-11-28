@@ -29,6 +29,7 @@ import {
     OpDeclarationError,
     OpRegistry,
     OpSig,
+    renderOperationName,
     type Type,
 } from "../core/index.ts"
 
@@ -697,10 +698,15 @@ function fieldCount(arm: CaseArm, ctx: RenderCtx): number {
 function renderExpr(expr: Expr, ctx: RenderCtx): string {
     switch (expr.kind) {
         case "binop":
-            return `(${renderExpr(expr.lhs, ctx)} ${expr.op} ` +
-                `${renderExpr(expr.rhs, ctx)})`
+            // An infix operator IS an operation application: `a + b` is
+            // `#+(ℰ(a), ℰ(b))` (`elaboration.md` §2.4). The core has no infix
+            // level, and the operator's name is its own (`+`, not an alias of
+            // a named twin), so the symbol is applied like any named operation
+            // — with the sigil that marks an application.
+            return `${renderOperationName(expr.op)}(` +
+                `${renderExpr(expr.lhs, ctx)}, ${renderExpr(expr.rhs, ctx)})`
         case "unary":
-            return `${expr.op} ${renderPrimary(expr.operand, ctx)}`
+            return `${renderOperationName(expr.op)}(${renderPrimary(expr.operand, ctx)})`
         case "call":
             return renderCall(expr.receiver, expr.parts, expr.messages, ctx)
         default:
@@ -725,11 +731,16 @@ function renderCall(
 ): string {
     let rendered = renderPrimary(receiver, ctx)
     for (const message of messages) {
-        rendered = `${message}(${rendered})`
+        // An unlabelled send is an operation application (`elaboration.md`
+        // §2.5: `recv negate` is `negate(ℰ(recv))`), so it carries the sigil
+        // like any other application.
+        rendered = `${renderOperationName(message)}(${rendered})`
     }
     if (parts.length > 0) {
         const args = parts.map((p) => renderExpr(p.value, ctx))
-        const selector = parts.map((p) => p.key).join(":")
+        // The selector is the operation's keyword sequence — the operation's
+        // name in this position — so it too is applied, not emitted bare.
+        const selector = renderOperationName(parts.map((p) => p.key).join(":"))
         rendered = `${selector}(${[rendered, ...args].join(", ")})`
     }
     return rendered
@@ -772,6 +783,13 @@ function renderPrimary(primary: Primary, ctx: RenderCtx): string {
         case "paren":
             return `(${renderExpr(primary.inner, ctx)})`
         case "opRef":
+            // A bare operation reference has no core spelling: the core names
+            // an operation only inside an application (`#name(args)`), and a
+            // lone `#name` is not a term. The surface has no reference
+            // position either (`surface-syntax.md` §3.1 — a function value
+            // cannot be passed), so this arm is unreachable on a resolved,
+            // elaborated program; it stays a name rather than inventing a
+            // spelling that would not parse.
             return primary.qualifier === undefined
                 ? primary.name
                 : `${primary.qualifier} ${primary.name}`

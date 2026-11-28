@@ -54,7 +54,7 @@ import {
     type SubSpaceSpec,
 } from "./laws.ts"
 
-import { type CheckedOpSig, type OpRegistry } from "./ops.ts"
+import { type CheckedOpSig, type OpRegistry, renderOperationName } from "./ops.ts"
 
 import { TypeRegistry } from "./grammar.ts"
 
@@ -237,7 +237,12 @@ function instantiate(
     bindings: readonly (readonly [string, Value])[],
     argumentValue: Value | undefined,
 ): LawInstance[] {
-    const opName = op.name
+    // The obligation is core text, so every operation application carries the
+    // sigil (`renderOperationName`). A bare name here would emit a term the
+    // core cannot read — and since law terms are evaluated through the same
+    // grammar as any other definition, the failure would surface as "every
+    // sample failed to evaluate", not as a malformed obligation.
+    const opName = renderOperationName(op.name)
     let rho = new ValueEnv()
     const rendered: string[] = []
     for (const [name, value] of bindings) {
@@ -288,7 +293,9 @@ function instantiate(
                 { left: `${opName}(a, z)`, right: `z`, rho, bindings: bindingsRendered },
             ]
         case "distributive": {
-            const g = law.argument!
+            // `argument` names the other operation, which appears in the
+            // obligation too — same sigil rule.
+            const g = renderOperationName(law.argument!)
             return [{
                 left: `${opName}(a, ${g}(b, c))`,
                 right: `${g}(${opName}(a, b), ${opName}(a, c))`,
@@ -513,7 +520,7 @@ function checkInstance(
  * the operation's parameter count — schemas instantiate fewer variables than
  * positions on some shapes). The sweep is the Cartesian product across
  * variables, so every variable takes independent values — a falsifying
- * pair like `op(a, b)` with `a ≠ b` is reachable for commutative.
+ * pair like `#op(a, b)` with `a ≠ b` is reachable for commutative.
  *
  * Laziness matters for the finite regime: an at-ceiling sweep (2²⁰
  * assignments) is produced one binding at a time — the full product is

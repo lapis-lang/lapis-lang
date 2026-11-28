@@ -89,7 +89,13 @@ import {
     TypeVarEnv,
 } from "./types.ts"
 
-import { OpRegistry } from "./ops.ts"
+import {
+    type CheckedOpSig,
+    isSymbolicOpChar,
+    OP_NAME_SIGIL,
+    OpRegistry,
+    parseOperationName,
+} from "./ops.ts"
 
 import { parsePattern, patternToString } from "./pattern_lang.ts"
 
@@ -1378,39 +1384,61 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     // ── Named operation application (lc.md §2.2) ─────────────────────────────
 
     /**
-     * `op(t₁, ..., tₙ)` — named operation application.
+     * `#op(t₁, ..., tₙ)` — named operation application.
      *
-     * Gated on the operation registry (Ω): the production only matches when
-     * the name matches a declared operation. Disambiguation from the keyword
-     * forms is positional, not lexical: every keyword position is
-     * whitespace-delimited (`fold [T] e {...}`, `let x:σ = ...`, `... in u`),
-     * while the op form requires the tight paren (`fold(a, b)`). The two are
-     * disjoint by construction, so the op lexeme (`opIdent`) accepts keywords
-     * — an operation may be named `fold` and still be appliable.
+     * The sigil is what makes this production unambiguous without consulting
+     * `Ω`: an operation application is the *only* form in the grammar that
+     * begins with `#`, so no registry read is needed to select the reading.
+     * Variable application requires whitespace (`f x`, never `f(a)`).
      *
-     * Disambiguation from variables is the registry gate: `add(a, b)` parses
-     * as an op application because `add ∈ Ω`; `unknownOp(a, b)` fails the gate
-     * and falls through to variable application, which requires whitespace
-     * (`f x`, never `f(a)`), so it fails too. The tight paren is the shadowing
-     * escape hatch — a let-bound `add` remains applicable with spacing.
+     * `opName` is likewise sigil-free in the action: the lexeme carries the
+     * sigil, the registry is keyed by the name, and `renderOperationName` /
+     * `parseOperationName` are the one pair that converts.
      *
      * Arguments are atoms (like variant construction), evaluated leftmost by
      * the one-pass grammar (E-OpArg).
      */
     @rule
     protected opProd(ctx: unknown): Parser<S["atom"]> {
+        return this.opCall(ctx).map(([opSig, args]) => this.opApp(opSig.name, args))
+    }
+
+    /**
+     * The shape every op-bearing grammar shares: `# name "(" args ")"`,
+     * resolved against `Ω`.
+     *
+     * Factored out so the type checker and evaluator specialize only the
+     * conclusion — one lexeme definition, not three copies that can drift.
+     *
+     * **The registry gate sits before the arguments are parsed.** The sigil
+     * already makes an application syntactically identifiable, so the gate no
+     * longer selects the reading — but it still must not be deferred until
+     * after `args`: parsing an argument list the registry will reject is work
+     * the backtracking engine repeats at every enclosing alternative, which is
+     * a combinatorial blowup on exactly the terms law screening generates
+     * (`#op(#op(a))`). The gate is a cheap prefix test, so it stays a prefix.
+     *
+     * Not a `@rule`: it declares no judgment and holds no recursion of its
+     * own — the memoizable unit is `atomProd`. Registering it with the engine
+     * made the engine memoize an intermediate that each of the two
+     * subclasses instantiates separately, re-exploring the same parse space at
+     * every enclosing alternative.
+     */
+    protected opCall(ctx: unknown): Parser<[CheckedOpSig, S["atom"][]]> {
         return seq(
+            char(OP_NAME_SIGIL),
             this.opIdent,
             char("("),
             this.ws,
-        ).bind(([opName]) => {
-            if (this.opRegistry.lookup(opName) === undefined) {
-                return empty<S["atom"]>()
-            }
+        ).bind(([, lexeme]) => {
+            const name = parseOperationName(`${OP_NAME_SIGIL}${lexeme}`)
+            if (name === undefined) return empty<[CheckedOpSig, S["atom"][]]>()
+            const opSig = this.opRegistry.lookup(name)
+            if (opSig === undefined) return empty<[CheckedOpSig, S["atom"][]]>()
             return sepBy(this.atomProd(ctx), seq(this.ws, char(","), this.ws))
                 .bind((args) =>
                     seq(this.ws, char(")"))
-                        .map(() => this.opApp(opName, args))
+                        .map(() => [opSig, args] as [CheckedOpSig, S["atom"][]])
                 )
         })
     }
@@ -1445,16 +1473,41 @@ export abstract class AbstractLC<S extends LCShape> extends Grammar<S> {
     }
 
     /**
-     * The operation-name lexeme: like `ident`, but keyword-permissive. The
-     * op form's tight paren (`fold(a, b)`) is positionally disjoint from every
-     * keyword position (all whitespace-delimited: `fold [T] e {...}`, `let
-     * x:σ = ...`, `... in u`), so an operation may be named `fold` — the
-     * registry gate resolves which reading applies, not the lexeme.
+     * The operation-name lexeme — the characters between the sigil and the
+     * application's tight paren.
+     *
+     * Two disjoint classes (`isOperationName`, `ops.ts`):
+     *
+     * - camelCase — keyword-permissive, because the application form's sigil
+     *   and tight paren are positionally disjoint from every keyword position
+     *   (all whitespace-delimited: `fold [T] e {...}`, `let x:σ = ...`,
+     *   `... in u`), so an operation may be named `fold` (`#fold(a, b)`).
+     * - symbolic — a maximal run of `SYMBOLIC_OP_CHARS`, so `#+(a, b)` and
+     *   `#<+>(a, b)` read the same way.
+     *
+     * The sigil carries no class information: one rule, `#name(args)`, for
+     * every operation (`renderOperationName`, `ops.ts`).
      */
     @rule
     protected get opIdent(): Parser<string> {
-        return seq(this.identFirst, this.identRest)
-            .map(([h, t]) => h + t)
+        return or(
+            seq(this.identFirst, this.identRest).map(([h, t]) => h + t),
+            this.symbolicOpRun,
+        )
+    }
+
+    /**
+     * A maximal run of symbolic operation characters (`#+`, `#<=`, `#<+>`).
+     *
+     * Maximal munch, and the character class excludes every core delimiter
+     * (whitespace, brackets, `:`, `,`, `\`), so the run always stops at the
+     * application's `(` rather than swallowing it.
+     */
+    @rule
+    protected get symbolicOpRun(): Parser<string> {
+        return pred(isSymbolicOpChar, "<symbolic-op>")
+            .many()
+            .bind((cs) => cs.length === 0 ? empty<string>() : epsilon(cs.join("")))
     }
 
     protected get identFirst(): Parser<string> {

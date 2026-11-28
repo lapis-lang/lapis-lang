@@ -719,7 +719,7 @@ Deno.test("discharge: an argument that evaluates to an error sentinel rejects th
     assertThrows(
         () =>
             declareCheckedLaw(
-                { kind: "identity", target: "andOp", argument: "ghostOp(True(), True())" },
+                { kind: "identity", target: "andOp", argument: "#ghostOp(True(), True())" },
                 h.opRegistry,
                 h.laws,
                 evalOfHarness(h.registry, h.opRegistry),

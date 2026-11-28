@@ -177,38 +177,43 @@ Under-application at a normal expression site is an arity error, not a silently 
 
 ### 2.4 Binary Operators
 
-Binary operators are **operation applications** on the receiver. Each operator maps to a fold on the
+Binary operators are **operation applications** on the receiver. Each operator names a fold on the
 appropriate type. All binary operators have **uniform precedence** (left-to-right, no hierarchy —
-see [`surface-syntax.md`](./surface-syntax.md) §2.1). Operator names follow `prelude.md` §3, which
-is normative for every spelling in this table:
+see [`surface-syntax.md`](./surface-syntax.md) §2.1). The operator's symbol **is** the operation's
+name (`surface-grammar.md` §2.3), declared by `fold +`. The core column applies that name, with the
+application sigil (`lc.md` §2.2):
 
-| Surface  | Core                   | Notes                                                             |
-| -------- | ---------------------- | ----------------------------------------------------------------- |
-| `a + b`  | `add(ℰ(a), ℰ(b))`      | `add` is a fold on `Int`/`Complex`                                |
-| `a - b`  | `subtract(ℰ(a), ℰ(b))` | Similarly                                                         |
-| `a * b`  | `multiply(ℰ(a), ℰ(b))` |                                                                   |
-| `a / b`  | `divide(ℰ(a), ℰ(b))`   |                                                                   |
-| `a = b`  | `equals(ℰ(a), ℰ(b))`   | `equals` is a fold (structural for data, bisimulation for codata) |
-| `a < b`  | `lessThan(ℰ(a), ℰ(b))` | Requires `Ordered` protocol                                       |
-| `a \| b` | `or(ℰ(a), ℰ(b))`       | Fold on `Bool`                                                    |
-| `a & b`  | `and(ℰ(a), ℰ(b))`      | Fold on `Bool`                                                    |
-| `a , b`  | `cons(ℰ(a), ℰ(b))`     | List/structure cons; a built-in or fold                           |
+| Surface  | Core              | Notes                                                        |
+| -------- | ----------------- | ------------------------------------------------------------ |
+| `a + b`  | `#+(ℰ(a), ℰ(b))`  | a fold on `Int`                                              |
+| `a - b`  | `#-(ℰ(a), ℰ(b))`  |                                                              |
+| `a * b`  | `#*(ℰ(a), ℰ(b))`  |                                                              |
+| `a / b`  | `#/(ℰ(a), ℰ(b))`  |                                                              |
+| `a = b`  | `#=(ℰ(a), ℰ(b))`  | `=` is a fold (structural for data, bisimulation for codata) |
+| `a < b`  | `#<(ℰ(a), ℰ(b))`  | Requires `Ordered` protocol                                  |
+| `a <= b` | `#<=(ℰ(a), ℰ(b))` |                                                              |
+| `a > b`  | `#>(ℰ(a), ℰ(b))`  |                                                              |
+| `a >= b` | `#>=(ℰ(a), ℰ(b))` |                                                              |
+| `a \| b` | `#\|(ℰ(a), ℰ(b))` | fold on `Bool`                                               |
+| `a & b`  | `#&(ℰ(a), ℰ(b))`  | fold on `Bool`                                               |
+| `a , b`  | `#,(ℰ(a), ℰ(b))`  | list/structure cons                                          |
 
-**This table is the target, and no row of it runs today.** The emitter writes the infix through
-instead, and the core has no infix production, so every infix expression elaborates to text the core
-rejects (`overview.md` §12.49, [#129](https://github.com/lapis-lang/lapis-lang/issues/129)). The
-postfix send is the model to copy: §2.5's `b negate` already emits `negate(ℰ(b))`, the application
-form, and type-checks.
+**The elaboration is the whole rule: apply the operator's name positionally.** `a + b` emits
+`#+(ℰ(a), ℰ(b))`, and the postfix send is the same form (§2.5): `b negate` emits `#negate(ℰ(b))`.
+
+**Operators are a closed set of spellings, not a closed set of operations.** Every row above names
+an operation the program must _declare_ — `fold + <in: Self, out: Self>` on `Int`. The core has no
+primitive operator and no infix level; the symbol is applied like any other operation name.
 
 **Key principle:** There are no primitive operators in the core. Every operator is an operation
 application that resolves to a fold on the appropriate type. For pattern-matched types (`Int`,
 `String`), these are folds with pattern- matched handlers that transform the `Token`; for user
 types, they are user-declared folds.
 
-**Symbolic operation names:** Operators can be symbolic (`+`, `*`, `<`, `<=`) or named (`add`,
-`mul`, `lessThan`). Symbolic operators are recognized by longest match among declared operators.
-Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; symbolic infix
-(between tokens) = operation.
+**Symbolic operation names:** Operators can be symbolic (`+`, `*`, `<`, `<=`, `<+>`) or named
+(`add`, `mul`, `lessThan`). Symbolic operators are recognized by longest match among declared
+operators. Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; symbolic
+infix (between tokens) = operation.
 
 ### 2.5 Unary and Keyword Applications
 
@@ -216,14 +221,14 @@ Position discriminates: symbolic prefix (no whitespace) = pattern-matched data; 
 | --------------- | ---------------------------------------- | -------------------------------------- |
 | `recv selector` | `fold_T recv {Cᵢ → hᵢ}` (applied)        | Unary call = parameterless fold access |
 | `recv key: arg` | `fold_T recv {Cᵢ → hᵢ}` (applied to arg) | Keyword call = parameterized fold      |
-| `recv negate`   | `negate(ℰ(recv))`                        | Unary send = operation application     |
-| `recv not`      | `not(ℰ(recv))`                           | Unary send = fold on `Bool`            |
+| `recv negate`   | `#negate(ℰ(recv))`                       | Unary send = operation application     |
+| `recv not`      | `#not(ℰ(recv))`                          | Unary send = fold on `Bool`            |
 
 **There is no prefix operation form.** Prefix position belongs to constructors: a symbol at the
 start of a token introduces data (`-7` is one `Int` token, `#x` a pattern match), never an
 operation. Every unary operation is a **suffix send** — `b negate`, `p not` — so `- expr` and
-`not expr` are not productions. Verified: `3 negate` parses and emits `negate(3)`; `negate 3`, `- 3`
-and `not A1` yield an empty forest.
+`not expr` are not productions. Verified: `3 negate` parses and emits `#negate(3)`; `negate 3`,
+`- 3` and `not A1` yield an empty forest.
 
 **A selector has one keyword part at most.** A fold takes the receiver and at most one `in:` value,
 so a two-part selector (`recv k1: a k2: b`) can name no declared operation — it is an arity error,

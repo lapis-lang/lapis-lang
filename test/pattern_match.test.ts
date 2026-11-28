@@ -536,7 +536,7 @@ Deno.test("T-Pattern: an op definition using match(...) declares and evaluates",
         h.tc.opWellFormedness,
     )
     assertEquals(constSig.name, "mkToken")
-    const value = evalOne(h, "mkToken(NatPat)")
+    const value = evalOne(h, "#mkToken(NatPat)")
     assert(value instanceof TokenVal, "the op's definition evaluates to the token")
     assertEquals((value as TokenVal).text, "[0-9]+")
 })
